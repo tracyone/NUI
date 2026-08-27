@@ -14,6 +14,14 @@ import android.graphics.drawable.Drawable
 object MapSources {
     const val EMBEDDED_OSM_ID = "builtin_osm"
 
+    /**
+     * 支持广播悬浮窗的地图应用：包名 -> (显示浮窗 action, 关闭浮窗 action)。
+     * 坐标通过广播 extras 传入：x/y 为左上角，w/h 为右下角（非宽高）。
+     */
+    private val FLOAT_BROADCAST = mapOf(
+        "com.autonavi.amapauto" to ("com.autonavi.plus.showmap" to "com.autonavi.plus.closemap"),
+    )
+
     /** 常见地图应用包名 → 缺省显示名（设备实际安装时再读取真实 label） */
     private val KNOWN = listOf(
         "com.autonavi.amapauto" to "高德地图（车机版）",
@@ -41,13 +49,17 @@ object MapSources {
                 pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
             }.getOrDefault(fallbackLabel)
             val icon: Drawable? = runCatching { pm.getApplicationIcon(pkg) }.getOrNull()
+            val floatActions = FLOAT_BROADCAST[pkg]
             result += MapSource(
                 id = pkg,
                 label = label,
-                type = MapSource.Type.EXTERNAL,
+                type = if (floatActions != null) MapSource.Type.EXTERNAL_FLOAT
+                    else MapSource.Type.EXTERNAL,
                 packageName = pkg,
                 launchIntent = launch.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) },
                 icon = icon,
+                floatShowAction = floatActions?.first,
+                floatCloseAction = floatActions?.second,
             )
         }
         return result
