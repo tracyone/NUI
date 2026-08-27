@@ -10,3 +10,5 @@
 /app/build
 *.apk
 *.aab
+# 临时截图
+screenshot.png
