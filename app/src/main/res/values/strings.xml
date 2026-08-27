@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NUI 桌面</string>
+    <string name="app_list_title">应用列表</string>
+    <string name="back">返回</string>
+    <string name="app_icon">应用图标</string>
+    <string name="weather_placeholder">天气插件（待接入）</string>
+
+    <string name="dock_apps">应用列表</string>
+    <string name="dock_map">地图</string>
+    <string name="dock_music">音乐</string>
+    <string name="dock_settings">设置</string>
+</resources>

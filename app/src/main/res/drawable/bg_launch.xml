@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 壁纸背景（占位）：深色线性渐变 -->
+    <item>
+        <shape android:shape="rectangle">
+            <gradient
+                android:type="linear"
+                android:angle="135"
+                android:startColor="#1A2330"
+                android:centerColor="#0F1620"
+                android:endColor="#070B11" />
+        </shape>
+    </item>
+</layer-list>

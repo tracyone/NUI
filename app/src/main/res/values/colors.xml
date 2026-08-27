@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 主题 -->
+    <color name="bg_root">#0B0D11</color>
+    <color name="top_bar">#14171C</color>
+    <color name="panel_bg">#1A1F26</color>
+    <color name="dock_bg">#1F242C</color>
+    <color name="map_bg">#0B1426</color>
+
+    <!-- 文本 -->
+    <color name="text_primary">#ECEFF1</color>
+    <color name="text_secondary">#9AA0A6</color>
+    <color name="divider">#33FFFFFF</color>
+
+    <!-- 强调色 -->
+    <color name="accent">#00C5D3</color>
+    <color name="dock_icon_tint">#ECEFF1</color>
+
+    <!-- 启动图标 -->
+    <color name="ic_launcher_background">#0B1426</color>
+</resources>
