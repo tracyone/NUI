@@ -63,11 +63,17 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, AppListActivity::class.java))
         }
         binding.dockAdd.setOnClickListener {
-            DockPickerDialog.show(this, DockConfig.packages(this)) { app ->
-                DockConfig.add(this, app.packageName)
-                renderDock()
-                Toast.makeText(this, "已添加 ${app.label}", Toast.LENGTH_SHORT).show()
-            }
+            mapHost.closeFloat()
+            DockPickerDialog.show(
+                context = this,
+                exclude = DockConfig.packages(this),
+                onPick = { app ->
+                    DockConfig.add(this, app.packageName)
+                    renderDock()
+                    Toast.makeText(this, "已添加 ${app.label}", Toast.LENGTH_SHORT).show()
+                },
+                onDismiss = { mapHost.showFloat() },
+            )
         }
         renderDock()
     }
@@ -112,10 +118,17 @@ class MainActivity : AppCompatActivity() {
         mapHost = MapHost(this, binding.mapContainer)
         mapHost.start(mapSources)
         binding.btnSwitchMap.setOnClickListener {
-            MapPickerDialog.show(this, mapSources, mapHost.currentId) { source ->
-                mapHost.select(source)
-                Toast.makeText(this, "已切换为 ${source.label}", Toast.LENGTH_SHORT).show()
-            }
+            mapHost.closeFloat()
+            MapPickerDialog.show(
+                context = this,
+                sources = mapSources,
+                currentId = mapHost.currentId,
+                onPick = { source ->
+                    mapHost.select(source)
+                    Toast.makeText(this, "已切换为 ${source.label}", Toast.LENGTH_SHORT).show()
+                },
+                onDismiss = { mapHost.showFloat() },
+            )
         }
     }
 

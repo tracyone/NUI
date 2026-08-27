@@ -165,23 +165,26 @@ class MapHost(
         runCatching { context.sendBroadcast(intent) }
     }
 
-    /** 关闭当前广播浮窗（如有） */
-    private fun closeFloat() {
+    /** 关闭当前广播浮窗（如有）。public 供 Activity 弹对话框前临时隐藏浮窗。 */
+    fun closeFloat() {
         val closeAction = current?.floatCloseAction ?: return
         runCatching { context.sendBroadcast(Intent(closeAction)) }
     }
 
+    /** 重新显示广播浮窗（若当前为浮窗源）。供对话框 dismiss 后恢复。 */
+    fun showFloat() {
+        current?.takeIf { it.type == MapSource.Type.EXTERNAL_FLOAT }
+            ?.let { container.post { sendFloatBroadcast(it.floatShowAction) } }
+    }
+
     fun onResume() {
         mapView?.onResume()
-        // 广播浮窗：恢复时重新显示（onPause 已关闭）
-        current?.takeIf { it.type == MapSource.Type.EXTERNAL_FLOAT }
-            ?.let { sendFloatBroadcast(it.floatShowAction) }
+        showFloat()
     }
 
     fun onPause() {
         mapView?.onPause()
-        // 广播浮窗：暂停时关闭，避免浮窗残留到其它应用上层
-        current?.takeIf { it.type == MapSource.Type.EXTERNAL_FLOAT }?.let { closeFloat() }
+        closeFloat()
     }
 
     fun onDestroy() {
