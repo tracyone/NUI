@@ -61,6 +61,9 @@ dependencies {
     implementation("androidx.recyclerview:recyclerview:1.3.2")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
 
+    // 悬浮地图（内置）：OSMDroid，纯 Java、无 native 库、无需 API Key
+    implementation("org.osmdroid:osmdroid-android:6.1.20")
+
     // 悬浮地图：后续接入高德地图时取消注释（需在 AndroidManifest 配置 API Key）
     // implementation("com.amap.api:3dmap:9.8.2")
 }

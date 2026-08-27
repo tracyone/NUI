@@ -90,9 +90,23 @@
         app:cardBackgroundColor="@color/map_bg"
         app:strokeWidth="0dp">
 
-        <com.nui.launcher.MapPlaceholderView
+        <FrameLayout
+            android:id="@+id/mapContainer"
             android:layout_width="match_parent"
-            android:layout_height="match_parent" />
+            android:layout_height="match_parent"
+            android:background="@color/map_bg" />
+
+        <ImageButton
+            android:id="@+id/btnSwitchMap"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_gravity="top|start"
+            android:layout_margin="10dp"
+            android:background="@drawable/bg_dock_item"
+            android:contentDescription="@string/dock_map"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_dock_map"
+            android:tint="@color/text_primary" />
     </com.google.android.material.card.MaterialCardView>
 
     <!-- 右侧：时钟 / 信息栏 -->

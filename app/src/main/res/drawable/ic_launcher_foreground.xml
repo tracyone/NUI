@@ -3,10 +3,11 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- 前景：字母 N（青色描边，圆角连接），位于自适应图标安全区内 -->
     <path
-        android:fillColor="#00C5D3"
-        android:pathData="M54,28L60,52L84,54L60,56L54,80L48,56L24,54L48,52Z" />
-    <path
-        android:fillColor="#ECEFF1"
-        android:pathData="M54,40m-4,0a4,4 0 1 0 8,0a4,4 0 1 0 -8,0" />
+        android:pathData="M34,80 L34,28 L74,80 L74,28"
+        android:strokeColor="#00C5D3"
+        android:strokeWidth="14"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
 </vector>

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">NUI 桌面</string>
+    <string name="app_name">NUI</string>
     <string name="app_list_title">应用列表</string>
     <string name="back">返回</string>
     <string name="app_icon">应用图标</string>
