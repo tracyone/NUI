@@ -10,7 +10,6 @@ import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
-import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -45,34 +44,26 @@ class MapHost(
     private var mapView: MapView? = null
     private var current: MapSource? = null
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-    private val scaleDetector: ScaleGestureDetector
     private var adjustMode = false
     private var adjustOverlay: View? = null
     private val wm: WindowManager
         get() = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+    /** 调整模式：起点（按下时的屏幕坐标+overlay尺寸）*/
     private var dragStartX = 0f
     private var dragStartY = 0f
-    private var startLeft = 0
-    private var startTop = 0
+    private var startLeft = 0   // 固定左边界（不允许移动）
+    private var startTop = 0    // 固定顶边界（不允许移动）
+    private var startWidth = 0
+    private var startHeight = 0
+    private var resizeMode = ResizeMode.NONE
+
+    private enum class ResizeMode { NONE, RIGHT, BOTTOM, BOTH }
 
     init {
         Configuration.getInstance().userAgentValue = context.packageName
         val base = File(context.cacheDir, "osm").apply { mkdirs() }
         Configuration.getInstance().osmdroidBasePath = base
         Configuration.getInstance().osmdroidTileCache = File(base, "tiles")
-        scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
-            override fun onScale(detector: ScaleGestureDetector): Boolean {
-                val ov = adjustOverlay ?: return false
-                val lp = ov.layoutParams as WindowManager.LayoutParams
-                val nw = (lp.width * detector.scaleFactor).toInt()
-                val nh = (lp.height * detector.scaleFactor).toInt()
-                val c = clampGeometry(lp.x, lp.y, nw, nh)
-                lp.x = c[0]; lp.y = c[1]; lp.width = c[2]; lp.height = c[3]
-                runCatching { wm.updateViewLayout(ov, lp) }
-                applyGeometry(c[0], c[1], c[2], c[3])
-                return true
-            }
-        })
         loadGeometry()
     }
 
@@ -215,9 +206,15 @@ class MapHost(
         mapView?.let { it.onDetach(); mapView = null }
     }
 
-    // ==================== 调整模式：overlay 拖动 + 缩放 ====================
+    // ==================== 调整模式：边缘拖拽缩放（左/顶固定）====================
+    //  - 左边、顶边固定不动，不允许拖动位移
+    //  - 从右边缘条 拖动 → 变宽/变窄
+    //  - 从下边缘条 拖动 → 变高/变矮
+    //  - 从右下角    拖动 → 同时变宽变高
 
-    /** 长按非悬浮区触发。进入：关闭高德浮窗 + 显示 overlay 接收手势；已在调整则退出。 */
+    private val edgeZone: Int get() = dp(EDGE_ZONE_DP)
+
+    /** 长按非悬浮区触发。进入：关闭高德浮窗 + 显示带边缘条的 overlay；已在调整则退出。 */
     fun toggleAdjust() {
         if (adjustMode) { exitAdjust(); return }
         if (!Settings.canDrawOverlays(context)) {
@@ -236,8 +233,32 @@ class MapHost(
         val loc = IntArray(2)
         mapPanel.getLocationOnScreen(loc)
         val lp0 = mapPanel.layoutParams as FrameLayout.LayoutParams
-        val overlay = View(context).apply {
-            background = ColorDrawable(0x662196F3.toInt()) // 半透明蓝
+        startLeft = lp0.leftMargin
+        startTop = lp0.topMargin
+        startWidth = mapPanel.width
+        startHeight = mapPanel.height
+
+        // overlay 根：FrameLayout 承载右/下边缘条
+        val overlay = FrameLayout(context).apply {
+            setBackgroundColor(0x332196F3.toInt()) // 极淡蓝底，仅提示调整区域
+            // 右边缘条（可视化 + 热区）
+            addView(View(context).apply {
+                background = ColorDrawable(0xFF1976D2.toInt()) // 深青蓝实条
+            }, FrameLayout.LayoutParams(edgeZone, FrameLayout.LayoutParams.MATCH_PARENT).apply {
+                gravity = Gravity.END
+            })
+            // 下边缘条
+            addView(View(context).apply {
+                background = ColorDrawable(0xFF1976D2.toInt())
+            }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, edgeZone).apply {
+                gravity = Gravity.BOTTOM
+            })
+            // 右下角把手
+            addView(View(context).apply {
+                background = ColorDrawable(0xFF0D47A1.toInt()) // 最深蓝
+            }, FrameLayout.LayoutParams(edgeZone, edgeZone).apply {
+                gravity = Gravity.BOTTOM or Gravity.END
+            })
             setOnTouchListener(adjustTouch)
         }
         val lp = WindowManager.LayoutParams().apply {
@@ -247,37 +268,50 @@ class MapHost(
             gravity = Gravity.TOP or Gravity.START
             x = loc[0]
             y = loc[1]
-            width = mapPanel.width
-            height = mapPanel.height
+            width = startWidth
+            height = startHeight
         }
         runCatching { wm.addView(overlay, lp) }
             .onFailure { Log.e(TAG, "addView overlay failed", it); adjustMode = false; return }
         adjustOverlay = overlay
-        startLeft = lp0.leftMargin
-        startTop = lp0.topMargin
-        Toast.makeText(context, "拖动移动 / 双指缩放，放手完成", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "从右/下边缘或右下角拖，放手完成", Toast.LENGTH_LONG).show()
     }
 
     private val adjustTouch = View.OnTouchListener { _, e ->
-        scaleDetector.onTouchEvent(e)
         val ov = adjustOverlay ?: return@OnTouchListener false
+        val lp = ov.layoutParams as WindowManager.LayoutParams
+        val ez = edgeZone
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 dragStartX = e.rawX
                 dragStartY = e.rawY
-                val lp = ov.layoutParams as WindowManager.LayoutParams
-                startLeft = lp.x
-                startTop = lp.y
+                startWidth = lp.width
+                startHeight = lp.height
+                // 根据按下位置决定是调右 / 调下 / 同时调右下
+                val relX = e.rawX - lp.x   // overlay 内的相对 x
+                val relY = e.rawY - lp.y
+                val onRight = relX >= lp.width - ez
+                val onBottom = relY >= lp.height - ez
+                resizeMode = when {
+                    onRight && onBottom -> ResizeMode.BOTH
+                    onRight -> ResizeMode.RIGHT
+                    onBottom -> ResizeMode.BOTTOM
+                    else -> ResizeMode.NONE
+                }
             }
             MotionEvent.ACTION_MOVE -> {
-                if (e.pointerCount == 1) {
+                if (e.pointerCount == 1 && resizeMode != ResizeMode.NONE) {
                     val dx = (e.rawX - dragStartX).toInt()
                     val dy = (e.rawY - dragStartY).toInt()
-                    val lp = ov.layoutParams as WindowManager.LayoutParams
-                    val c = clampGeometry(startLeft + dx, startTop + dy, lp.width, lp.height)
-                    lp.x = c[0]; lp.y = c[1]
+                    var nw = startWidth
+                    var nh = startHeight
+                    if (resizeMode == ResizeMode.RIGHT || resizeMode == ResizeMode.BOTH) nw += dx
+                    if (resizeMode == ResizeMode.BOTTOM || resizeMode == ResizeMode.BOTH) nh += dy
+                    val c = clampSizeFixed(startLeft, startTop, nw, nh)
+                    lp.width = c[2]
+                    lp.height = c[3]
                     runCatching { wm.updateViewLayout(ov, lp) }
-                    applyGeometry(c[0], c[1], null, null)
+                    applyGeometry(null, null, c[2], c[3])
                 }
             }
             MotionEvent.ACTION_UP -> exitAdjust()
@@ -289,26 +323,25 @@ class MapHost(
         adjustOverlay?.let { runCatching { wm.removeView(it) } }
         adjustOverlay = null
         adjustMode = false
+        resizeMode = ResizeMode.NONE
         saveGeometry()
         showFloat()
-        Toast.makeText(context, "已应用新位置", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "已应用新大小", Toast.LENGTH_SHORT).show()
     }
 
-    /** 边界限制：mapPanel 不超出 dock 右侧/时钟左侧/屏幕上下，不小于 MIN_SIZE。 */
-    private fun clampGeometry(x: Int, y: Int, w: Int, h: Int): IntArray {
+    /** 按固定 x/y 限制宽高最大值（左/顶不动，只约束右侧/底部不越界）。 */
+    private fun clampSizeFixed(x: Int, y: Int, w: Int, h: Int): IntArray {
         val sw = context.resources.displayMetrics.widthPixels
         val sh = context.resources.displayMetrics.heightPixels
-        val minLeft = dp(152)
-        val maxRight = sw - dp(20)
-        val minTop = 0
-        val maxBottom = sh - dp(20)
+        val maxRight = sw - dp(20)       // 不碰到右边信息栏
+        val maxBottom = sh - dp(20)     // 不碰到底边
+        // 最小尺寸
         var nw = w.coerceAtLeast(MIN_SIZE)
         var nh = h.coerceAtLeast(MIN_SIZE)
-        if (minLeft + nw > maxRight) nw = (maxRight - minLeft).coerceAtLeast(MIN_SIZE)
-        if (minTop + nh > maxBottom) nh = (maxBottom - minTop).coerceAtLeast(MIN_SIZE)
-        val nx = x.coerceIn(minLeft, (maxRight - nw).coerceAtLeast(minLeft))
-        val ny = y.coerceIn(minTop, (maxBottom - nh).coerceAtLeast(minTop))
-        return intArrayOf(nx, ny, nw, nh)
+        // 最大尺寸：以固定 x/y 为基准，右边/下边不出界
+        if (x + nw > maxRight) nw = (maxRight - x).coerceAtLeast(MIN_SIZE)
+        if (y + nh > maxBottom) nh = (maxBottom - y).coerceAtLeast(MIN_SIZE)
+        return intArrayOf(x, y, nw, nh)
     }
 
     private fun applyGeometry(x: Int?, y: Int?, w: Int?, h: Int?) {
@@ -325,14 +358,19 @@ class MapHost(
         if (g != null) {
             val p = g.split(',').mapNotNull { it.toIntOrNull() }
             if (p.size == 4) {
-                val c = clampGeometry(p[0], p[1], p[2], p[3])
+                val c = clampSizeFixed(p[0], p[1], p[2], p[3])
                 applyGeometry(c[0], c[1], c[2], c[3])
                 return
             }
         }
+        // 默认位置：左边贴 dock 栏右侧（152dp），上边 20dp
+        val x = dp(152)
+        val y = dp(20)
         val sw = context.resources.displayMetrics.widthPixels
         val sh = context.resources.displayMetrics.heightPixels
-        val c = clampGeometry(dp(152), dp(20), sw - dp(152) - dp(20), sh - dp(40))
+        val defaultW = (sw - x - dp(240)).coerceAtLeast(MIN_SIZE) // 留右侧信息栏
+        val defaultH = (sh - y - dp(40)).coerceAtLeast(MIN_SIZE)
+        val c = clampSizeFixed(x, y, defaultW, defaultH)
         applyGeometry(c[0], c[1], c[2], c[3])
     }
 
@@ -349,6 +387,7 @@ class MapHost(
         private const val PREFS = "nui_map"
         private const val KEY_SOURCE = "float_map_source_id"
         private const val KEY_GEOMETRY = "map_geometry"
+        private const val EDGE_ZONE_DP = 28   // 右/下边缘把手宽度
         private val MIN_SIZE = 240 // px，缩放下限
     }
 }

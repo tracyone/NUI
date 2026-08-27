@@ -80,20 +80,6 @@
             android:scaleType="centerInside"
             android:src="@drawable/ic_dock_map"
             android:tint="@color/text_primary" />
-
-
-        <ImageButton
-            android:id="@+id/btnAdjust"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:layout_gravity="top|start"
-            android:layout_marginStart="60dp"
-            android:layout_marginTop="10dp"
-            android:background="@drawable/bg_dock_item"
-            android:contentDescription="调整地图区域"
-            android:scaleType="centerInside"
-            android:src="@drawable/ic_adjust"
-            android:tint="@color/text_primary" />
     </com.google.android.material.card.MaterialCardView>
 
     <!-- 右侧：时钟 / 信息栏 -->
