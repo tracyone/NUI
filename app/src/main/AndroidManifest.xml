@@ -9,9 +9,11 @@
     <!-- 地图瓦片联网 -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- 后续定位/悬浮窗权限占位 -->
+    <!-- 悬浮窗：地图调整模式时用 overlay 覆盖 mapPanel 接收拖动/缩放手势
+         （高德浮窗 closemap 后仍拦截触摸，需 NUI 自己的 overlay 在其之上） -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- 后续定位权限占位 -->
     <!-- <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" /> -->
-    <!-- <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" /> -->
 
     <application
         android:allowBackup="false"

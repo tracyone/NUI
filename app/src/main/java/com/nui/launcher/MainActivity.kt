@@ -2,6 +2,7 @@ package com.nui.launcher
 
 import android.app.AlertDialog
 import android.content.Intent
+import android.util.Log
 import android.os.Bundle
 import android.provider.Settings
 import android.view.WindowManager
@@ -61,6 +62,11 @@ class MainActivity : AppCompatActivity() {
     private fun setupDock() {
         binding.dockApps.setOnClickListener {
             startActivity(Intent(this, AppListActivity::class.java))
+        }
+        binding.dockApps.setOnLongClickListener {
+            Log.d("NUI", "dockApps long press")
+            mapHost.toggleAdjust()
+            true
         }
         renderDock()
     }
@@ -128,8 +134,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupMap() {
-        mapHost = MapHost(this, binding.mapContainer)
+        mapHost = MapHost(this, binding.mapContainer, binding.mapPanel)
         mapHost.start(mapSources)
+        binding.dockBar.isClickable = true
+        binding.dockBar.setOnLongClickListener { Log.d("NUI", "dock long press"); mapHost.toggleAdjust(); true }
+
         binding.btnSwitchMap.setOnClickListener {
             mapHost.closeFloat()
             MapPickerDialog.show(

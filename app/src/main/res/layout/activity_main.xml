@@ -1,9 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="horizontal"
     android:background="@drawable/bg_launch"
     android:fitsSystemWindows="false">
 
@@ -12,6 +11,7 @@
         android:id="@+id/dockBar"
         android:layout_width="112dp"
         android:layout_height="match_parent"
+        android:layout_gravity="start"
         android:orientation="vertical"
         android:gravity="center_horizontal"
         android:paddingTop="24dp"
@@ -51,13 +51,13 @@
             android:tint="@color/dock_icon_tint" />
     </LinearLayout>
 
-    <!-- 中间：悬浮地图区域 -->
+    <!-- 悬浮地图区域（绝对定位，几何由 MapHost 代码管理） -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/mapPanel"
-        android:layout_width="0dp"
-        android:layout_height="match_parent"
-        android:layout_weight="1"
-        android:layout_margin="20dp"
+        android:layout_width="600dp"
+        android:layout_height="400dp"
+        android:layout_marginStart="152dp"
+        android:layout_marginTop="20dp"
         app:cardCornerRadius="24dp"
         app:cardElevation="10dp"
         app:cardBackgroundColor="@color/map_bg"
@@ -80,12 +80,27 @@
             android:scaleType="centerInside"
             android:src="@drawable/ic_dock_map"
             android:tint="@color/text_primary" />
+
+
+        <ImageButton
+            android:id="@+id/btnAdjust"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_gravity="top|start"
+            android:layout_marginStart="60dp"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/bg_dock_item"
+            android:contentDescription="调整地图区域"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_adjust"
+            android:tint="@color/text_primary" />
     </com.google.android.material.card.MaterialCardView>
 
     <!-- 右侧：时钟 / 信息栏 -->
     <LinearLayout
         android:layout_width="220dp"
         android:layout_height="match_parent"
+        android:layout_gravity="end"
         android:orientation="vertical"
         android:gravity="center"
         android:padding="20dp"
@@ -127,4 +142,4 @@
             android:textColor="@color/text_secondary"
             android:textSize="16sp" />
     </LinearLayout>
-</LinearLayout>
+</FrameLayout>
