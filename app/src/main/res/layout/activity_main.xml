@@ -22,58 +22,43 @@
         android:layout_marginStart="20dp"
         android:background="@drawable/bg_dock">
 
+        <!-- 用户自定义应用快捷方式（动态，可滚动） -->
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:scrollbars="none"
+            android:fillViewport="true">
+
+            <LinearLayout
+                android:id="@+id/dockItems"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center_horizontal" />
+        </ScrollView>
+
+        <!-- 添加应用（加号） -->
+        <ImageButton
+            android:id="@+id/dockAdd"
+            android:layout_width="80dp"
+            android:layout_height="80dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_dock_item"
+            android:contentDescription="@string/dock_add"
+            android:src="@drawable/ic_dock_add"
+            android:scaleType="centerInside"
+            android:tint="@color/dock_icon_tint" />
+
+        <!-- 应用列表入口（最下） -->
         <ImageButton
             android:id="@+id/dockApps"
             android:layout_width="80dp"
             android:layout_height="80dp"
+            android:layout_marginTop="8dp"
             android:background="@drawable/bg_dock_item"
             android:contentDescription="@string/dock_apps"
             android:src="@drawable/ic_dock_apps"
-            android:scaleType="centerInside"
-            android:tint="@color/dock_icon_tint" />
-
-        <View
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:layout_weight="1" />
-
-        <ImageButton
-            android:id="@+id/dockMap"
-            android:layout_width="80dp"
-            android:layout_height="80dp"
-            android:background="@drawable/bg_dock_item"
-            android:contentDescription="@string/dock_map"
-            android:src="@drawable/ic_dock_map"
-            android:scaleType="centerInside"
-            android:tint="@color/dock_icon_tint" />
-
-        <View
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:layout_weight="1" />
-
-        <ImageButton
-            android:id="@+id/dockMusic"
-            android:layout_width="80dp"
-            android:layout_height="80dp"
-            android:background="@drawable/bg_dock_item"
-            android:contentDescription="@string/dock_music"
-            android:src="@drawable/ic_dock_music"
-            android:scaleType="centerInside"
-            android:tint="@color/dock_icon_tint" />
-
-        <View
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:layout_weight="1" />
-
-        <ImageButton
-            android:id="@+id/dockSettings"
-            android:layout_width="80dp"
-            android:layout_height="80dp"
-            android:background="@drawable/bg_dock_item"
-            android:contentDescription="@string/dock_settings"
-            android:src="@drawable/ic_dock_settings"
             android:scaleType="centerInside"
             android:tint="@color/dock_icon_tint" />
     </LinearLayout>

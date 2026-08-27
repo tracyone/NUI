@@ -7,6 +7,7 @@
     <string name="weather_placeholder">天气插件（待接入）</string>
 
     <string name="dock_apps">应用列表</string>
+    <string name="dock_add">添加应用</string>
     <string name="dock_map">地图</string>
     <string name="dock_music">音乐</string>
     <string name="dock_settings">设置</string>
