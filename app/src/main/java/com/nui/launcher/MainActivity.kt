@@ -62,49 +62,30 @@ class MainActivity : AppCompatActivity() {
         binding.dockApps.setOnClickListener {
             startActivity(Intent(this, AppListActivity::class.java))
         }
-        binding.dockAdd.setOnClickListener {
-            mapHost.closeFloat()
-            DockPickerDialog.show(
-                context = this,
-                exclude = DockConfig.packages(this),
-                onPick = { app ->
-                    DockConfig.add(this, app.packageName)
-                    renderDock()
-                    Toast.makeText(this, "已添加 ${app.label}", Toast.LENGTH_SHORT).show()
-                },
-                onDismiss = { mapHost.showFloat() },
-            )
-        }
         renderDock()
     }
 
-    /** 渲染用户自定义 dock 快捷方式 */
+    /** 渲染 dock 槽位：空槽显示加号，已填显示应用图标 */
     private fun renderDock() {
         binding.dockItems.removeAllViews()
         val dp = resources.displayMetrics.density
         val size = (80 * dp).toInt()
         val gap = (8 * dp).toInt()
         val bg = ContextCompat.getDrawable(this, R.drawable.bg_dock_item)
-        for (app in DockConfig.loadApps(this)) {
+        val addIcon = ContextCompat.getDrawable(this, R.drawable.ic_dock_add)
+        val apps = DockConfig.loadApps(this)
+        for (i in 0 until DockConfig.SLOT_COUNT) {
+            val app = apps.getOrNull(i)
             val btn = ImageButton(this).apply {
-                setImageDrawable(app.icon)
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 background = bg
-                setOnClickListener {
-                    runCatching { startActivity(app.launchIntent) }
-                }
-                setOnLongClickListener {
-                    AlertDialog.Builder(this@MainActivity)
-                        .setTitle("从 Dock 移除")
-                        .setMessage("移除 ${app.label}?")
-                        .setPositiveButton("移除") { _, _ ->
-                            DockConfig.remove(this@MainActivity, app.packageName)
-                            renderDock()
-                            Toast.makeText(this@MainActivity, "已移除", Toast.LENGTH_SHORT).show()
-                        }
-                        .setNegativeButton("取消", null)
-                        .show()
-                    true
+                if (app != null) {
+                    setImageDrawable(app.icon)
+                    setOnClickListener { runCatching { startActivity(app.launchIntent) } }
+                    setOnLongClickListener { confirmRemove(i, app); true }
+                } else {
+                    setImageDrawable(addIcon)
+                    setOnClickListener { openPicker(i) }
                 }
             }
             binding.dockItems.addView(
@@ -112,6 +93,38 @@ class MainActivity : AppCompatActivity() {
                 LinearLayout.LayoutParams(size, size).apply { topMargin = gap },
             )
         }
+    }
+
+    /** 点空槽加号：弹应用选择器填入指定槽位 */
+    private fun openPicker(slot: Int) {
+        mapHost.closeFloat()
+        DockPickerDialog.show(
+            context = this,
+            exclude = DockConfig.filledPackages(this),
+            onPick = { app ->
+                DockConfig.setSlot(this, slot, app.packageName)
+                renderDock()
+                Toast.makeText(this, "已添加 ${app.label}", Toast.LENGTH_SHORT).show()
+            },
+            onDismiss = { mapHost.showFloat() },
+        )
+    }
+
+    /** 长按已填槽：确认移除（变回加号即可重新添加） */
+    private fun confirmRemove(slot: Int, app: AppModel) {
+        mapHost.closeFloat()
+        val d = AlertDialog.Builder(this)
+            .setTitle("从 Dock 移除")
+            .setMessage("移除 ${app.label}?")
+            .setPositiveButton("移除") { _, _ ->
+                DockConfig.setSlot(this, slot, null)
+                renderDock()
+                Toast.makeText(this, "已移除", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("取消", null)
+            .create()
+        d.setOnDismissListener { mapHost.showFloat() }
+        d.show()
     }
 
     private fun setupMap() {

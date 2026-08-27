@@ -5,41 +5,40 @@ import android.content.Intent
 import androidx.core.content.edit
 
 /**
- * Dock 栏快捷方式持久化：
- * - 以 "\n" 分隔的包名串存储顺序列表（SharedPreferences）
- * - loadApps 跳过已卸载的应用
+ * Dock 栏快捷方式持久化（固定槽位模式）：
+ * - [SLOT_COUNT] 个固定槽位，空槽显示加号，用户点加号填入应用
+ * - 全部填满后加号消失；长按已填槽可移除（变回加号即可重新添加）
+ * - 以 "\n" 分隔存储，空串代表空槽
+ * - loadApps 跳过已卸载的应用（该槽返回 null，渲染为加号）
  */
 object DockConfig {
     private const val PREFS = "nui_dock"
-    private const val KEY = "packages"
+    private const val KEY = "slots"
+    const val SLOT_COUNT = 6
 
-    fun packages(context: Context): List<String> {
+    fun slots(context: Context): List<String?> {
         val s = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(KEY, "") ?: ""
-        return s.split('\n').filter { it.isNotEmpty() }
+        val parts = s.split('\n')
+        return (0 until SLOT_COUNT).map { i -> parts.getOrNull(i)?.takeIf { it.isNotEmpty() } }
     }
 
-    fun add(context: Context, pkg: String) {
-        val list = packages(context).toMutableList()
-        if (pkg !in list) list += pkg
-        save(context, list)
-    }
+    fun filledPackages(context: Context): List<String> = slots(context).mapNotNull { it }
 
-    fun remove(context: Context, pkg: String) {
-        save(context, packages(context).toMutableList().also { it.remove(pkg) })
-    }
-
-    private fun save(context: Context, packages: List<String>) {
+    fun setSlot(context: Context, index: Int, pkg: String?) {
+        val list = slots(context).toMutableList()
+        list[index] = pkg
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit { putString(KEY, packages.joinToString("\n")) }
+            .edit { putString(KEY, list.joinToString("\n") { it ?: "" }) }
     }
 
-    /** 加载为 AppModel，跳过已卸载的包 */
-    fun loadApps(context: Context): List<AppModel> {
+    /** 加载各槽 AppModel，空槽或已卸载返回 null */
+    fun loadApps(context: Context): List<AppModel?> {
         val pm = context.packageManager
         val fallback = pm.defaultActivityIcon
-        return packages(context).mapNotNull { pkg ->
-            val launch = pm.getLaunchIntentForPackage(pkg) ?: return@mapNotNull null
+        return slots(context).map { pkg ->
+            if (pkg == null) return@map null
+            val launch = pm.getLaunchIntentForPackage(pkg) ?: return@map null
             val label = runCatching {
                 pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
             }.getOrDefault(pkg)

@@ -38,18 +38,6 @@
                 android:gravity="center_horizontal" />
         </ScrollView>
 
-        <!-- 添加应用（加号） -->
-        <ImageButton
-            android:id="@+id/dockAdd"
-            android:layout_width="80dp"
-            android:layout_height="80dp"
-            android:layout_marginTop="8dp"
-            android:background="@drawable/bg_dock_item"
-            android:contentDescription="@string/dock_add"
-            android:src="@drawable/ic_dock_add"
-            android:scaleType="centerInside"
-            android:tint="@color/dock_icon_tint" />
-
         <!-- 应用列表入口（最下） -->
         <ImageButton
             android:id="@+id/dockApps"
