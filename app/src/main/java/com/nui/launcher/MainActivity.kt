@@ -100,6 +100,11 @@ class MainActivity : AppCompatActivity() {
         setupPageIndicator()
     }
 
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        wallpaper.onActivityResult(requestCode, resultCode, data)
+    }
+
     override fun onResume() {
         super.onResume()
         if (::mapHost.isInitialized) {
@@ -281,6 +286,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupWallpaper() {
         wallpaper = WallpaperController(this, binding.root)
+        wallpaper.applyOnStart()
         wallpaper.onHideFloat = { mapHost.closeFloat() }
         wallpaper.onShowFloat = { mapHost.showFloat() }
         val rightPanel = desktopRightPanel ?: return

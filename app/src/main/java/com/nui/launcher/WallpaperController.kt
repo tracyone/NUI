@@ -123,7 +123,8 @@ class WallpaperController(
     }
 
     private fun applyDefault() {
-        root.background = activity.getDrawable(R.drawable.bg_launch)
+        root.background = activity.getDrawable(R.drawable.default_wallpaper)
+            ?: activity.getDrawable(R.drawable.bg_launch)
             ?: ColorDrawable(Color.parseColor("#0B0D11"))
     }
 
