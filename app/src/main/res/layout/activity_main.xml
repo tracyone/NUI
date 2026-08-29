@@ -9,7 +9,7 @@
     <!-- 左侧 Dock 栏 -->
     <LinearLayout
         android:id="@+id/dockBar"
-        android:layout_width="112dp"
+        android:layout_width="96dp"
         android:layout_height="match_parent"
         android:layout_gravity="start"
         android:orientation="vertical"
@@ -22,7 +22,6 @@
         android:layout_marginStart="20dp"
         android:background="@drawable/bg_dock">
 
-        <!-- 用户自定义应用快捷方式（动态，可滚动） -->
         <ScrollView
             android:layout_width="match_parent"
             android:layout_height="0dp"
@@ -38,11 +37,10 @@
                 android:gravity="center_horizontal" />
         </ScrollView>
 
-        <!-- 应用列表入口（最下） -->
         <ImageButton
             android:id="@+id/dockApps"
-            android:layout_width="80dp"
-            android:layout_height="80dp"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
             android:layout_marginTop="8dp"
             android:background="@drawable/bg_dock_item"
             android:contentDescription="@string/dock_apps"
@@ -82,50 +80,139 @@
             android:tint="@color/text_primary" />
     </com.google.android.material.card.MaterialCardView>
 
-    <!-- 右侧：时钟 / 信息栏 -->
+    <!-- 右侧面板：导航按钮 / 时钟 / 音乐区（绝对定位，位置由代码同步地图几何） -->
     <LinearLayout
-        android:layout_width="220dp"
+        android:id="@+id/rightPanel"
+        android:layout_width="240dp"
         android:layout_height="match_parent"
-        android:layout_gravity="end"
+        android:layout_gravity="top|start"
         android:orientation="vertical"
-        android:gravity="center"
-        android:padding="20dp"
-        android:layout_marginVertical="20dp"
+        android:padding="16dp"
+        android:layout_marginTop="20dp"
+        android:layout_marginBottom="20dp"
         android:layout_marginEnd="20dp"
         android:background="@drawable/bg_panel">
 
-        <TextClock
-            android:id="@+id/clockTime"
-            android:layout_width="wrap_content"
+        <!-- 导航按钮：回家 / 公司 -->
+        <LinearLayout
+            android:id="@+id/navRow"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:format12Hour="HH:mm"
-            android:format24Hour="HH:mm"
-            android:textSize="56sp"
-            android:textColor="@color/text_primary"
-            android:textStyle="bold" />
+            android:orientation="horizontal"
+            android:gravity="center">
 
-        <TextClock
-            android:id="@+id/clockDate"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:format12Hour="M月d日 EEE"
-            android:format24Hour="M月d日 EEE"
-            android:textSize="18sp"
-            android:textColor="@color/text_secondary"
-            android:layout_marginTop="4dp" />
+            <LinearLayout
+                android:id="@+id/btnNavHome"
+                android:layout_width="0dp"
+                android:layout_height="80dp"
+                android:layout_weight="1"
+                android:layout_marginEnd="6dp"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="@drawable/bg_dock_item"
+                android:paddingTop="10dp"
+                android:paddingBottom="8dp">
 
-        <View
-            android:layout_width="120dp"
-            android:layout_height="1dp"
-            android:layout_marginTop="20dp"
-            android:background="@color/divider" />
+                <ImageView
+                    android:id="@+id/navIconHome"
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
+                    android:scaleType="centerInside"
+                    android:src="@drawable/ic_nav_home" />
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:text="@string/weather_placeholder"
-            android:textColor="@color/text_secondary"
-            android:textSize="16sp" />
+                <TextView
+                    android:id="@+id/navLabelHome"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="回家"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_primary"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/btnNavCompany"
+                android:layout_width="0dp"
+                android:layout_height="80dp"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="@drawable/bg_dock_item"
+                android:paddingTop="10dp"
+                android:paddingBottom="8dp">
+
+                <ImageView
+                    android:id="@+id/navIconCompany"
+                    android:layout_width="30dp"
+                    android:layout_height="30dp"
+                    android:scaleType="centerInside"
+                    android:src="@drawable/ic_nav_company" />
+
+                <TextView
+                    android:id="@+id/navLabelCompany"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="公司"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_primary"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 时钟 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:layout_marginTop="8dp">
+
+            <TextClock
+                android:id="@+id/clockTime"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:format12Hour="HH:mm"
+                android:format24Hour="HH:mm"
+                android:textSize="44sp"
+                android:textColor="@color/text_primary"
+                android:textStyle="bold" />
+
+            <TextClock
+                android:id="@+id/clockDate"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:format12Hour="M月d日 EEE"
+                android:format24Hour="M月d日 EEE"
+                android:textSize="14sp"
+                android:textColor="@color/text_secondary"
+                android:layout_marginTop="2dp" />
+        </LinearLayout>
+
+        <!-- 音乐区域（容器，由 MusicHost 动态渲染） -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/musicPanel"
+            android:layout_width="match_parent"
+            android:layout_height="220dp"
+            android:layout_marginTop="8dp"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="6dp"
+            app:cardBackgroundColor="@color/map_bg"
+            app:strokeWidth="0dp">
+
+            <FrameLayout
+                android:id="@+id/musicContainer"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+        </com.google.android.material.card.MaterialCardView>
     </LinearLayout>
 </FrameLayout>

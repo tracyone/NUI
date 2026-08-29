@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 主题 -->
+    <!-- 主题（dock/panel 加 80% 透明度，让壁纸透出；CarPlay 玻璃风） -->
     <color name="bg_root">#0B0D11</color>
     <color name="top_bar">#14171C</color>
-    <color name="panel_bg">#1A1F26</color>
-    <color name="dock_bg">#1F242C</color>
+    <color name="panel_bg">#CC1A1F26</color>
+    <color name="dock_bg">#CC1F242C</color>
     <color name="map_bg">#0B1426</color>
 
     <!-- 文本 -->

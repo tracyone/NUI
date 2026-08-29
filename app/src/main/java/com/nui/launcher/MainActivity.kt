@@ -16,6 +16,8 @@ import com.nui.launcher.databinding.ActivityMainBinding
 import com.nui.launcher.map.MapHost
 import com.nui.launcher.map.MapPickerDialog
 import com.nui.launcher.map.MapSources
+import com.nui.launcher.music.MusicHost
+import com.nui.launcher.nav.NavHost
 
 /**
  * 桌面主页（Launcher / HOME）。
@@ -31,6 +33,9 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var mapHost: MapHost
+    private lateinit var navHost: NavHost
+    private lateinit var musicHost: MusicHost
+    private lateinit var wallpaper: WallpaperController
     private val mapSources by lazy { MapSources.build(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -40,13 +45,26 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        wallpaper = WallpaperController(this, binding.root)
+        wallpaper.applyOnStart()
         setupDock()
         setupMap()
+        setupNav()
+        setupMusic()
+        setupWallpaper()
+        // 初始同步一次右侧面板位置
+        binding.root.post { syncRightPanel() }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        wallpaper.onActivityResult(requestCode, resultCode, data)
     }
 
     override fun onResume() {
         super.onResume()
         mapHost.onResume()
+        musicHost.refresh()
     }
 
     override fun onPause() {
@@ -56,7 +74,47 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         mapHost.onDestroy()
+        musicHost.onDestroy()
         super.onDestroy()
+    }
+
+    /**
+     * 同步右侧面板位置：紧跟地图右边 + 间距，宽度默认 240dp。
+     * 地图缩放挤占右侧空间时：
+     * - 可用空间 >= 面板宽：正常显示 240dp
+     * - 可用空间 >= 半宽：缩小面板宽度但仍显示
+     * - 可用空间 < 半宽：面板隐藏（GONE），地图可铺满到屏幕右边
+     * 地图调整大小时由 MapHost.onGeometryChanged 回调触发。
+     */
+    private fun syncRightPanel() {
+        val map = binding.mapPanel
+        val rp = binding.rightPanel
+        val gap = (12 * resources.displayMetrics.density).toInt()
+        val panelWidth = (240 * resources.displayMetrics.density).toInt()
+        val rightMargin = (20 * resources.displayMetrics.density).toInt()
+        val sw = resources.displayMetrics.widthPixels
+        val mapLp = map.layoutParams as android.widget.FrameLayout.LayoutParams
+        val mapRight = mapLp.leftMargin + map.width
+        val lp = rp.layoutParams as android.widget.FrameLayout.LayoutParams
+        val availForPanel = sw - rightMargin - mapRight - gap
+        when {
+            availForPanel >= panelWidth -> {
+                rp.visibility = android.view.View.VISIBLE
+                lp.leftMargin = mapRight + gap
+                lp.width = panelWidth
+            }
+            availForPanel >= panelWidth / 2 -> {
+                // 部分挤占：缩小面板宽度但仍显示
+                rp.visibility = android.view.View.VISIBLE
+                lp.leftMargin = mapRight + gap
+                lp.width = availForPanel
+            }
+            else -> {
+                // 面板消失，地图可铺满
+                rp.visibility = android.view.View.GONE
+            }
+        }
+        rp.layoutParams = lp
     }
 
     private fun setupDock() {
@@ -75,7 +133,7 @@ class MainActivity : AppCompatActivity() {
     private fun renderDock() {
         binding.dockItems.removeAllViews()
         val dp = resources.displayMetrics.density
-        val size = (80 * dp).toInt()
+        val size = (64 * dp).toInt()
         val gap = (8 * dp).toInt()
         val bg = ContextCompat.getDrawable(this, R.drawable.bg_dock_item)
         val addIcon = ContextCompat.getDrawable(this, R.drawable.ic_dock_add)
@@ -135,7 +193,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupMap() {
         mapHost = MapHost(this, binding.mapContainer, binding.mapPanel)
-        mapHost.start(mapSources)
+        // 地图几何变化时同步右侧面板位置
+        mapHost.onGeometryChanged = { binding.root.post { syncRightPanel() } }
+        mapHost.start(mapSources, autoLaunch = true)
         binding.dockBar.isClickable = true
         binding.dockBar.setOnLongClickListener { Log.d("NUI", "dock long press"); mapHost.toggleAdjust(); true }
 
@@ -146,12 +206,40 @@ class MainActivity : AppCompatActivity() {
                 sources = mapSources,
                 currentId = mapHost.currentId,
                 onPick = { source ->
-                    mapHost.select(source)
+                    mapHost.select(source, autoLaunch = true)
                     Toast.makeText(this, "已切换为 ${source.label}", Toast.LENGTH_SHORT).show()
                 },
                 onDismiss = { mapHost.showFloat() },
             )
         }
+    }
+
+    private fun setupNav() {
+        navHost = NavHost(this, binding.btnNavHome, binding.btnNavCompany)
+        // 弹导航编辑/切换对话框前隐藏悬浮地图，关闭后恢复（同 MusicHost 模式）
+        navHost.onHideFloat = { mapHost.closeFloat() }
+        navHost.onShowFloat = { mapHost.showFloat() }
+        navHost.start()
+    }
+
+    private fun setupMusic() {
+        musicHost = MusicHost(this, binding.musicContainer)
+        // 弹音乐选择对话框前隐藏悬浮地图，关闭后恢复
+        musicHost.onHideFloat = { mapHost.closeFloat() }
+        musicHost.onShowFloat = { mapHost.showFloat() }
+        musicHost.start()
+    }
+
+    /** 长按时钟区 → 设置壁纸菜单 */
+    private fun setupWallpaper() {
+        // 弹壁纸菜单/选图前隐藏悬浮地图，关闭后恢复（同 NavHost/MusicHost 模式）
+        wallpaper.onHideFloat = { mapHost.closeFloat() }
+        wallpaper.onShowFloat = { mapHost.showFloat() }
+        // 时钟/日期可长按触发壁纸设置
+        binding.clockTime.setOnLongClickListener { wallpaper.showMenu(); true }
+        binding.clockDate.setOnLongClickListener { wallpaper.showMenu(); true }
+        // 右侧面板空白区也可长按
+        binding.rightPanel.setOnLongClickListener { wallpaper.showMenu(); true }
     }
 
     private fun applyImmersive() {

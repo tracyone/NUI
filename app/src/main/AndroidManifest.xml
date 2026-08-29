@@ -50,5 +50,16 @@
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:screenOrientation="landscape"
             android:theme="@style/Theme.NUI" />
+
+        <!-- 通知监听服务：作为 MediaSessionManager 读取媒体会话的权限载体 -->
+        <service
+            android:name=".music.MusicListenerService"
+            android:exported="false"
+            android:label="NUI 音乐"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>

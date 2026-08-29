@@ -40,6 +40,8 @@ class MapHost(
     private val context: Context,
     private val container: FrameLayout,
     private val mapPanel: MaterialCardView,
+    /** 几何（位置/大小）变更回调，用于外部同步联动右侧面板等。 */
+    var onGeometryChanged: (() -> Unit)? = null
 ) {
     private var mapView: MapView? = null
     private var current: MapSource? = null
@@ -69,17 +71,46 @@ class MapHost(
 
     val currentId: String? get() = current?.id
 
-    fun start(sources: List<MapSource>) {
+    fun start(sources: List<MapSource>, autoLaunch: Boolean = false) {
         val savedId = prefs.getString(KEY_SOURCE, MapSources.EMBEDDED_OSM_ID)
         val src = sources.firstOrNull { it.id == savedId }
             ?: sources.firstOrNull { it.type == MapSource.Type.EMBEDDED_OSM }
             ?: sources.firstOrNull()
-        src?.let { render(it) }
+        src?.let {
+            render(it)
+            if (autoLaunch) launchAndReturnHome()
+        }
     }
 
-    fun select(source: MapSource) {
+    fun select(source: MapSource, autoLaunch: Boolean = false) {
         prefs.edit { putString(KEY_SOURCE, source.id) }
         render(source)
+        if (autoLaunch) launchAndReturnHome()
+    }
+
+    /**
+     * 启动外部地图应用，延迟 [delayMs] 毫秒后返回桌面（HOME）。
+     * 回桌面后再恢复浮窗（高德浮窗需地图进程在运行才生效）。
+     * 内置 OSM 无需启动外部应用，直接返回。
+     */
+    fun launchAndReturnHome(delayMs: Long = 3000L) {
+        val src = current ?: return
+        if (src.type == MapSource.Type.EMBEDDED_OSM) return
+        val launch = src.launchIntent ?: return
+        runCatching { context.startActivity(launch) }
+            .onFailure { Log.e(TAG, "launch external map failed", it); return }
+        container.postDelayed({
+            // 显式返回 NUI（不依赖是否为默认 Launcher，HOME 可能回到其他桌面）
+            val back = Intent().apply {
+                setClassName(context, "com.nui.launcher.MainActivity")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+            }
+            runCatching { context.startActivity(back) }
+            // 回 NUI 后再恢复浮窗
+            if (src.type == MapSource.Type.EXTERNAL_FLOAT) {
+                container.postDelayed({ showFloat() }, 500L)
+            }
+        }, delayMs)
     }
 
     private fun render(source: MapSource) {
@@ -329,16 +360,16 @@ class MapHost(
         Toast.makeText(context, "已应用新大小", Toast.LENGTH_SHORT).show()
     }
 
-    /** 按固定 x/y 限制宽高最大值（左/顶不动，只约束右侧/底部不越界）。 */
+    /** 按固定 x/y 限制宽高最大值（左/顶不动，只约束右侧/底部不越界）。
+     *  右面板的显示/隐藏由外部 syncRightPanel 根据剩余空间自动处理，
+     *  这里地图右边可铺到屏幕宽 - 20dp。 */
     private fun clampSizeFixed(x: Int, y: Int, w: Int, h: Int): IntArray {
         val sw = context.resources.displayMetrics.widthPixels
         val sh = context.resources.displayMetrics.heightPixels
-        val maxRight = sw - dp(20)       // 不碰到右边信息栏
+        val maxRight = sw - dp(20)     // 右距 20dp，地图可铺满到屏幕右边
         val maxBottom = sh - dp(20)     // 不碰到底边
-        // 最小尺寸
         var nw = w.coerceAtLeast(MIN_SIZE)
         var nh = h.coerceAtLeast(MIN_SIZE)
-        // 最大尺寸：以固定 x/y 为基准，右边/下边不出界
         if (x + nw > maxRight) nw = (maxRight - x).coerceAtLeast(MIN_SIZE)
         if (y + nh > maxBottom) nh = (maxBottom - y).coerceAtLeast(MIN_SIZE)
         return intArrayOf(x, y, nw, nh)
@@ -351,9 +382,14 @@ class MapHost(
         if (w != null) lp.width = w
         if (h != null) lp.height = h
         mapPanel.layoutParams = lp
+        onGeometryChanged?.invoke()
     }
 
     private fun loadGeometry() {
+        // 一次性重置旧版地图几何（dock 变窄后旧位置离 dock 太远）
+        if (!prefs.getBoolean(KEY_GEOM_V2, false)) {
+            prefs.edit { remove(KEY_GEOMETRY); putBoolean(KEY_GEOM_V2, true) }
+        }
         val g = prefs.getString(KEY_GEOMETRY, null)
         if (g != null) {
             val p = g.split(',').mapNotNull { it.toIntOrNull() }
@@ -363,8 +399,8 @@ class MapHost(
                 return
             }
         }
-        // 默认位置：左边贴 dock 栏右侧（152dp），上边 20dp
-        val x = dp(152)
+        // 默认位置：左边贴 dock 栏右侧（dock 96dp+20margin+12gap≈128dp），上边 20dp
+        val x = dp(128)
         val y = dp(20)
         val sw = context.resources.displayMetrics.widthPixels
         val sh = context.resources.displayMetrics.heightPixels
@@ -387,6 +423,7 @@ class MapHost(
         private const val PREFS = "nui_map"
         private const val KEY_SOURCE = "float_map_source_id"
         private const val KEY_GEOMETRY = "map_geometry"
+        private const val KEY_GEOM_V2 = "geometry_v2" // 新版几何标记（dock 变窄后重置旧位置）
         private const val EDGE_ZONE_DP = 28   // 右/下边缘把手宽度
         private val MIN_SIZE = 240 // px，缩放下限
     }
