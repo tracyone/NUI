@@ -111,12 +111,16 @@ class MainActivity : AppCompatActivity() {
             if (binding.viewPager.currentItem == 0) mapHost.showFloat()
             mapHost.onResume()
         }
-        if (::musicHost.isInitialized) musicHost.refresh()
+        if (::musicHost.isInitialized) {
+            musicHost.refresh()
+            musicHost.setFloatAreaVisible(true)
+        }
     }
 
     override fun onPause() {
         super.onPause()
         if (::mapHost.isInitialized) mapHost.onPause()
+        if (::musicHost.isInitialized) musicHost.setFloatAreaVisible(false)
     }
 
     override fun onDestroy() {
@@ -240,6 +244,7 @@ class MainActivity : AppCompatActivity() {
 
         mapHost = MapHost(this, mapContainer, mapPanel)
         mapHost.onGeometryChanged = { binding.root.post { syncRightPanel() } }
+        mapHost.onFloatShown = { if (::musicHost.isInitialized) musicHost.bringLyricFloatToFront() }
         mapHost.onPickMap = {
             mapHost.closeFloat()
             MapPickerDialog.show(
@@ -281,6 +286,9 @@ class MainActivity : AppCompatActivity() {
         musicHost = MusicHost(this, desktopMusicContainer!!)
         musicHost.onHideFloat = { mapHost.closeFloat() }
         musicHost.onShowFloat = { mapHost.showFloat() }
+        musicHost.floatBoundsProvider = {
+            if (::mapHost.isInitialized) mapHost.floatBounds() else null
+        }
         musicHost.start()
     }
 

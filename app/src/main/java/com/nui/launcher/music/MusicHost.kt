@@ -64,7 +64,7 @@ class MusicHost(
     private var lyricHighlight: Int = -1
     /** 歌词定时刷新 runnable */
     private val lyricTick = object : Runnable {
-        override fun run() { refreshLyric(); handler.postDelayed(this, 500L) }
+        override fun run() { refreshLyric(); handler.postDelayed(this, 100L) }
     }
 
     /** 元数据/播放状态变化回调：切歌时刷新封面等信息 */
@@ -218,6 +218,7 @@ class MusicHost(
         lyrics = emptyList()
         lyricHighlight = -1
         handler.removeCallbacks(lyricTick)
+        hideLyricFloat()
 
         container.removeAllViews()
         val v = LinearLayout(context).apply {
@@ -268,6 +269,193 @@ class MusicHost(
         handler.removeCallbacks(lyricTick)
         currentController?.unregisterCallback(metadataCallback)
         currentController = null
+        hideLyricFloat()
+    }
+
+    // ===== 卡拉OK悬浮歌词：跨 page 常驻、可拖动/拉伸、扫光高亮 =====
+    private val wm =
+        context.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
+    private var lyricFloatView: FrameLayout? = null
+    private var karaokeView: KaraokeTextView? = null
+    private var lyricFloatNext: TextView? = null
+    private var desktopVisible = false
+    private var playingNow = false
+    private var floatX = -1
+    private var floatY = -1
+    private var floatW = -1
+    private var floatH = -1
+    /** 提供悬浮地图几何（边界格式 x1,y1,x2,y2），用于默认位置 */
+    var floatBoundsProvider: (() -> IntArray?)? = null
+
+    /** 重新 addView 把歌词窗提到最上层（盖住高德浮窗） */
+    fun bringLyricFloatToFront() {
+        val view = lyricFloatView ?: return
+        val lp = view.layoutParams as? android.view.WindowManager.LayoutParams ?: return
+        runCatching {
+            wm.removeViewImmediate(view)
+            wm.addView(view, lp)
+        }
+    }
+
+    fun setFloatAreaVisible(v: Boolean) {
+        if (desktopVisible == v) return
+        desktopVisible = v
+        updateLyricFloat()
+    }
+
+    private fun defaultFloatGeo() {
+        val bounds = floatBoundsProvider?.invoke()
+        if (bounds != null) {
+            floatW = (bounds[2] - bounds[0]) * 4 / 5
+            floatH = dp(110)
+            floatX = bounds[0] + (bounds[2] - bounds[0]) / 10
+            floatY = bounds[3] - dp(150)
+        } else {
+            floatX = dp(200); floatY = dp(700)
+            floatW = dp(700); floatH = dp(110)
+        }
+    }
+
+    private fun loadFloatGeo() {
+        floatX = prefs.getInt("lyric_x", -1)
+        floatY = prefs.getInt("lyric_y", -1)
+        floatW = prefs.getInt("lyric_w", -1)
+        floatH = prefs.getInt("lyric_h", -1)
+        if (floatX < 0 || floatW <= 0 || floatH <= 0) defaultFloatGeo()
+    }
+
+    private fun saveFloatGeo() {
+        prefs.edit {
+            putInt("lyric_x", floatX); putInt("lyric_y", floatY)
+            putInt("lyric_w", floatW); putInt("lyric_h", floatH)
+        }
+    }
+
+    private fun createLyricFloat() {
+        val root = FrameLayout(context).apply {
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0x80000000.toInt())
+                cornerRadius = dp(14).toFloat()
+            }
+        }
+        val col = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(18), dp(8), dp(30), dp(8))
+            clipChildren = true
+            clipToPadding = true
+        }
+        karaokeView = KaraokeTextView(context).apply {
+            textSize = 26f
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        lyricFloatNext = TextView(context).apply {
+            setTextColor(0x99FFFFFF.toInt()); textSize = 14f
+            gravity = Gravity.CENTER; maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        col.addView(karaokeView, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        col.addView(lyricFloatNext, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        root.clipChildren = true
+        root.clipToPadding = true
+        root.addView(col, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        // 右下角拉伸手柄
+        root.addView(View(context).apply {
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0xFF00E5FF.toInt()); cornerRadius = dp(2).toFloat()
+            }
+        }, FrameLayout.LayoutParams(dp(18), dp(4)).apply {
+            gravity = Gravity.BOTTOM or Gravity.END
+            marginEnd = dp(8); bottomMargin = dp(6)
+        })
+        root.setOnTouchListener(floatTouch)
+        lyricFloatView = root
+    }
+
+    private var touchMode = 0 // 0 无 1 移动 2 拉伸
+    private var touchStartX = 0f
+    private var touchStartY = 0f
+    private var geoStartX = 0
+    private var geoStartY = 0
+    private var geoStartW = 0
+    private var geoStartH = 0
+    private val floatTouch = View.OnTouchListener { _, e ->
+        when (e.action) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                val v = lyricFloatView ?: return@OnTouchListener false
+                val inHandle = e.x > v.width - dp(48) && e.y > v.height - dp(32)
+                touchMode = if (inHandle) 2 else 1
+                touchStartX = e.rawX; touchStartY = e.rawY
+                geoStartX = floatX; geoStartY = floatY
+                geoStartW = floatW; geoStartH = floatH
+                true
+            }
+            android.view.MotionEvent.ACTION_MOVE -> {
+                val dx = (e.rawX - touchStartX).toInt()
+                val dy = (e.rawY - touchStartY).toInt()
+                if (touchMode == 1) { floatX = geoStartX + dx; floatY = geoStartY + dy }
+                else if (touchMode == 2) {
+                    floatW = (geoStartW + dx).coerceAtLeast(dp(240))
+                    floatH = (geoStartH + dy).coerceIn(dp(70), dp(300))
+                }
+                applyFloatLayout()
+                true
+            }
+            else -> { touchMode = 0; saveFloatGeo(); true }
+        }
+    }
+
+    private fun applyFloatLayout() {
+        val view = lyricFloatView ?: return
+        val lp = view.layoutParams as? android.view.WindowManager.LayoutParams ?: return
+        lp.x = floatX; lp.y = floatY; lp.width = floatW; lp.height = floatH
+        // 字号随窗口高度缩放
+        karaokeView?.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, floatH * 0.30f)
+        lyricFloatNext?.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, floatH * 0.15f)
+        runCatching { wm.updateViewLayout(view, lp) }
+    }
+
+    private fun hideLyricFloat() {
+        lyricFloatView?.let { runCatching { wm.removeView(it) } }
+        lyricFloatView = null
+        karaokeView = null
+        lyricFloatNext = null
+    }
+
+    private fun updateLyricFloat() {
+        if (!desktopVisible || lyrics.isEmpty() || !playingNow) { hideLyricFloat(); return }
+        if (lyricFloatView == null) {
+            loadFloatGeo()
+            createLyricFloat()
+            val lp = android.view.WindowManager.LayoutParams().apply {
+                type = android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                format = android.graphics.PixelFormat.TRANSLUCENT
+                flags = android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                gravity = Gravity.TOP or Gravity.START
+            }
+            runCatching { wm.addView(lyricFloatView!!, lp) }
+                .onFailure { hideLyricFloat(); return }
+        }
+        applyFloatLayout()
+        val idx = lyricHighlight.coerceAtLeast(0)
+        karaokeView?.text = lyrics[idx].second
+        lyricFloatNext?.text = if (idx + 1 < lyrics.size) lyrics[idx + 1].second else ""
+        updateKaraokeProgress()
+    }
+
+    /** 卡拉OK扫光：按播放进度更新当前行已唱比例 */
+    private fun updateKaraokeProgress() {
+        val view = karaokeView ?: return
+        val controller = currentController ?: return
+        val pos = controller.playbackState?.position ?: return
+        val idx = lyricHighlight.coerceAtLeast(0)
+        val start = lyrics[idx].first
+        val end = if (idx + 1 < lyrics.size) lyrics[idx + 1].first else start + 5000L
+        view.progress = if (end > start) (pos - start).toFloat() / (end - start) else 1f
     }
 
     private fun pickPreferredApp() {
@@ -324,17 +512,18 @@ class MusicHost(
 
     /** 根据当前播放进度更新歌词高亮行。 */
     private fun refreshLyric() {
-        if (lyrics.isEmpty()) return
+        if (lyrics.isEmpty()) { hideLyricFloat(); return }
         val controller = currentController ?: return
         val state = controller.playbackState ?: return
+        playingNow = state.state == PlaybackState.STATE_PLAYING
         val pos = state.position
 
         var idx = -1
         for (i in lyrics.indices) {
             if (lyrics[i].first <= pos) idx = i else break
         }
-        if (idx == lyricHighlight || idx < 0) return
-        lyricHighlight = idx
+        if (idx != lyricHighlight && idx >= 0) {
+            lyricHighlight = idx
 
         val lyricView = container.getTag(R.id.tag_lyric_view) as? TextView ?: return
         val sb = android.text.SpannableStringBuilder()
@@ -350,8 +539,10 @@ class MusicHost(
         }
         if (idx > 0) { appendLine(lyrics[idx - 1].second + "\n", dim, false) }
         appendLine(lyrics[idx].second, hi, true)
-        if (idx + 1 < lyrics.size) { appendLine("\n" + lyrics[idx + 1].second, dim, false) }
-        lyricView.text = sb
+            if (idx + 1 < lyrics.size) { appendLine("\n" + lyrics[idx + 1].second, dim, false) }
+            lyricView.text = sb
+        }
+        updateLyricFloat()
     }
 
     private fun dp(v: Int): Int =
@@ -369,5 +560,42 @@ class MusicHost(
             "cn.kuwo.player",
             "com.spotify.music",
         )
+    }
+}
+
+/** 卡拉OK歌词行：未唱灰色，已唱金色渐变扫光 */
+class KaraokeTextView(context: Context) : androidx.appcompat.widget.AppCompatTextView(context) {
+    var progress = 0f
+        set(v) { field = v.coerceIn(0f, 1f); invalidate() }
+    private val basePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    private val sungPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    override fun onDraw(canvas: android.graphics.Canvas) {
+        var text = text?.toString().orEmpty()
+        if (text.isEmpty()) return
+        basePaint.textSize = textSize; basePaint.typeface = typeface
+        sungPaint.textSize = textSize; sungPaint.typeface = typeface
+        // 超宽自动缩字号，保证整行显示
+        val maxW = width - paddingLeft - paddingRight
+        var tw = basePaint.measureText(text)
+        if (tw > maxW && tw > 0) {
+            val shrunk = textSize * maxW / tw
+            basePaint.textSize = shrunk; sungPaint.textSize = shrunk
+            tw = basePaint.measureText(text)
+        }
+        val x = (width - tw) / 2f
+        val fm = basePaint.fontMetrics
+        val y = (height - (fm.descent - fm.ascent)) / 2f - fm.ascent
+        basePaint.color = 0xFF8FA3AD.toInt()
+        canvas.drawText(text, x, y, basePaint)
+        if (progress > 0f) {
+            canvas.save()
+            canvas.clipRect(0f, 0f, x + tw * progress, height.toFloat())
+            sungPaint.shader = android.graphics.LinearGradient(
+                x, 0f, x + tw, 0f,
+                intArrayOf(0xFFFFC400.toInt(), 0xFFFFF59D.toInt(), 0xFFFFAB00.toInt()),
+                null, android.graphics.Shader.TileMode.CLAMP)
+            canvas.drawText(text, x, y, sungPaint)
+            canvas.restore()
+        }
     }
 }

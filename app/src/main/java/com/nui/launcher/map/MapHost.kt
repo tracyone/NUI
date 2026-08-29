@@ -44,6 +44,8 @@ class MapHost(
     private val mapPanel: MaterialCardView,
     /** 几何（位置/大小）变更回调，用于外部同步联动右侧面板等。 */
     var onGeometryChanged: (() -> Unit)? = null,
+    /** 高德浮窗广播发出、窗口出现后回调（用于歌词窗置顶） */
+    var onFloatShown: (() -> Unit)? = null,
     /** 调整模式下点击"选择地图"按钮回调。 */
     var onPickMap: (() -> Unit)? = null
 ) {
@@ -240,6 +242,11 @@ class MapHost(
         runCatching { context.sendBroadcast(intent) }
     }
 
+    /** 悬浮地图几何（边界格式 x1,y1,x2,y2），未显示过返回 null */
+    fun floatBounds(): IntArray? =
+        if (cachedX < 0 || cachedW <= cachedX || cachedH <= cachedY) null
+        else intArrayOf(cachedX, cachedY, cachedW, cachedH)
+
     fun closeFloat() {
         val closeAction = current?.floatCloseAction ?: return
         runCatching { context.sendBroadcast(Intent(closeAction)) }
@@ -247,7 +254,12 @@ class MapHost(
 
     fun showFloat() {
         current?.takeIf { it.type == MapSource.Type.EXTERNAL_FLOAT }
-            ?.let { container.post { sendFloatBroadcast(it.floatShowAction) } }
+            ?.let { src ->
+                container.post {
+                    sendFloatBroadcast(src.floatShowAction)
+                    container.postDelayed({ onFloatShown?.invoke() }, 600)
+                }
+            }
     }
 
     fun onResume() {
