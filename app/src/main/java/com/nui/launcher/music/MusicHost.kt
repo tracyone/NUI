@@ -327,7 +327,6 @@ class MusicHost(
         if (lyrics.isEmpty()) return
         val controller = currentController ?: return
         val state = controller.playbackState ?: return
-        if (state.state != PlaybackState.STATE_PLAYING) return
         val pos = state.position
 
         var idx = -1
@@ -338,11 +337,21 @@ class MusicHost(
         lyricHighlight = idx
 
         val lyricView = container.getTag(R.id.tag_lyric_view) as? TextView ?: return
-        val sb = StringBuilder()
-        if (idx > 0) sb.appendLine(lyrics[idx - 1].second)
-        sb.append(">> ${lyrics[idx].second}")
-        if (idx + 1 < lyrics.size) sb.appendLine().append(lyrics[idx + 1].second)
-        lyricView.text = sb.toString()
+        val sb = android.text.SpannableStringBuilder()
+        val dim = Color.parseColor("#78909C")
+        val hi = Color.parseColor("#FFFFFF")
+        fun appendLine(text: String, color: Int, bold: Boolean) {
+            val start = sb.length
+            sb.append(text)
+            sb.setSpan(android.text.style.ForegroundColorSpan(color),
+                start, sb.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            if (bold) sb.setSpan(android.text.style.StyleSpan(android.graphics.Typeface.BOLD),
+                start, sb.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        if (idx > 0) { appendLine(lyrics[idx - 1].second + "\n", dim, false) }
+        appendLine(lyrics[idx].second, hi, true)
+        if (idx + 1 < lyrics.size) { appendLine("\n" + lyrics[idx + 1].second, dim, false) }
+        lyricView.text = sb
     }
 
     private fun dp(v: Int): Int =
