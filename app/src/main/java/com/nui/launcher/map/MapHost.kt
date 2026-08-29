@@ -193,7 +193,7 @@ class MapHost(
 
     private fun renderFloat(source: MapSource) {
         if (source.floatShowAction == null) return
-        container.post { sendFloatBroadcast(source.floatShowAction) }
+        showFloat()
     }
 
     private fun sendFloatBroadcast(action: String?) {
@@ -221,7 +221,23 @@ class MapHost(
 
     fun showFloat() {
         current?.takeIf { it.type == MapSource.Type.EXTERNAL_FLOAT }
-            ?.let { container.post { sendFloatBroadcast(it.floatShowAction) } }
+            ?.let { src ->
+                // ViewPager2 翻页后 Page 0 的 view 可能刚 attach，
+                // 必须等 layout 完再取坐标，否则 getLocationOnScreen 返回 (0,0)
+                container.post {
+                    if (container.width > 0 && container.height > 0) {
+                        sendFloatBroadcast(src.floatShowAction)
+                    } else {
+                        container.viewTreeObserver.addOnGlobalLayoutListener(object :
+                            android.view.ViewTreeObserver.OnGlobalLayoutListener {
+                            override fun onGlobalLayout() {
+                                container.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                                sendFloatBroadcast(src.floatShowAction)
+                            }
+                        })
+                    }
+                }
+            }
     }
 
     fun onResume() {
