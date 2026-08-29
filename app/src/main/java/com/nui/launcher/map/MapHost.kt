@@ -1,5 +1,7 @@
 package com.nui.launcher.map
 
+import com.nui.launcher.NuiToast
+
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
@@ -41,8 +43,12 @@ class MapHost(
     private val container: FrameLayout,
     private val mapPanel: MaterialCardView,
     /** 几何（位置/大小）变更回调，用于外部同步联动右侧面板等。 */
-    var onGeometryChanged: (() -> Unit)? = null
+    var onGeometryChanged: (() -> Unit)? = null,
+    /** 调整模式下点击"选择地图"按钮回调。 */
+    var onPickMap: (() -> Unit)? = null
 ) {
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var pendingEnterAdjust: Runnable? = null
     private var mapView: MapView? = null
     private var current: MapSource? = null
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -172,7 +178,7 @@ class MapHost(
         v.setOnClickListener {
             source.launchIntent?.let {
                 runCatching { context.startActivity(it) }.onFailure {
-                    Toast.makeText(context, "无法启动 ${source.label}", Toast.LENGTH_SHORT).show()
+                    NuiToast.show(context, "无法启动 ${source.label}", Toast.LENGTH_SHORT)
                 }
             }
         }
@@ -224,6 +230,8 @@ class MapHost(
     }
 
     fun onPause() {
+        pendingEnterAdjust?.let { mainHandler.removeCallbacks(it); pendingEnterAdjust = null }
+        if (adjustMode) exitAdjust()
         mapView?.onPause()
         closeFloat()
     }
@@ -246,10 +254,12 @@ class MapHost(
     private val edgeZone: Int get() = dp(EDGE_ZONE_DP)
 
     /** 长按非悬浮区触发。进入：关闭高德浮窗 + 显示带边缘条的 overlay；已在调整则退出。 */
+    fun isAdjustMode() = adjustMode
+
     fun toggleAdjust() {
         if (adjustMode) { exitAdjust(); return }
         if (!Settings.canDrawOverlays(context)) {
-            Toast.makeText(context, "需要悬浮窗权限，授权后重试", Toast.LENGTH_LONG).show()
+            NuiToast.show(context, "需要悬浮窗权限，授权后重试", Toast.LENGTH_LONG)
             val i = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}"))
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(i)
@@ -259,6 +269,7 @@ class MapHost(
     }
 
     private fun enterAdjust() {
+        if (adjustMode) return
         adjustMode = true
         closeFloat()
         val loc = IntArray(2)
@@ -269,43 +280,72 @@ class MapHost(
         startWidth = mapPanel.width
         startHeight = mapPanel.height
 
-        // overlay 根：FrameLayout 承载右/下边缘条
-        val overlay = FrameLayout(context).apply {
-            setBackgroundColor(0x332196F3.toInt()) // 极淡蓝底，仅提示调整区域
-            // 右边缘条（可视化 + 热区）
-            addView(View(context).apply {
-                background = ColorDrawable(0xFF1976D2.toInt()) // 深青蓝实条
-            }, FrameLayout.LayoutParams(edgeZone, FrameLayout.LayoutParams.MATCH_PARENT).apply {
-                gravity = Gravity.END
-            })
-            // 下边缘条
-            addView(View(context).apply {
-                background = ColorDrawable(0xFF1976D2.toInt())
-            }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, edgeZone).apply {
-                gravity = Gravity.BOTTOM
-            })
-            // 右下角把手
-            addView(View(context).apply {
-                background = ColorDrawable(0xFF0D47A1.toInt()) // 最深蓝
-            }, FrameLayout.LayoutParams(edgeZone, edgeZone).apply {
-                gravity = Gravity.BOTTOM or Gravity.END
-            })
-            setOnTouchListener(adjustTouch)
+        // closeFloat 是异步广播，必须等高德浮窗真消失后再加 overlay，
+        // 否则 overlay 会被还没关闭的浮窗完全盖住
+        pendingEnterAdjust?.let { mainHandler.removeCallbacks(it) }
+        val runnable = Runnable {
+            if (!adjustMode) return@Runnable // 期间用户可能已 exitAdjust
+            pendingEnterAdjust = null
+
+            val overlay = FrameLayout(context).apply {
+                setBackgroundColor(0x332196F3.toInt()) // 极淡蓝底，仅提示调整区域
+                // 左上角透明点击热区（与原 btnSwitchMap 位置一致：40dp 图标 + 10dp margin）
+                addView(View(context).apply {
+                    setBackgroundColor(0x00000000)
+                    setOnClickListener {
+                        adjustOverlay?.let { runCatching { wm.removeView(it) } }
+                        adjustOverlay = null
+                        adjustMode = false
+                        resizeMode = ResizeMode.NONE
+                        saveGeometry()
+                        closeFloat()
+                        onPickMap?.invoke()
+                    }
+                }, FrameLayout.LayoutParams(
+                    (40 * context.resources.displayMetrics.density).toInt(),
+                    (40 * context.resources.displayMetrics.density).toInt()
+                ).apply {
+                    gravity = Gravity.TOP or Gravity.START
+                    leftMargin = (10 * context.resources.displayMetrics.density).toInt()
+                    topMargin = (10 * context.resources.displayMetrics.density).toInt()
+                })
+                // 右边缘条（可视化 + 热区）
+                addView(View(context).apply {
+                    background = ColorDrawable(0xFF1976D2.toInt()) // 深青蓝实条
+                }, FrameLayout.LayoutParams(edgeZone, FrameLayout.LayoutParams.MATCH_PARENT).apply {
+                    gravity = Gravity.END
+                })
+                // 下边缘条
+                addView(View(context).apply {
+                    background = ColorDrawable(0xFF1976D2.toInt())
+                }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, edgeZone).apply {
+                    gravity = Gravity.BOTTOM
+                })
+                // 右下角把手
+                addView(View(context).apply {
+                    background = ColorDrawable(0xFF0D47A1.toInt()) // 最深蓝
+                }, FrameLayout.LayoutParams(edgeZone, edgeZone).apply {
+                    gravity = Gravity.BOTTOM or Gravity.END
+                })
+                setOnTouchListener(adjustTouch)
+            }
+            val lp = WindowManager.LayoutParams().apply {
+                type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                format = PixelFormat.TRANSLUCENT
+                flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                gravity = Gravity.TOP or Gravity.START
+                x = loc[0]
+                y = loc[1]
+                width = startWidth
+                height = startHeight
+            }
+            runCatching { wm.addView(overlay, lp) }
+                .onFailure { Log.e(TAG, "addView overlay failed", it); adjustMode = false; return@Runnable }
+            adjustOverlay = overlay
+            NuiToast.show(context, "从右/下边缘或右下角拖，放手完成", Toast.LENGTH_LONG)
         }
-        val lp = WindowManager.LayoutParams().apply {
-            type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            format = PixelFormat.TRANSLUCENT
-            flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-            gravity = Gravity.TOP or Gravity.START
-            x = loc[0]
-            y = loc[1]
-            width = startWidth
-            height = startHeight
-        }
-        runCatching { wm.addView(overlay, lp) }
-            .onFailure { Log.e(TAG, "addView overlay failed", it); adjustMode = false; return }
-        adjustOverlay = overlay
-        Toast.makeText(context, "从右/下边缘或右下角拖，放手完成", Toast.LENGTH_LONG).show()
+        pendingEnterAdjust = runnable
+        mainHandler.postDelayed(runnable, 500L)
     }
 
     private val adjustTouch = View.OnTouchListener { _, e ->
@@ -350,14 +390,15 @@ class MapHost(
         true
     }
 
-    private fun exitAdjust() {
+        fun exitAdjust() {
+        pendingEnterAdjust?.let { mainHandler.removeCallbacks(it); pendingEnterAdjust = null }
+        adjustMode = false
         adjustOverlay?.let { runCatching { wm.removeView(it) } }
         adjustOverlay = null
-        adjustMode = false
         resizeMode = ResizeMode.NONE
         saveGeometry()
         showFloat()
-        Toast.makeText(context, "已应用新大小", Toast.LENGTH_SHORT).show()
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ NuiToast.show(context, "已应用新大小", Toast.LENGTH_SHORT) }, 300L)
     }
 
     /** 按固定 x/y 限制宽高最大值（左/顶不动，只约束右侧/底部不越界）。

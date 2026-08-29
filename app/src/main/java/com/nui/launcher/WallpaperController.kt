@@ -1,5 +1,7 @@
 package com.nui.launcher
 
+import com.nui.launcher.NuiToast
+
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
@@ -58,7 +60,7 @@ class WallpaperController(
             activity.startActivityForResult(Intent.createChooser(intent, "选择壁纸"), REQ_PICK)
         }.onFailure {
             onShowFloat?.invoke() // 选择器未打开，恢复悬浮地图
-            Toast.makeText(activity, "无法打开图库选择器", Toast.LENGTH_SHORT).show()
+            NuiToast.show(activity, "无法打开图库选择器", Toast.LENGTH_SHORT)
             Log.e(TAG, "pick failed", it)
         }
     }
@@ -71,9 +73,9 @@ class WallpaperController(
         val uri = data.data ?: return
         // 复制到内部存储持久化
         if (copyToInternal(uri)) {
-            Toast.makeText(activity, "壁纸已设置", Toast.LENGTH_SHORT).show()
+            NuiToast.show(activity, "壁纸已设置", Toast.LENGTH_SHORT)
         } else {
-            Toast.makeText(activity, "壁纸加载失败", Toast.LENGTH_SHORT).show()
+            NuiToast.show(activity, "壁纸加载失败", Toast.LENGTH_SHORT)
         }
     }
 
@@ -131,7 +133,7 @@ class WallpaperController(
         file.delete()
         prefs.edit { putBoolean(KEY_SET, false) }
         applyDefault()
-        Toast.makeText(activity, "已恢复默认壁纸", Toast.LENGTH_SHORT).show()
+        NuiToast.show(activity, "已恢复默认壁纸", Toast.LENGTH_SHORT)
     }
 
     /** 弹菜单：设置壁纸 / 恢复默认。 */

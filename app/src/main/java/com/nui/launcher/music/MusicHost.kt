@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.graphics.Color
 import android.media.MediaMetadata
+
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
@@ -25,13 +26,17 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.annotation.RequiresApi
 import androidx.core.content.edit
+import com.nui.launcher.NuiToast
+import com.nui.launcher.R
 
 /**
- * 右侧音乐区：通过 MediaSession 读取当前正在播放的歌曲（标题/艺术家/封面），
+ * 右侧音乐区：通过 MediaSession 读取当前正在播放的歌曲（标题/艺术家/封面/歌词），
  * 并提供播放/暂停、上一首、下一首控制。
  *
  * 实现"协议方式"获取歌曲信息：MediaSession 是 Android 标准 API，
  * 所有注册了媒体会话的音乐 App（QQ音乐/网易云/酷狗/Spotify 等）都能读取。
+ * 歌词从 METADATA_KEY_LYRIC（API 24+）读取，LRC 格式解析后按播放进度滚动高亮。
+ * 无歌词时显示"暂无歌词"。
  *
  * 无会话或未播放时：显示"点击打开音乐"启动卡（点击拉起首选音乐 App）。
  * 长按音乐区：选择首选音乐 App（用于启动卡点击）。
@@ -53,6 +58,14 @@ class MusicHost(
 
     /** 当前正在渲染的控制器，用于注册/注销元数据回调 */
     private var currentController: MediaController? = null
+    /** 当前歌词列表：(timeMs, lyricText) 按时间升序 */
+    private var lyrics: List<Pair<Long, String>> = emptyList()
+    /** 当前高亮行的 index */
+    private var lyricHighlight: Int = -1
+    /** 歌词定时刷新 runnable */
+    private val lyricTick = object : Runnable {
+        override fun run() { refreshLyric(); handler.postDelayed(this, 500L) }
+    }
 
     /** 元数据/播放状态变化回调：切歌时刷新封面等信息 */
     private val metadataCallback = object : MediaController.Callback() {
@@ -96,7 +109,7 @@ class MusicHost(
     private fun isPlaying(state: PlaybackState?): Boolean =
         state != null && state.state == PlaybackState.STATE_PLAYING
 
-    /** 渲染播放中：封面 + 标题 + 艺术家 + 控制按钮（竖排，适配高面板） */
+    /** 渲染播放中：封面 + 标题 + 艺术家 + 控制按钮 + 歌词（竖排） */
     private fun renderPlaying(controller: MediaController) {
         // 注销旧控制器回调，注册新控制器回调（切歌时自动刷新封面）
         currentController?.unregisterCallback(metadataCallback)
@@ -108,6 +121,10 @@ class MusicHost(
         val title = md.getString(MediaMetadata.METADATA_KEY_TITLE) ?: "未知歌曲"
         val artist = md.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: "未知艺术家"
         val art = md.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
+        val rawLyric = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N)
+            md.getString("android.media.metadata.LYRIC") else null
+        lyrics = parseLrc(rawLyric)
+        lyricHighlight = -1
 
         val col = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -158,9 +175,25 @@ class MusicHost(
         })
         col.addView(ctrls, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-        ).apply { topMargin = dp(12) })
+        ).apply { topMargin = dp(10) })
+        // 歌词区
+        val lyricView = TextView(context).apply {
+            setTextColor(Color.parseColor("#B0BEC5"))
+            textSize = 11f
+            gravity = Gravity.CENTER
+            maxLines = 3
+            text = if (lyrics.isNotEmpty()) "\u266A" else "暂无歌词"
+        }
+        col.addView(lyricView, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = dp(8) })
+
         container.addView(col)
         col.setOnClickListener { launchPreferredApp() }
+
+        container.setTag(R.id.tag_lyric_view, lyricView)
+        handler.removeCallbacks(lyricTick)
+        handler.postDelayed(lyricTick, 500L)
     }
 
     private fun ctrlBtn(icon: Int, onClick: () -> Unit): View =
@@ -174,14 +207,17 @@ class MusicHost(
 
     private fun safe(block: () -> Unit) {
         runCatching { block() }
-            .onFailure { Toast.makeText(context, "该 App 不支持此操作", Toast.LENGTH_SHORT).show() }
+            .onFailure { NuiToast.show(context, "该 App 不支持此操作", Toast.LENGTH_SHORT) }
     }
 
     /** 无会话/无权限：启动卡，点击拉起首选音乐 App */
     private fun renderEmpty() {
-        // 注销元数据回调
+        // 注销元数据回调 + 停歌词刷新
         currentController?.unregisterCallback(metadataCallback)
         currentController = null
+        lyrics = emptyList()
+        lyricHighlight = -1
+        handler.removeCallbacks(lyricTick)
 
         container.removeAllViews()
         val v = LinearLayout(context).apply {
@@ -229,6 +265,7 @@ class MusicHost(
 
     /** 清理回调，Activity 销毁时调用 */
     fun onDestroy() {
+        handler.removeCallbacks(lyricTick)
         currentController?.unregisterCallback(metadataCallback)
         currentController = null
     }
@@ -245,7 +282,7 @@ class MusicHost(
             apps.add(pkg to label)
         }
         if (apps.isEmpty()) {
-            Toast.makeText(context, "未检测到常用音乐 App，可从应用列表打开", Toast.LENGTH_LONG).show()
+            NuiToast.show(context, "未检测到常用音乐 App，可从应用列表打开", Toast.LENGTH_LONG)
             return
         }
         val labels = apps.map { it.second }.toTypedArray()
@@ -254,10 +291,58 @@ class MusicHost(
             .setTitle("选择音乐 App")
             .setItems(labels) { _, which ->
                 prefs.edit { putString(KEY_APP, apps[which].first) }
-                Toast.makeText(context, "已选择 ${labels[which]}", Toast.LENGTH_SHORT).show()
+                NuiToast.show(context, "已选择 ${labels[which]}", Toast.LENGTH_SHORT)
             }.create()
         d.setOnDismissListener { onShowFloat?.invoke() }
         d.show()
+    }
+
+    /** 解析 LRC 格式歌词：[mm:ss.xx]歌词文本 → (timeMs, text) 列表。 */
+    private fun parseLrc(raw: String?): List<Pair<Long, String>> {
+        if (raw.isNullOrBlank()) return emptyList()
+        val result = mutableListOf<Pair<Long, String>>()
+        val tagRe = Regex("""\[(\d{1,2}):(\d{2})[.:](\d{1,3})\]""")
+        for (line in raw.lines()) {
+            val matches = tagRe.findAll(line).toList()
+            if (matches.isEmpty()) continue
+            val lastTag = matches.last()
+            val text = line.substring(lastTag.range.last + 1).trim()
+            if (text.isEmpty()) continue
+            for (m in matches) {
+                val min = m.groupValues[1].toLong()
+                val sec = m.groupValues[2].toLong()
+                val msDigits = m.groupValues[3]
+                val ms = msDigits.toLong().let {
+                    when (msDigits.length) { 1 -> it * 100; 2 -> it * 10; else -> it }
+                }
+                val timeMs = (min * 60 + sec) * 1000 + ms
+                result.add(timeMs to text)
+            }
+        }
+        return result.sortedBy { it.first }
+    }
+
+    /** 根据当前播放进度更新歌词高亮行。 */
+    private fun refreshLyric() {
+        if (lyrics.isEmpty()) return
+        val controller = currentController ?: return
+        val state = controller.playbackState ?: return
+        if (state.state != PlaybackState.STATE_PLAYING) return
+        val pos = state.position
+
+        var idx = -1
+        for (i in lyrics.indices) {
+            if (lyrics[i].first <= pos) idx = i else break
+        }
+        if (idx == lyricHighlight || idx < 0) return
+        lyricHighlight = idx
+
+        val lyricView = container.getTag(R.id.tag_lyric_view) as? TextView ?: return
+        val sb = StringBuilder()
+        if (idx > 0) sb.appendLine(lyrics[idx - 1].second)
+        sb.append(">> ${lyrics[idx].second}")
+        if (idx + 1 < lyrics.size) sb.appendLine().append(lyrics[idx + 1].second)
+        lyricView.text = sb.toString()
     }
 
     private fun dp(v: Int): Int =

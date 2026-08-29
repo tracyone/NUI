@@ -1,5 +1,7 @@
 package com.nui.launcher.nav
 
+import com.nui.launcher.NuiToast
+
 import android.app.AlertDialog
 import android.content.ComponentName
 import android.content.Context
@@ -133,7 +135,7 @@ class NavHost(
     private fun naviSpecial(dest: String) {
         val app = preferredApp()
         if (!installedApp(app)) {
-            Toast.makeText(context, "未安装 ${mapAppName(app)}", Toast.LENGTH_LONG).show()
+            NuiToast.show(context, "未安装 ${mapAppName(app)}", Toast.LENGTH_LONG)
             return
         }
         if (app == APP_BAIDU) { launchApp(APP_BAIDU); return }
@@ -146,14 +148,14 @@ class NavHost(
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         if (runCatching { context.startActivity(i) }.isSuccess) {
-            Toast.makeText(context, "已发起$label", Toast.LENGTH_SHORT).show()
+            NuiToast.show(context, "已发起$label", Toast.LENGTH_SHORT)
             returnToNui(4000L)
         } else {
             // 兜底：启动高德后再试一次，成功后同样返回 NUI
             launchApp(APP_AMAP)
             handler.postDelayed({
                 if (runCatching { context.startActivity(i) }.isSuccess) {
-                    Toast.makeText(context, "已发起$label", Toast.LENGTH_SHORT).show()
+                    NuiToast.show(context, "已发起$label", Toast.LENGTH_SHORT)
                     returnToNui(4000L)
                 } else {
                     val mapUri = "androidauto://rootmap?sourceApplication=NUI"
@@ -161,7 +163,7 @@ class NavHost(
                         .setPackage(APP_AMAP)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     runCatching { context.startActivity(mapI) }
-                    Toast.makeText(context, "${label}失败，请在高德中手动发起", Toast.LENGTH_LONG).show()
+                    NuiToast.show(context, "${label}失败，请在高德中手动发起", Toast.LENGTH_LONG)
                 }
             }, 3000L)
         }
@@ -184,7 +186,7 @@ class NavHost(
     private fun startNavigation(t: NavTarget) {
         val app = preferredApp()
         if (!installedApp(app)) {
-            Toast.makeText(context, "未安装 ${mapAppName(app)}，长按按钮可切换", Toast.LENGTH_LONG).show()
+            NuiToast.show(context, "未安装 ${mapAppName(app)}，长按按钮可切换", Toast.LENGTH_LONG)
             return
         }
         when (app) {
@@ -208,7 +210,7 @@ class NavHost(
         launchApp(APP_AMAP)
         handler.postDelayed({
             if (sendNaviBroadcast(t)) {
-                Toast.makeText(context, "导航至${t.label}", Toast.LENGTH_SHORT).show()
+                NuiToast.show(context, "导航至${t.label}", Toast.LENGTH_SHORT)
                 returnToNui(5000L)
             } else {
                 // 兜底①：androidauto://navi URI（车机版实测无效，保留兜底）
@@ -233,7 +235,7 @@ class NavHost(
                     .setPackage(APP_AMAP)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 runCatching { context.startActivity(mapI) }
-                Toast.makeText(context, "导航失败，请在高德中手动发起", Toast.LENGTH_LONG).show()
+                NuiToast.show(context, "导航失败，请在高德中手动发起", Toast.LENGTH_LONG)
             }
         }, 3000L)
     }
@@ -248,12 +250,12 @@ class NavHost(
             if (runCatching { context.startActivity(fillI) }.isSuccess) return
         }
         val i = context.packageManager.getLaunchIntentForPackage(pkg) ?: run {
-            Toast.makeText(context, "无法启动 ${mapAppName(pkg)}", Toast.LENGTH_SHORT).show()
+            NuiToast.show(context, "无法启动 ${mapAppName(pkg)}", Toast.LENGTH_SHORT)
             return
         }
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         runCatching { context.startActivity(i) }
-            .onFailure { Toast.makeText(context, "无法启动 ${mapAppName(pkg)}", Toast.LENGTH_SHORT).show() }
+            .onFailure { NuiToast.show(context, "无法启动 ${mapAppName(pkg)}", Toast.LENGTH_SHORT) }
     }
 
     private fun installedApp(pkg: String): Boolean =
@@ -293,7 +295,7 @@ class NavHost(
                         followUpPending = false // 不弹子对话框，直接恢复浮窗
                         prefs.edit { remove(b.key) }
                         bind(b)
-                        Toast.makeText(context, "已清除坐标", Toast.LENGTH_SHORT).show()
+                        NuiToast.show(context, "已清除坐标", Toast.LENGTH_SHORT)
                     }
                 }
             }.create()
@@ -334,11 +336,11 @@ class NavHost(
                 val lat = etLat.text.toString().trim().toDoubleOrNull()
                 val lon = etLon.text.toString().trim().toDoubleOrNull()
                 if (lat == null || lon == null) {
-                    Toast.makeText(context, "经纬度格式错误", Toast.LENGTH_SHORT).show()
+                    NuiToast.show(context, "经纬度格式错误", Toast.LENGTH_SHORT)
                     return@setPositiveButton
                 }
                 prefs.edit { putString(b.key, "$name\n$lat\n$lon") }
-                Toast.makeText(context, "已保存，点击将一键导航", Toast.LENGTH_SHORT).show()
+                NuiToast.show(context, "已保存，点击将一键导航", Toast.LENGTH_SHORT)
                 bind(b)
             }
             .setNegativeButton("取消", null)
@@ -352,7 +354,7 @@ class NavHost(
         if (installedApp(APP_AMAP)) apps.add(APP_AMAP)
         if (installedApp(APP_BAIDU)) apps.add(APP_BAIDU)
         if (apps.isEmpty()) {
-            Toast.makeText(context, "未安装高德或百度地图", Toast.LENGTH_LONG).show()
+            NuiToast.show(context, "未安装高德或百度地图", Toast.LENGTH_LONG)
             return
         }
         val labels = apps.map { mapAppName(it) }.toTypedArray()
@@ -361,7 +363,7 @@ class NavHost(
             .setTitle("导航地图")
             .setItems(labels) { _, which ->
                 prefs.edit { putString(KEY_APP, apps[which]) }
-                Toast.makeText(context, "已切换为 ${labels[which]}", Toast.LENGTH_SHORT).show()
+                NuiToast.show(context, "已切换为 ${labels[which]}", Toast.LENGTH_SHORT)
             }.create()
         d.setOnDismissListener { onShowFloat?.invoke() }
         d.show()

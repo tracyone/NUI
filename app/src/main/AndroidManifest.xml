@@ -2,18 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- 列出已安装应用（车机桌面侧载应用，非 Play 上架） -->
     <uses-permission
         android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
-    <!-- 地图瓦片联网 -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- 悬浮窗：地图调整模式时用 overlay 覆盖 mapPanel 接收拖动/缩放手势
-         （高德浮窗 closemap 后仍拦截触摸，需 NUI 自己的 overlay 在其之上） -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <!-- 后续定位权限占位 -->
-    <!-- <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" /> -->
 
     <application
         android:allowBackup="false"
@@ -25,7 +19,6 @@
         android:theme="@style/Theme.NUI"
         tools:targetApi="34">
 
-        <!-- 桌面主页（Launcher HOME） -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -43,15 +36,13 @@
             </intent-filter>
         </activity>
 
-        <!-- 应用列表页 -->
         <activity
             android:name=".AppListActivity"
+            android:theme="@style/Theme.NUI.Transparent"
             android:exported="false"
             android:configChanges="orientation|screenSize|keyboardHidden"
-            android:screenOrientation="landscape"
-            android:theme="@style/Theme.NUI" />
+            android:screenOrientation="landscape" />
 
-        <!-- 通知监听服务：作为 MediaSessionManager 读取媒体会话的权限载体 -->
         <service
             android:name=".music.MusicListenerService"
             android:exported="false"

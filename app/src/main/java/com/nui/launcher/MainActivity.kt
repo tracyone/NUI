@@ -1,17 +1,20 @@
 package com.nui.launcher
 
-import android.app.AlertDialog
 import android.content.Intent
-import android.util.Log
 import android.os.Bundle
-import android.provider.Settings
+import android.util.Log
+import android.view.LayoutInflater
+import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.ImageButton
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
+import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import androidx.viewpager2.widget.ViewPager2
+import com.google.android.material.card.MaterialCardView
 import com.nui.launcher.databinding.ActivityMainBinding
 import com.nui.launcher.map.MapHost
 import com.nui.launcher.map.MapPickerDialog
@@ -19,16 +22,6 @@ import com.nui.launcher.map.MapSources
 import com.nui.launcher.music.MusicHost
 import com.nui.launcher.nav.NavHost
 
-/**
- * 桌面主页（Launcher / HOME）。
- *
- * 布局：左侧 Dock 栏 + 中间悬浮地图区域 + 右侧时钟/信息栏。
- *
- * Dock 栏：
- * - 顶部：用户自定义应用快捷方式（点加号添加，长按移除）
- * - 加号按钮：弹出应用选择器添加快捷方式
- * - 最下：应用列表入口
- */
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
@@ -38,168 +31,141 @@ class MainActivity : AppCompatActivity() {
     private lateinit var wallpaper: WallpaperController
     private val mapSources by lazy { MapSources.build(this) }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        applyImmersive()
-        binding = ActivityMainBinding.inflate(layoutInflater)
-        setContentView(binding.root)
+    // Page0 (desktop) 里的 view 引用
+    private var desktopMapPanel: MaterialCardView? = null
+    private var desktopMapContainer: android.widget.FrameLayout? = null
+    private var desktopRightPanel: LinearLayout? = null
+    private var desktopBtnSwitchMap: ImageButton? = null
+    private var desktopMusicContainer: android.widget.FrameLayout? = null
+    private var desktopBtnNavHome: View? = null
+    private var desktopBtnNavCompany: View? = null
+    private var page0Ready = false
+    private var appGridLoaded = false
 
-        wallpaper = WallpaperController(this, binding.root)
-        wallpaper.applyOnStart()
-        setupDock()
-        setupMap()
-        setupNav()
-        setupMusic()
-        setupWallpaper()
-        // 初始同步一次右侧面板位置
-        binding.root.post { syncRightPanel() }
+    private inner class PagerAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+        override fun getItemCount() = 2
+        override fun getItemViewType(position: Int) = position
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+            val inflater = LayoutInflater.from(parent.context)
+            val v = when (viewType) {
+                0 -> inflater.inflate(R.layout.page_desktop, parent, false)
+                else -> inflater.inflate(R.layout.page_app_grid, parent, false)
+            }
+            return object : RecyclerView.ViewHolder(v) {}
+        }
+        override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+            when (position) {
+                0 -> bindDesktop(holder.itemView)
+                1 -> bindAppGrid(holder.itemView)
+            }
+        }
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        wallpaper.onActivityResult(requestCode, resultCode, data)
+    private fun bindDesktop(v: View) {
+        desktopMapPanel = v.findViewById(R.id.mapPanel)
+        desktopMapContainer = v.findViewById(R.id.mapContainer)
+        desktopRightPanel = v.findViewById(R.id.rightPanel)
+        desktopBtnSwitchMap = v.findViewById(R.id.btnSwitchMap)
+        desktopMusicContainer = v.findViewById(R.id.musicContainer)
+        desktopBtnNavHome = v.findViewById(R.id.btnNavHome)
+        desktopBtnNavCompany = v.findViewById(R.id.btnNavCompany)
+        if (!page0Ready) {
+            page0Ready = true
+            v.post { setupMap(); setupNav(); setupMusic(); setupWallpaper() }
+        }
+    }
+
+    private fun bindAppGrid(v: View) {
+        loadAppGrid(v.findViewById(R.id.appGridMain))
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+        applyImmersive()
+
+        binding.viewPager.adapter = PagerAdapter()
+        binding.viewPager.isUserInputEnabled = true
+        binding.viewPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
+            override fun onPageSelected(position: Int) {
+                updatePageIndicator(position)
+                if (::mapHost.isInitialized) {
+                    if (position == 0) mapHost.showFloat() else mapHost.closeFloat()
+                }
+            }
+        })
+
+        setupDock()
+        setupPageIndicator()
     }
 
     override fun onResume() {
         super.onResume()
-        mapHost.onResume()
-        musicHost.refresh()
+        if (::mapHost.isInitialized) {
+            if (binding.viewPager.currentItem == 0) mapHost.showFloat()
+            mapHost.onResume()
+        }
+        if (::musicHost.isInitialized) musicHost.refresh()
     }
 
     override fun onPause() {
         super.onPause()
-        mapHost.onPause()
+        if (::mapHost.isInitialized) mapHost.onPause()
     }
 
     override fun onDestroy() {
-        mapHost.onDestroy()
-        musicHost.onDestroy()
+        if (::mapHost.isInitialized) mapHost.onDestroy()
+        if (::musicHost.isInitialized) musicHost.onDestroy()
         super.onDestroy()
-    }
-
-    /**
-     * 同步右侧面板位置：紧跟地图右边 + 间距，宽度默认 240dp。
-     * 地图缩放挤占右侧空间时：
-     * - 可用空间 >= 面板宽：正常显示 240dp
-     * - 可用空间 >= 半宽：缩小面板宽度但仍显示
-     * - 可用空间 < 半宽：面板隐藏（GONE），地图可铺满到屏幕右边
-     * 地图调整大小时由 MapHost.onGeometryChanged 回调触发。
-     */
-    private fun syncRightPanel() {
-        val map = binding.mapPanel
-        val rp = binding.rightPanel
-        val gap = (12 * resources.displayMetrics.density).toInt()
-        val panelWidth = (240 * resources.displayMetrics.density).toInt()
-        val rightMargin = (20 * resources.displayMetrics.density).toInt()
-        val sw = resources.displayMetrics.widthPixels
-        val mapLp = map.layoutParams as android.widget.FrameLayout.LayoutParams
-        val mapRight = mapLp.leftMargin + map.width
-        val lp = rp.layoutParams as android.widget.FrameLayout.LayoutParams
-        val availForPanel = sw - rightMargin - mapRight - gap
-        when {
-            availForPanel >= panelWidth -> {
-                rp.visibility = android.view.View.VISIBLE
-                lp.leftMargin = mapRight + gap
-                lp.width = panelWidth
-            }
-            availForPanel >= panelWidth / 2 -> {
-                // 部分挤占：缩小面板宽度但仍显示
-                rp.visibility = android.view.View.VISIBLE
-                lp.leftMargin = mapRight + gap
-                lp.width = availForPanel
-            }
-            else -> {
-                // 面板消失，地图可铺满
-                rp.visibility = android.view.View.GONE
-            }
-        }
-        rp.layoutParams = lp
     }
 
     private fun setupDock() {
         binding.dockApps.setOnClickListener {
-            startActivity(Intent(this, AppListActivity::class.java))
+            if (binding.viewPager.currentItem == 0) binding.viewPager.currentItem = 1
+            else binding.viewPager.currentItem = 0
         }
-        binding.dockApps.setOnLongClickListener {
-            Log.d("NUI", "dockApps long press")
-            mapHost.toggleAdjust()
+        binding.dockBar.isClickable = true
+        binding.dockBar.setOnLongClickListener {
+            if (binding.viewPager.currentItem == 0 && ::mapHost.isInitialized) {
+                mapHost.toggleAdjust()
+            }
             true
         }
-        renderDock()
     }
 
-    /** 渲染 dock 槽位：空槽显示加号，已填显示应用图标 */
-    private fun renderDock() {
-        binding.dockItems.removeAllViews()
-        val dp = resources.displayMetrics.density
-        val size = (64 * dp).toInt()
-        val gap = (8 * dp).toInt()
-        val bg = ContextCompat.getDrawable(this, R.drawable.bg_dock_item)
-        val addIcon = ContextCompat.getDrawable(this, R.drawable.ic_dock_add)
-        val apps = DockConfig.loadApps(this)
-        for (i in 0 until DockConfig.SLOT_COUNT) {
-            val app = apps.getOrNull(i)
-            val btn = ImageButton(this).apply {
-                scaleType = ImageView.ScaleType.FIT_CENTER
-                background = bg
-                if (app != null) {
-                    setImageDrawable(app.icon)
-                    setOnClickListener { runCatching { startActivity(app.launchIntent) } }
-                    setOnLongClickListener { confirmRemove(i, app); true }
-                } else {
-                    setImageDrawable(addIcon)
-                    setOnClickListener { openPicker(i) }
-                }
+    private fun setupPageIndicator() {
+        val dots = arrayOfNulls<View>(2)
+        for (i in 0..1) {
+            val dot = View(this)
+            val size = (8 * resources.displayMetrics.density).toInt()
+            val lp = LinearLayout.LayoutParams(size, size).apply {
+                setMargins(if (i == 0) 0 else (12 * resources.displayMetrics.density).toInt(), 0, 0, 0)
             }
-            binding.dockItems.addView(
-                btn,
-                LinearLayout.LayoutParams(size, size).apply { topMargin = gap },
-            )
+            dot.layoutParams = lp
+            dot.background = getDrawable(R.drawable.bg_dot_indicator)
+            dot.alpha = if (i == 0) 1f else 0.35f
+            dots[i] = dot
+            binding.pageIndicator.addView(dot)
         }
+        binding.pageIndicator.tag = dots
     }
 
-    /** 点空槽加号：弹应用选择器填入指定槽位 */
-    private fun openPicker(slot: Int) {
-        mapHost.closeFloat()
-        DockPickerDialog.show(
-            context = this,
-            exclude = DockConfig.filledPackages(this),
-            onPick = { app ->
-                DockConfig.setSlot(this, slot, app.packageName)
-                renderDock()
-                Toast.makeText(this, "已添加 ${app.label}", Toast.LENGTH_SHORT).show()
-            },
-            onDismiss = { mapHost.showFloat() },
-        )
-    }
-
-    /** 长按已填槽：确认移除（变回加号即可重新添加） */
-    private fun confirmRemove(slot: Int, app: AppModel) {
-        mapHost.closeFloat()
-        val d = AlertDialog.Builder(this)
-            .setTitle("从 Dock 移除")
-            .setMessage("移除 ${app.label}?")
-            .setPositiveButton("移除") { _, _ ->
-                DockConfig.setSlot(this, slot, null)
-                renderDock()
-                Toast.makeText(this, "已移除", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("取消", null)
-            .create()
-        d.setOnDismissListener { mapHost.showFloat() }
-        d.show()
+    @Suppress("UNCHECKED_CAST")
+    private fun updatePageIndicator(position: Int) {
+        val dots = binding.pageIndicator.tag as Array<View>
+        for (i in dots.indices) dots[i].alpha = if (i == position) 1f else 0.35f
     }
 
     private fun setupMap() {
-        mapHost = MapHost(this, binding.mapContainer, binding.mapPanel)
-        // 地图几何变化时同步右侧面板位置
-        mapHost.onGeometryChanged = { binding.root.post { syncRightPanel() } }
-        mapHost.start(mapSources, autoLaunch = true)
-        binding.dockBar.isClickable = true
-        binding.dockBar.setOnLongClickListener { Log.d("NUI", "dock long press"); mapHost.toggleAdjust(); true }
+        val mapPanel = desktopMapPanel ?: return
+        val mapContainer = desktopMapContainer ?: return
+        val rightPanel = desktopRightPanel ?: return
+        val btnSwitchMap = desktopBtnSwitchMap ?: return
 
-        binding.btnSwitchMap.setOnClickListener {
+        mapHost = MapHost(this, mapContainer, mapPanel)
+        mapHost.onGeometryChanged = { binding.root.post { /* sync handled by MapHost */ } }
+        mapHost.onPickMap = {
             mapHost.closeFloat()
             MapPickerDialog.show(
                 context = this,
@@ -207,7 +173,22 @@ class MainActivity : AppCompatActivity() {
                 currentId = mapHost.currentId,
                 onPick = { source ->
                     mapHost.select(source, autoLaunch = true)
-                    Toast.makeText(this, "已切换为 ${source.label}", Toast.LENGTH_SHORT).show()
+                    NuiToast.show(this, "已切换为 ${source.label}", Toast.LENGTH_SHORT)
+                },
+                onDismiss = { mapHost.showFloat() },
+            )
+        }
+        mapHost.start(mapSources, autoLaunch = true)
+
+        btnSwitchMap.setOnClickListener {
+            mapHost.closeFloat()
+            MapPickerDialog.show(
+                context = this,
+                sources = mapSources,
+                currentId = mapHost.currentId,
+                onPick = { source ->
+                    mapHost.select(source, autoLaunch = true)
+                    NuiToast.show(this, "已切换为 ${source.label}", Toast.LENGTH_SHORT)
                 },
                 onDismiss = { mapHost.showFloat() },
             )
@@ -215,37 +196,62 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupNav() {
-        navHost = NavHost(this, binding.btnNavHome, binding.btnNavCompany)
-        // 弹导航编辑/切换对话框前隐藏悬浮地图，关闭后恢复（同 MusicHost 模式）
+        navHost = NavHost(this, desktopBtnNavHome!!, desktopBtnNavCompany!!)
         navHost.onHideFloat = { mapHost.closeFloat() }
         navHost.onShowFloat = { mapHost.showFloat() }
         navHost.start()
     }
 
     private fun setupMusic() {
-        musicHost = MusicHost(this, binding.musicContainer)
-        // 弹音乐选择对话框前隐藏悬浮地图，关闭后恢复
+        musicHost = MusicHost(this, desktopMusicContainer!!)
         musicHost.onHideFloat = { mapHost.closeFloat() }
         musicHost.onShowFloat = { mapHost.showFloat() }
         musicHost.start()
     }
 
-    /** 长按时钟区 → 设置壁纸菜单 */
     private fun setupWallpaper() {
-        // 弹壁纸菜单/选图前隐藏悬浮地图，关闭后恢复（同 NavHost/MusicHost 模式）
+        wallpaper = WallpaperController(this, binding.root)
         wallpaper.onHideFloat = { mapHost.closeFloat() }
         wallpaper.onShowFloat = { mapHost.showFloat() }
-        // 时钟/日期可长按触发壁纸设置
-        binding.clockTime.setOnLongClickListener { wallpaper.showMenu(); true }
-        binding.clockDate.setOnLongClickListener { wallpaper.showMenu(); true }
-        // 右侧面板空白区也可长按
-        binding.rightPanel.setOnLongClickListener { wallpaper.showMenu(); true }
+        val rightPanel = desktopRightPanel ?: return
+        val clockArea = rightPanel.getChildAt(1) as? LinearLayout
+        clockArea?.setOnLongClickListener { wallpaper.showMenu(); true }
+    }
+
+    private fun loadAppGrid(grid: RecyclerView) {
+        if (appGridLoaded) return
+        appGridLoaded = true
+        grid.layoutManager = GridLayoutManager(this, 6)
+        grid.setHasFixedSize(true)
+        grid.itemAnimator = null
+
+        Thread {
+            val pm = packageManager
+            val main = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+            val resolved = pm.queryIntentActivities(main, 0)
+            val fallbackIcon = pm.defaultActivityIcon
+            val apps = resolved.map { ri ->
+                val pkg = ri.activityInfo.packageName
+                AppModel(
+                    label = ri.loadLabel(pm).toString(),
+                    packageName = pkg,
+                    icon = IconUtils.getIconWithFallback(pm, pkg, fallbackIcon),
+                    launchIntent = pm.getLaunchIntentForPackage(pkg)
+                        ?.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                        ?: Intent(Intent.ACTION_MAIN).setPackage(pkg),
+                )
+            }.sortedBy { it.label.lowercase() }
+            runOnUiThread {
+                grid.adapter = AppListAdapter(
+                    context = this,
+                    apps = apps,
+                    onClick = { app -> startActivity(app.launchIntent) },
+                )
+            }
+        }.start()
     }
 
     private fun applyImmersive() {
-        @Suppress("DEPRECATION")
-        val flags = (WindowManager.LayoutParams.FLAG_FULLSCREEN
-            or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
-        window.addFlags(flags)
+        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
     }
 }
