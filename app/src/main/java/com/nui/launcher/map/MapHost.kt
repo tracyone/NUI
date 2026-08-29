@@ -47,6 +47,11 @@ class MapHost(
     /** 调整模式下点击"选择地图"按钮回调。 */
     var onPickMap: (() -> Unit)? = null
 ) {
+    /** 浮窗几何缓存：第一次 layout 完后固定下来，后续 showFloat 永远用它。 */
+    private var cachedX = -1
+    private var cachedY = -1
+    private var cachedW = -1
+    private var cachedH = -1
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var pendingEnterAdjust: Runnable? = null
     private var mapView: MapView? = null
@@ -76,6 +81,19 @@ class MapHost(
     }
 
     val currentId: String? get() = current?.id
+
+    /** 预热浮窗几何缓存：等 mapPanel layout 完取一次坐标 */
+    private fun primeGeometryCache() {
+        mapPanel.post {
+            val loc = IntArray(2)
+            mapPanel.getLocationOnScreen(loc)
+            cachedX = loc[0]
+            cachedY = loc[1]
+            cachedW = cachedX + mapPanel.width
+            cachedH = cachedY + mapPanel.height
+            Log.d(TAG, "float geo cached: x=$cachedX y=$cachedY w=$cachedW h=$cachedH")
+        }
+    }
 
     fun start(sources: List<MapSource>, autoLaunch: Boolean = false) {
         val savedId = prefs.getString(KEY_SOURCE, MapSources.EMBEDDED_OSM_ID)
@@ -193,18 +211,23 @@ class MapHost(
 
     private fun renderFloat(source: MapSource) {
         if (source.floatShowAction == null) return
+        primeGeometryCache()
         showFloat()
     }
 
     private fun sendFloatBroadcast(action: String?) {
         if (action == null) return
-        val loc = IntArray(2)
-        container.getLocationOnScreen(loc)
-        val x = loc[0]
-        val y = loc[1]
-        val w = x + container.width
-        val h = y + container.height
-        if (container.width <= 0 || container.height <= 0) return
+        // 优先用缓存
+        var x = cachedX; var y = cachedY; var w = cachedW; var h = cachedH
+        if (w <= 0) {
+            // 第一次：layout 完再取坐标并缓存
+            val loc = IntArray(2)
+            container.getLocationOnScreen(loc)
+            x = loc[0]; y = loc[1]
+            w = x + container.width; h = y + container.height
+            if (container.width <= 0 || container.height <= 0) return
+            cachedX = x; cachedY = y; cachedW = w; cachedH = h
+        }
         val intent = Intent(action).apply {
             putExtra("x", x)
             putExtra("y", y)
