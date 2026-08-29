@@ -47,13 +47,6 @@ class MapHost(
     /** 调整模式下点击"选择地图"按钮回调。 */
     var onPickMap: (() -> Unit)? = null
 ) {
-    /** 浮窗几何缓存：第一次 layout 完后固定下来，后续 showFloat 永远用它。 */
-    private var cachedX = -1
-    private var cachedY = -1
-    private var cachedW = -1
-    private var cachedH = -1
-    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
-    private var pendingEnterAdjust: Runnable? = null
     private var mapView: MapView? = null
     private var current: MapSource? = null
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -82,25 +75,25 @@ class MapHost(
 
     val currentId: String? get() = current?.id
 
-    /** 预热浮窗几何缓存：等 mapPanel layout 完取一次坐标 */
-    private fun primeGeometryCache() {
-        mapPanel.post {
-            val loc = IntArray(2)
-            mapPanel.getLocationOnScreen(loc)
-            cachedX = loc[0]
-            cachedY = loc[1]
-            cachedW = cachedX + mapPanel.width
-            cachedH = cachedY + mapPanel.height
-            Log.d(TAG, "float geo cached: x=$cachedX y=$cachedY w=$cachedW h=$cachedH")
-        }
-    }
+    /** 浮窗几何缓存：renderFloat 时取一次，之后永远用。
+     *  ViewPager2 翻页后 Page 0 会 detach/attach，getLocationOnScreen 会返回错误值。 */
+    private var cachedX = -1
+    private var cachedY = -1
+    private var cachedW = -1   // 边界格式（x + width）
+    private var cachedH = -1   // 边界格式（y + height）
 
     fun start(sources: List<MapSource>, autoLaunch: Boolean = false) {
-        val savedId = prefs.getString(KEY_SOURCE, MapSources.EMBEDDED_OSM_ID)
-        val src = sources.firstOrNull { it.id == savedId }
-            ?: sources.firstOrNull { it.type == MapSource.Type.EMBEDDED_OSM }
+        // 优先高德浮窗；没有偏好时默认 EXTERNAL_FLOAT
+        val defaultSrc = sources.firstOrNull { it.type == MapSource.Type.EXTERNAL_FLOAT }
             ?: sources.firstOrNull()
+        val savedId = prefs.getString(KEY_SOURCE, null)
+        val src = if (savedId != null) {
+            sources.firstOrNull { it.id == savedId } ?: defaultSrc
+        } else {
+            defaultSrc
+        }
         src?.let {
+            prefs.edit { putString(KEY_SOURCE, it.id) }
             render(it)
             if (autoLaunch) launchAndReturnHome()
         }
@@ -211,16 +204,25 @@ class MapHost(
 
     private fun renderFloat(source: MapSource) {
         if (source.floatShowAction == null) return
-        primeGeometryCache()
-        showFloat()
+        container.post {
+            primeCache()
+            sendFloatBroadcast(source.floatShowAction)
+        }
+    }
+
+    private fun primeCache() {
+        val loc = IntArray(2)
+        mapPanel.getLocationOnScreen(loc)
+        cachedX = loc[0]
+        cachedY = loc[1]
+        cachedW = cachedX + mapPanel.width
+        cachedH = cachedY + mapPanel.height
     }
 
     private fun sendFloatBroadcast(action: String?) {
         if (action == null) return
-        // 优先用缓存
         var x = cachedX; var y = cachedY; var w = cachedW; var h = cachedH
         if (w <= 0) {
-            // 第一次：layout 完再取坐标并缓存
             val loc = IntArray(2)
             container.getLocationOnScreen(loc)
             x = loc[0]; y = loc[1]
@@ -228,6 +230,7 @@ class MapHost(
             if (container.width <= 0 || container.height <= 0) return
             cachedX = x; cachedY = y; cachedW = w; cachedH = h
         }
+        Log.d(TAG, "sendFloat: x=$x y=$y w(border)=$w h(border)=$h (cached: $cachedX,$cachedY,$cachedW,$cachedH)")
         val intent = Intent(action).apply {
             putExtra("x", x)
             putExtra("y", y)
@@ -244,23 +247,7 @@ class MapHost(
 
     fun showFloat() {
         current?.takeIf { it.type == MapSource.Type.EXTERNAL_FLOAT }
-            ?.let { src ->
-                // ViewPager2 翻页后 Page 0 的 view 可能刚 attach，
-                // 必须等 layout 完再取坐标，否则 getLocationOnScreen 返回 (0,0)
-                container.post {
-                    if (container.width > 0 && container.height > 0) {
-                        sendFloatBroadcast(src.floatShowAction)
-                    } else {
-                        container.viewTreeObserver.addOnGlobalLayoutListener(object :
-                            android.view.ViewTreeObserver.OnGlobalLayoutListener {
-                            override fun onGlobalLayout() {
-                                container.viewTreeObserver.removeOnGlobalLayoutListener(this)
-                                sendFloatBroadcast(src.floatShowAction)
-                            }
-                        })
-                    }
-                }
-            }
+            ?.let { container.post { sendFloatBroadcast(it.floatShowAction) } }
     }
 
     fun onResume() {
@@ -269,8 +256,6 @@ class MapHost(
     }
 
     fun onPause() {
-        pendingEnterAdjust?.let { mainHandler.removeCallbacks(it); pendingEnterAdjust = null }
-        if (adjustMode) exitAdjust()
         mapView?.onPause()
         closeFloat()
     }
@@ -319,14 +304,7 @@ class MapHost(
         startWidth = mapPanel.width
         startHeight = mapPanel.height
 
-        // closeFloat 是异步广播，必须等高德浮窗真消失后再加 overlay，
-        // 否则 overlay 会被还没关闭的浮窗完全盖住
-        pendingEnterAdjust?.let { mainHandler.removeCallbacks(it) }
-        val runnable = Runnable {
-            if (!adjustMode) return@Runnable // 期间用户可能已 exitAdjust
-            pendingEnterAdjust = null
-
-            val overlay = FrameLayout(context).apply {
+        val overlay = FrameLayout(context).apply {
                 setBackgroundColor(0x332196F3.toInt()) // 极淡蓝底，仅提示调整区域
                 // 左上角透明点击热区（与原 btnSwitchMap 位置一致：40dp 图标 + 10dp margin）
                 addView(View(context).apply {
@@ -378,13 +356,10 @@ class MapHost(
                 width = startWidth
                 height = startHeight
             }
-            runCatching { wm.addView(overlay, lp) }
-                .onFailure { Log.e(TAG, "addView overlay failed", it); adjustMode = false; return@Runnable }
-            adjustOverlay = overlay
-            NuiToast.show(context, "从右/下边缘或右下角拖，放手完成", Toast.LENGTH_LONG)
-        }
-        pendingEnterAdjust = runnable
-        mainHandler.postDelayed(runnable, 500L)
+        runCatching { wm.addView(overlay, lp) }
+            .onFailure { Log.e(TAG, "addView overlay failed", it); adjustMode = false; return }
+        adjustOverlay = overlay
+        NuiToast.show(context, "从右/下边缘或右下角拖，放手完成", Toast.LENGTH_LONG)
     }
 
     private val adjustTouch = View.OnTouchListener { _, e ->
@@ -430,7 +405,6 @@ class MapHost(
     }
 
         fun exitAdjust() {
-        pendingEnterAdjust?.let { mainHandler.removeCallbacks(it); pendingEnterAdjust = null }
         adjustMode = false
         adjustOverlay?.let { runCatching { wm.removeView(it) } }
         adjustOverlay = null
@@ -491,6 +465,7 @@ class MapHost(
     }
 
     private fun saveGeometry() {
+        primeCache()  // 刷新缓存，否则 showFloat 会用旧坐标
         val lp = mapPanel.layoutParams as FrameLayout.LayoutParams
         prefs.edit { putString(KEY_GEOMETRY, "${lp.leftMargin},${lp.topMargin},${lp.width},${lp.height}") }
     }

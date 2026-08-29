@@ -71,7 +71,7 @@ class MainActivity : AppCompatActivity() {
         desktopBtnNavCompany = v.findViewById(R.id.btnNavCompany)
         if (!page0Ready) {
             page0Ready = true
-            v.post { setupMap(); setupNav(); setupMusic(); setupWallpaper() }
+            v.post { setupMap(); setupNav(); setupMusic(); setupWallpaper(); syncRightPanel() }
         }
     }
 
@@ -124,6 +124,12 @@ class MainActivity : AppCompatActivity() {
         binding.dockApps.setOnClickListener {
             if (binding.viewPager.currentItem == 0) binding.viewPager.currentItem = 1
             else binding.viewPager.currentItem = 0
+        }
+        binding.dockApps.setOnLongClickListener {
+            if (binding.viewPager.currentItem == 0 && ::mapHost.isInitialized) {
+                mapHost.toggleAdjust()
+            }
+            true
         }
         binding.dockBar.isClickable = true
         binding.dockBar.setOnLongClickListener {
@@ -228,7 +234,7 @@ class MainActivity : AppCompatActivity() {
         val btnSwitchMap = desktopBtnSwitchMap ?: return
 
         mapHost = MapHost(this, mapContainer, mapPanel)
-        mapHost.onGeometryChanged = { binding.root.post { /* sync handled by MapHost */ } }
+        mapHost.onGeometryChanged = { binding.root.post { syncRightPanel() } }
         mapHost.onPickMap = {
             mapHost.closeFloat()
             MapPickerDialog.show(
@@ -313,6 +319,36 @@ class MainActivity : AppCompatActivity() {
                 )
             }
         }.start()
+    }
+
+    /** 同步右侧面板位置（Page 0 的 mapPanel 右边 + gap） */
+    private fun syncRightPanel() {
+        val rp = desktopRightPanel ?: return
+        val map = desktopMapPanel ?: return
+        val gap = (12 * resources.displayMetrics.density).toInt()
+        val panelWidth = (240 * resources.displayMetrics.density).toInt()
+        val rightMargin = (20 * resources.displayMetrics.density).toInt()
+        val sw = resources.displayMetrics.widthPixels
+        val mapLp = map.layoutParams as android.widget.FrameLayout.LayoutParams
+        val mapRight = mapLp.leftMargin + map.width
+        val lp = rp.layoutParams as android.widget.FrameLayout.LayoutParams
+        val availForPanel = sw - rightMargin - mapRight - gap
+        when {
+            availForPanel >= panelWidth -> {
+                rp.visibility = android.view.View.VISIBLE
+                lp.leftMargin = mapRight + gap
+                lp.width = panelWidth
+            }
+            availForPanel >= panelWidth / 2 -> {
+                rp.visibility = android.view.View.VISIBLE
+                lp.leftMargin = mapRight + gap
+                lp.width = availForPanel
+            }
+            else -> {
+                rp.visibility = android.view.View.GONE
+            }
+        }
+        rp.layoutParams = lp
     }
 
     private fun applyImmersive() {
