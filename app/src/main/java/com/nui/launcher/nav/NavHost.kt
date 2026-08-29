@@ -128,7 +128,7 @@ class NavHost(
     }
 
     /** 一键回家/公司：用 navi2SpecialDest?dest=home/crop URI（用户真机验证成功）。
-     *  高德使用其已保存的家/公司地址自动规划路线并倒计时导航。
+     *  发起导航后延迟 4s 自动返回 NUI，高德浮窗恢复显示导航画面。
      *  需加 CATEGORY_DEFAULT，否则高德不响应。百度不支持，直接打开主界面。 */
     private fun naviSpecial(dest: String) {
         val app = preferredApp()
@@ -147,21 +147,37 @@ class NavHost(
         }
         if (runCatching { context.startActivity(i) }.isSuccess) {
             Toast.makeText(context, "已发起$label", Toast.LENGTH_SHORT).show()
+            returnToNui(4000L)
         } else {
-            // 兜底：启动高德后再试一次
+            // 兜底：启动高德后再试一次，成功后同样返回 NUI
             launchApp(APP_AMAP)
             handler.postDelayed({
-                runCatching { context.startActivity(i) }
-                    .onFailure {
-                        val mapUri = "androidauto://rootmap?sourceApplication=NUI"
-                        val mapI = Intent(Intent.ACTION_VIEW, Uri.parse(mapUri))
-                            .setPackage(APP_AMAP)
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        runCatching { context.startActivity(mapI) }
-                        Toast.makeText(context, "${label}失败，请在高德中手动发起", Toast.LENGTH_LONG).show()
-                    }
+                if (runCatching { context.startActivity(i) }.isSuccess) {
+                    Toast.makeText(context, "已发起$label", Toast.LENGTH_SHORT).show()
+                    returnToNui(4000L)
+                } else {
+                    val mapUri = "androidauto://rootmap?sourceApplication=NUI"
+                    val mapI = Intent(Intent.ACTION_VIEW, Uri.parse(mapUri))
+                        .setPackage(APP_AMAP)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    runCatching { context.startActivity(mapI) }
+                    Toast.makeText(context, "${label}失败，请在高德中手动发起", Toast.LENGTH_LONG).show()
+                }
             }, 3000L)
         }
+    }
+
+    /** 发起导航后延迟返回 NUI，并恢复高德浮窗（用户可在悬浮窗看到导航画面）。 */
+    private fun returnToNui(delayMs: Long) {
+        handler.postDelayed({
+            val back = Intent().apply {
+                setClassName(context, "com.nui.launcher.MainActivity")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+            }
+            runCatching { context.startActivity(back) }
+            // 回 NUI 后恢复浮窗，高德在后台继续导航
+            handler.postDelayed({ onShowFloat?.invoke() }, 500L)
+        }, delayMs)
     }
 
     /** 坐标导航：高德首选 10007 广播（真机验证成功），URI 方式在车机版上无效仅作兜底。百度用 URI。 */
@@ -186,13 +202,14 @@ class NavHost(
     }
 
     /** 高德车机版坐标导航：10007 广播为主（真机验证成功→路线规划+5s倒计时自动导航），
-     *  URI 方式在车机版上实测无效仅作兜底，最终打开主图。 */
+     *  发起后延迟返回 NUI 恢复浮窗。URI 方式仅兜底。 */
     private fun startAmapNav(t: NavTarget) {
         // 首选：10007 直接导航广播（需高德在前台，先启动预热）
         launchApp(APP_AMAP)
         handler.postDelayed({
             if (sendNaviBroadcast(t)) {
                 Toast.makeText(context, "导航至${t.label}", Toast.LENGTH_SHORT).show()
+                returnToNui(5000L)
             } else {
                 // 兜底①：androidauto://navi URI（车机版实测无效，保留兜底）
                 val naviUri = "androidauto://navi?sourceApplication=NUI" +
