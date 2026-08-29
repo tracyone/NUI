@@ -28,6 +28,17 @@
         android:layout_marginStart="20dp"
         android:background="@drawable/bg_dock">
 
+        <TextClock
+            android:id="@+id/dockClock"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:format24Hour="HH:mm"
+            android:format12Hour="HH:mm"
+            android:textColor="@color/text_primary"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+
         <ScrollView
             android:layout_width="match_parent"
             android:layout_height="0dp"

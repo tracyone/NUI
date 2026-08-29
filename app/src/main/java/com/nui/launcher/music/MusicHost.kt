@@ -334,7 +334,7 @@ class MusicHost(
     private fun createLyricFloat() {
         val root = FrameLayout(context).apply {
             background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0x80000000.toInt())
+                setColor(0x0D000000)
                 cornerRadius = dp(14).toFloat()
             }
         }

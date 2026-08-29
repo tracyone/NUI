@@ -5,8 +5,7 @@
     android:layout_height="wrap_content"
     android:orientation="vertical"
     android:gravity="center"
-    android:padding="12dp"
-    android:background="@drawable/bg_app_grid_item">
+    android:padding="12dp">
 
     <ImageView
         android:id="@+id/appIcon"
@@ -17,9 +16,14 @@
 
     <TextView
         android:id="@+id/appLabel"
-        android:layout_width="match_parent"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
+        android:background="@drawable/bg_app_label"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp"
         android:gravity="center"
         android:singleLine="true"
         android:ellipsize="end"

@@ -63,6 +63,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun bindDesktop(v: View) {
         desktopMapPanel = v.findViewById(R.id.mapPanel)
+        desktopMapPanel?.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> syncRightPanel() }
         desktopMapContainer = v.findViewById(R.id.mapContainer)
         desktopRightPanel = v.findViewById(R.id.rightPanel)
         desktopBtnSwitchMap = v.findViewById(R.id.btnSwitchMap)
