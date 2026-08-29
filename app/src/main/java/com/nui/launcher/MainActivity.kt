@@ -132,6 +132,70 @@ class MainActivity : AppCompatActivity() {
             }
             true
         }
+        renderDock()
+    }
+
+    /** 渲染 dock 槽位：空槽显示加号，已填显示应用图标 */
+    private fun renderDock() {
+        binding.dockItems.removeAllViews()
+        val dp = resources.displayMetrics.density
+        val size = (64 * dp).toInt()
+        val gap = (8 * dp).toInt()
+        val bg = androidx.core.content.ContextCompat.getDrawable(this, R.drawable.bg_dock_item)
+        val addIcon = androidx.core.content.ContextCompat.getDrawable(this, R.drawable.ic_dock_add)
+        val apps = DockConfig.loadApps(this)
+        for (i in 0 until DockConfig.SLOT_COUNT) {
+            val app = apps.getOrNull(i)
+            val btn = android.widget.ImageButton(this).apply {
+                scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+                background = bg
+                if (app != null) {
+                    setImageDrawable(app.icon)
+                    setOnClickListener { runCatching { startActivity(app.launchIntent) } }
+                    setOnLongClickListener { confirmRemove(i, app); true }
+                } else {
+                    setImageDrawable(addIcon)
+                    setOnClickListener { openPicker(i) }
+                }
+            }
+            binding.dockItems.addView(
+                btn,
+                LinearLayout.LayoutParams(size, size).apply { topMargin = gap },
+            )
+        }
+    }
+
+    /** 点空槽加号：弹应用选择器填入指定槽位 */
+    private fun openPicker(slot: Int) {
+        if (::mapHost.isInitialized) mapHost.closeFloat()
+        DockPickerDialog.show(
+            context = this,
+            exclude = DockConfig.filledPackages(this),
+            onPick = { app ->
+                DockConfig.setSlot(this, slot, app.packageName)
+                renderDock()
+                NuiToast.show(this, "已添加 ${app.label}", Toast.LENGTH_SHORT)
+            },
+            onDismiss = { if (::mapHost.isInitialized) mapHost.showFloat() },
+        )
+    }
+
+    /** 长按已填槽：确认移除（变回加号即可重新添加） */
+    private fun confirmRemove(slot: Int, app: AppModel): Boolean {
+        if (::mapHost.isInitialized) mapHost.closeFloat()
+        val d = android.app.AlertDialog.Builder(this)
+            .setTitle("从 Dock 移除")
+            .setMessage("移除 ${app.label}?")
+            .setPositiveButton("移除") { _, _ ->
+                DockConfig.setSlot(this, slot, null)
+                renderDock()
+                NuiToast.show(this, "已移除", Toast.LENGTH_SHORT)
+            }
+            .setNegativeButton("取消", null)
+            .create()
+        d.setOnDismissListener { if (::mapHost.isInitialized) mapHost.showFloat() }
+        d.show()
+        return true
     }
 
     private fun setupPageIndicator() {
