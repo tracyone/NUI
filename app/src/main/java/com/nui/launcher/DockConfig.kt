@@ -32,12 +32,14 @@ object DockConfig {
             .edit { putString(KEY, list.joinToString("\n") { it ?: "" }) }
     }
 
-    /** 加载各槽 AppModel，空槽或已卸载返回 null */
+    /** 加载各槽 AppModel，空槽或已卸载返回 null。
+     *  对虚拟特殊包（如 [StockHome.PKG_STOCK_HOME]）直接构造对应 AppModel。 */
     fun loadApps(context: Context): List<AppModel?> {
         val pm = context.packageManager
         val fallback = pm.defaultActivityIcon
         return slots(context).map { pkg ->
             if (pkg == null) return@map null
+            if (pkg == StockHome.PKG_STOCK_HOME) return@map runCatching { StockHome.model(context) }.getOrNull()
             val launch = pm.getLaunchIntentForPackage(pkg) ?: return@map null
             val label = runCatching {
                 pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()

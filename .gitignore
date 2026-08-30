@@ -12,3 +12,6 @@
 *.aab
 # 临时截图
 screenshot.png
+# 构建错误与运行日志
+.kotlin/
+*.log

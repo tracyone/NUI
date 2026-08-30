@@ -178,7 +178,14 @@ class MainActivity : AppCompatActivity() {
                 background = bg
                 if (app != null) {
                     setImageDrawable(app.icon)
-                    setOnClickListener { runCatching { startActivity(app.launchIntent) } }
+                    setOnClickListener {
+                        if (app.packageName == StockHome.PKG_STOCK_HOME) {
+                            val ok = StockHome.launch(this@MainActivity)
+                            if (!ok) NuiToast.show(this@MainActivity, "未找到其他桌面", Toast.LENGTH_SHORT)
+                        } else {
+                            runCatching { startActivity(app.launchIntent) }
+                        }
+                    }
                     setOnLongClickListener { confirmRemove(i, app); true }
                 } else {
                     setImageDrawable(addIcon)

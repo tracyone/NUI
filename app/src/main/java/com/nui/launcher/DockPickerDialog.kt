@@ -20,7 +20,12 @@ object DockPickerDialog {
     ) {
         val pm = context.packageManager
         val main = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val apps = pm.queryIntentActivities(main, 0).mapNotNull { ri ->
+        val apps: MutableList<AppModel> = mutableListOf()
+        // 置顶：虚拟条目 —— "原车桌面"（如果还没加入过）
+        if (StockHome.PKG_STOCK_HOME !in exclude) {
+            runCatching { StockHome.model(context) }.getOrNull()?.let { apps.add(it) }
+        }
+        apps += pm.queryIntentActivities(main, 0).mapNotNull { ri ->
             val pkg = ri.activityInfo.packageName
             val launch = pm.getLaunchIntentForPackage(pkg) ?: return@mapNotNull null
             AppModel(

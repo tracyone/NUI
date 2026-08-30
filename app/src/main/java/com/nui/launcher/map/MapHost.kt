@@ -359,7 +359,10 @@ class MapHost(
                 setOnTouchListener(adjustTouch)
             }
             val lp = WindowManager.LayoutParams().apply {
-                type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                type = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O)
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                else
+                    @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
                 format = PixelFormat.TRANSLUCENT
                 flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 gravity = Gravity.TOP or Gravity.START
@@ -369,7 +372,12 @@ class MapHost(
                 height = startHeight
             }
         runCatching { wm.addView(overlay, lp) }
-            .onFailure { Log.e(TAG, "addView overlay failed", it); adjustMode = false; return }
+            .onFailure {
+                Log.e(TAG, "addView overlay failed", it)
+                adjustMode = false
+                showFloat()  // 失败了恢复高德，不要让用户看不到地图
+                return
+            }
         adjustOverlay = overlay
         NuiToast.show(context, "从右/下边缘或右下角拖，放手完成", Toast.LENGTH_LONG)
     }

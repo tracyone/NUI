@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <item name="tag_lyric_view" type="id" />
+    <item name="tag_lyric_scroll" type="id" />
+    <item name="tag_lyric_lines" type="id" />
 </resources>

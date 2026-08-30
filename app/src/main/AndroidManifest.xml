@@ -9,6 +9,18 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
+    <!-- Android 11+ queries: 允许 bindService 到酷我/网易云/QQ/酷狗等音乐 App，不走 QUERY_ALL 兜底也能通 -->
+    <queries>
+        <package android:name="cn.kuwo.kwmusiccar" />
+        <package android:name="cn.kuwo.player" />
+        <package android:name="com.netease.cloudmusic" />
+        <package android:name="com.tencent.qqmusic" />
+        <package android:name="com.tencent.qqmusiccar" />
+        <package android:name="com.kugou.android" />
+        <package android:name="com.spotify.music" />
+        <package android:name="com.android.mediacenter" />
+    </queries>
+
     <application
         android:allowBackup="false"
         android:hardwareAccelerated="true"

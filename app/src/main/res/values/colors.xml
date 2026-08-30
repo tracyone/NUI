@@ -18,4 +18,15 @@
 
     <!-- 启动图标 -->
     <color name="ic_launcher_background">#0B1426</color>
+
+    <!-- iOS 设置风格 -->
+    <color name="settings_bg">#F2F2F7</color>
+    <color name="settings_card">#FFFFFF</color>
+    <color name="settings_label">#1C1C1E</color>
+    <color name="settings_value">#8E8E93</color>
+    <color name="settings_group_title">#8E8E93</color>
+    <color name="settings_divider">#E5E5EA</color>
+    <color name="settings_btn_bg">#E9E9EB</color>
+    <color name="settings_btn_text">#007AFF</color>
+    <color name="settings_danger">#FF3B30</color>
 </resources>

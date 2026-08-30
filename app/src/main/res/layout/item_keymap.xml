@@ -4,17 +4,16 @@
     android:layout_height="wrap_content"
     android:orientation="horizontal"
     android:gravity="center_vertical"
-    android:layout_marginTop="12dp"
-    android:padding="16dp"
-    android:background="@drawable/bg_panel">
+    android:paddingTop="10dp"
+    android:paddingBottom="10dp">
 
     <TextView
         android:id="@+id/tvKeyCode"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
-        android:textColor="@color/text_primary"
-        android:textSize="20sp"
+        android:textColor="@color/settings_label"
+        android:textSize="17sp"
         android:textStyle="bold" />
 
     <TextView
@@ -23,29 +22,29 @@
         android:layout_height="wrap_content"
         android:layout_weight="1"
         android:gravity="center"
-        android:textColor="@color/accent"
-        android:textSize="20sp" />
+        android:textColor="@color/settings_btn_text"
+        android:textSize="17sp" />
 
     <Button
         android:id="@+id/btnEdit"
         android:layout_width="wrap_content"
-        android:layout_height="48dp"
-        android:background="@drawable/bg_dock_item"
+        android:layout_height="44dp"
+        android:background="@drawable/bg_settings_btn"
         android:paddingStart="20dp"
         android:paddingEnd="20dp"
         android:text="@string/edit"
-        android:textColor="@color/text_primary"
-        android:textSize="16sp" />
+        android:textColor="@color/settings_btn_text"
+        android:textSize="15sp" />
 
     <Button
         android:id="@+id/btnDelete"
         android:layout_width="wrap_content"
-        android:layout_height="48dp"
+        android:layout_height="44dp"
         android:layout_marginStart="12dp"
-        android:background="@drawable/bg_dock_item"
+        android:background="@drawable/bg_settings_btn"
         android:paddingStart="20dp"
         android:paddingEnd="20dp"
         android:text="@string/delete"
-        android:textColor="#FF6B6B"
-        android:textSize="16sp" />
+        android:textColor="@color/settings_danger"
+        android:textSize="15sp" />
 </LinearLayout>
