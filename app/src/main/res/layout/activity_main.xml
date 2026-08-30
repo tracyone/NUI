@@ -12,7 +12,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- 左侧 Dock 栏（固定不动，始终在最上层；贴左缘，CarPlay 风格） -->
+    <!-- 左侧 Dock 栏（固定不动，始终在最上层；贴边=矩形贯穿，悬浮=紧凑竖条居中） -->
     <LinearLayout
         android:id="@+id/dockBar"
         android:layout_width="96dp"
@@ -20,22 +20,21 @@
         android:layout_gravity="start"
         android:orientation="vertical"
         android:gravity="center_horizontal"
-        android:paddingTop="24dp"
-        android:paddingBottom="24dp"
+        android:paddingTop="16dp"
+        android:paddingBottom="16dp"
         android:paddingStart="12dp"
         android:paddingEnd="12dp"
-        android:layout_marginVertical="20dp"
         android:background="@drawable/bg_dock">
 
         <TextClock
             android:id="@+id/dockClock"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="12dp"
+            android:layout_marginBottom="8dp"
             android:format24Hour="HH:mm"
             android:format12Hour="HH:mm"
             android:textColor="@color/text_primary"
-            android:textSize="22sp"
+            android:textSize="20sp"
             android:textStyle="bold" />
 
         <ScrollView

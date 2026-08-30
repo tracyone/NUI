@@ -248,11 +248,13 @@ class MapHost(
             cachedX = x; cachedY = y; cachedW = w; cachedH = h
         }
         Log.d(TAG, "sendFloat: x=$x y=$y w(border)=$w h(border)=$h (cached: $cachedX,$cachedY,$cachedW,$cachedH)")
+        // 高德浮窗边界比 mapPanel 外扩 4px：悬浮窗可能比卡片窄/有内边距，边缘会露出卡片深色背景
+        val inset = 4
         val intent = Intent(action).apply {
-            putExtra("x", x)
-            putExtra("y", y)
-            putExtra("w", w)
-            putExtra("h", h)
+            putExtra("x", x - inset)
+            putExtra("y", y - inset)
+            putExtra("w", w + inset)
+            putExtra("h", h + inset)
         }
         runCatching { context.sendBroadcast(intent) }
     }
@@ -332,7 +334,14 @@ class MapHost(
         startHeight = mapPanel.height
 
         val overlay = FrameLayout(context).apply {
-                setBackgroundColor(0x332196F3.toInt()) // 极淡蓝底，仅提示调整区域
+                setBackgroundColor(0x00000000) // 透明底，仅地图区域上色
+                // 地图区域淡蓝底（提示调整区域）
+                addView(View(context).apply {
+                    setBackgroundColor(0x332196F3.toInt())
+                }, FrameLayout.LayoutParams(startWidth, startHeight).apply {
+                    leftMargin = startLeft
+                    topMargin = startTop
+                })
                 // 左上角透明点击热区（与原 btnSwitchMap 位置一致：40dp 图标 + 10dp margin）
                 addView(View(context).apply {
                     setBackgroundColor(0x00000000)
@@ -350,26 +359,29 @@ class MapHost(
                     (40 * context.resources.displayMetrics.density).toInt()
                 ).apply {
                     gravity = Gravity.TOP or Gravity.START
-                    leftMargin = (10 * context.resources.displayMetrics.density).toInt()
-                    topMargin = (10 * context.resources.displayMetrics.density).toInt()
+                    leftMargin = startLeft + (10 * context.resources.displayMetrics.density).toInt()
+                    topMargin = startTop + (10 * context.resources.displayMetrics.density).toInt()
                 })
                 // 右边缘条（可视化 + 热区）
                 addView(View(context).apply {
                     background = ColorDrawable(0xFF1976D2.toInt()) // 深青蓝实条
-                }, FrameLayout.LayoutParams(edgeZone, FrameLayout.LayoutParams.MATCH_PARENT).apply {
-                    gravity = Gravity.END
+                }, FrameLayout.LayoutParams(edgeZone, startHeight).apply {
+                    leftMargin = startLeft + startWidth - edgeZone
+                    topMargin = startTop
                 })
                 // 下边缘条
                 addView(View(context).apply {
                     background = ColorDrawable(0xFF1976D2.toInt())
-                }, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, edgeZone).apply {
-                    gravity = Gravity.BOTTOM
+                }, FrameLayout.LayoutParams(startWidth, edgeZone).apply {
+                    leftMargin = startLeft
+                    topMargin = startTop + startHeight - edgeZone
                 })
                 // 右下角把手
                 addView(View(context).apply {
                     background = ColorDrawable(0xFF0D47A1.toInt()) // 最深蓝
                 }, FrameLayout.LayoutParams(edgeZone, edgeZone).apply {
-                    gravity = Gravity.BOTTOM or Gravity.END
+                    leftMargin = startLeft + startWidth - edgeZone
+                    topMargin = startTop + startHeight - edgeZone
                 })
                 setOnTouchListener(adjustTouch)
             }
@@ -381,10 +393,10 @@ class MapHost(
                 format = PixelFormat.TRANSLUCENT
                 flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 gravity = Gravity.TOP or Gravity.START
-                x = loc[0]
-                y = loc[1]
-                width = startWidth
-                height = startHeight
+                x = 0
+                y = 0
+                width = context.resources.displayMetrics.widthPixels
+                height = context.resources.displayMetrics.heightPixels
             }
         runCatching { wm.addView(overlay, lp) }
             .onFailure {
@@ -405,13 +417,12 @@ class MapHost(
             MotionEvent.ACTION_DOWN -> {
                 dragStartX = e.rawX
                 dragStartY = e.rawY
-                startWidth = lp.width
-                startHeight = lp.height
-                // 根据按下位置决定是调右 / 调下 / 同时调右下
-                val relX = e.rawX - lp.x   // overlay 内的相对 x
-                val relY = e.rawY - lp.y
-                val onRight = relX >= lp.width - ez
-                val onBottom = relY >= lp.height - ez
+                // startWidth/startHeight 已在 enterAdjust 记录为地图区域大小
+                // 根据按下位置决定是调右 / 调下 / 同时调右下（相对地图区域）
+                val relX = e.rawX - startLeft
+                val relY = e.rawY - startTop
+                val onRight = relX >= startWidth - ez
+                val onBottom = relY >= startHeight - ez
                 resizeMode = when {
                     onRight && onBottom -> ResizeMode.BOTH
                     onRight -> ResizeMode.RIGHT
@@ -445,6 +456,8 @@ class MapHost(
         adjustOverlay = null
         resizeMode = ResizeMode.NONE
         saveGeometry()
+        // 同步外部联动（右侧音乐栏宽度等），确保最终几何落定后对齐
+        onGeometryChanged?.invoke()
         showFloat()
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ NuiToast.show(context, "已应用新大小", Toast.LENGTH_SHORT) }, 300L)
     }

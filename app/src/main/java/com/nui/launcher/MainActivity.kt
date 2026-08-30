@@ -259,15 +259,19 @@ class MainActivity : AppCompatActivity() {
         val barLp = binding.dockBar.layoutParams as FrameLayout.LayoutParams
         barLp.width = (dockW * dp).toInt()
         if (edge) {
-            // 贴边：上下+左边都贴边
+            // 贴边：上下+左边都贴边，矩形贯穿全高（CarPlay 风格）
+            barLp.height = FrameLayout.LayoutParams.MATCH_PARENT
             barLp.leftMargin = 0
             barLp.topMargin = 0
             barLp.bottomMargin = 0
+            barLp.gravity = android.view.Gravity.START
         } else {
-            // 悬浮：四边留 20dp
+            // 悬浮：紧凑竖条垂直居中，四边留 20dp（元素上下不再分散）
+            barLp.height = FrameLayout.LayoutParams.WRAP_CONTENT
             barLp.leftMargin = (20 * dp).toInt()
             barLp.topMargin = (20 * dp).toInt()
             barLp.bottomMargin = (20 * dp).toInt()
+            barLp.gravity = android.view.Gravity.START or android.view.Gravity.CENTER_VERTICAL
         }
         binding.dockBar.layoutParams = barLp
         applyDockVisual()
@@ -294,7 +298,7 @@ class MainActivity : AppCompatActivity() {
         val dp = resources.displayMetrics.density
         val scale = UiTheme.dockIconScale(this)
         val size = (UiTheme.DEFAULT_DOCK_ICON_DP * dp * scale).toInt()
-        val gap = (8 * dp).toInt()
+        val gap = (4 * dp).toInt()   // 紧凑：图标间距 4dp
         val dark = UiTheme.isDark(this)
         val p = UiTheme.palette(this)
         val itemBg = RippleDrawable(
@@ -504,18 +508,34 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    /** 右侧面板固定贴右缘（不随地图移动）；地图右缘限制在音乐栏左侧，避免遮挡 */
+    /** 右侧面板（音乐栏）宽度随地图右缘动态变化：地图右移 → 音乐栏变窄，太窄则整个消失。
+     *  音乐栏右缘固定贴右，左缘 = 地图右缘 + gap；地图可一直右移到音乐栏消失。 */
     private fun syncRightPanel() {
         val rp = desktopRightPanel ?: return
+        val mp = desktopMapPanel ?: return
         val density = resources.displayMetrics.density
         val sw = resources.displayMetrics.widthPixels
         val rightMargin = (16 * density).toInt()
-        val panelWidth = (240 * density).toInt()
         val gap = (12 * density).toInt()
-        rp.visibility = android.view.View.VISIBLE
-        // 地图最大右边缘 = 屏幕宽 - 音乐栏右距 - 音乐栏宽 - gap
-        val maxMapRight = sw - rightMargin - panelWidth - gap
-        if (::mapHost.isInitialized) mapHost.setRightLimit(maxMapRight)
+        val minPanel = (180 * density).toInt()          // 音乐栏最小宽度，低于则整体消失
+        val availableRight = sw - rightMargin
+        // 地图右缘（相对 Page0，全屏坐标系）
+        val mlp = mp.layoutParams as FrameLayout.LayoutParams
+        val mapRight = mlp.leftMargin + mp.width
+        val panelW = availableRight - gap - mapRight
+        if (panelW < minPanel) {
+            // 音乐栏太窄：隐藏，地图可占满右侧
+            rp.visibility = android.view.View.GONE
+        } else {
+            rp.visibility = android.view.View.VISIBLE
+            val lp = rp.layoutParams
+            if (lp.width != panelW) {
+                lp.width = panelW
+                rp.layoutParams = lp
+            }
+        }
+        // 地图右缘上限：音乐栏消失后地图可铺到屏幕右缘-16dp
+        if (::mapHost.isInitialized) mapHost.setRightLimit(availableRight)
     }
 
     private fun applyImmersive() {
