@@ -16,4 +16,5 @@ data class AppModel(
     val packageName: String,
     val icon: Drawable,
     val launchIntent: Intent,
+    val onClick: (() -> Unit)? = null,
 )

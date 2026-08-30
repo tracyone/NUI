@@ -515,13 +515,17 @@ class MainActivity : AppCompatActivity() {
                 label = getString(R.string.desktop_settings),
                 packageName = packageName,
                 icon = androidx.core.content.ContextCompat.getDrawable(this, R.drawable.ic_dock_settings)!!,
-                launchIntent = Intent(this, com.nui.launcher.settings.SettingsActivity::class.java),
+                launchIntent = Intent(),
+                onClick = { com.nui.launcher.settings.SettingsDialog(this).show() },
             )
             runOnUiThread {
                 appListAdapter = AppListAdapter(
                     context = this,
                     apps = listOf(settingsEntry) + apps,
-                    onClick = { app -> startActivity(app.launchIntent) },
+                    onClick = { app ->
+                        if (app.onClick != null) app.onClick.invoke()
+                        else startActivity(app.launchIntent)
+                    },
                 )
                 grid.adapter = appListAdapter
             }
