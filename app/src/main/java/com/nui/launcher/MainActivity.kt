@@ -134,6 +134,15 @@ class MainActivity : AppCompatActivity() {
         wallpaper.onActivityResult(requestCode, resultCode, data)
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        // Home 键触发：在 page 0（桌面）和 page 1（应用列表）之间切换
+        // onNewIntent 仅在系统启动 Launcher（Home 键）时被调用
+        if (binding.viewPager.currentItem == 0) binding.viewPager.currentItem = 1
+        else binding.viewPager.currentItem = 0
+    }
+
     override fun onResume() {
         super.onResume()
         applyTheme()
