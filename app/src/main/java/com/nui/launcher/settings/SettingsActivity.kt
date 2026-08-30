@@ -2,12 +2,17 @@ package com.nui.launcher.settings
 
 import android.app.AlertDialog
 import android.app.Dialog
+import android.content.res.ColorStateList
+import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.os.Bundle
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.widget.Button
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
@@ -32,6 +37,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var checkSystem: TextView
     private lateinit var checkDark: TextView
     private lateinit var checkLight: TextView
+    private var currentTab = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -69,6 +75,7 @@ class SettingsActivity : AppCompatActivity() {
             UiTheme.setMode(this, UiTheme.Mode.LIGHT); renderAppearance()
         }
         renderAppearance()
+        applySettingsTheme()
 
         // 悬浮歌词背景不透明度（0-100，默认 20，拖动实时保存）
         tvLyricAlphaValue.text = "${MusicHost.lyricBgAlpha(this)}%"
@@ -89,15 +96,60 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     /** 切换分类：0=音乐，1=方向盘，2=外观 */
-    private fun selectTab(index: Int) {
+    private fun selectTab(index: Int) = selectTab(index, UiTheme.isDark(this))
+
+    private fun selectTab(index: Int, dark: Boolean) {
+        currentTab = index
+        val p = UiTheme.settingsPalette(dark)
         val tabs = listOf(tabMusic, tabSteering, tabAppearance)
         val panels = listOf(panelMusic, panelSteering, panelAppearance)
         tabs.forEachIndexed { i, tab ->
             val isSel = i == index
             tab.isSelected = isSel
-            tab.setTextColor(if (isSel) Color.WHITE else getColor(R.color.settings_label))
+            tab.setTextColor(if (isSel) Color.WHITE else p.label)
             panels[i].visibility = if (isSel) View.VISIBLE else View.GONE
         }
+    }
+
+    /** 设置页跟随深浅模式：整页配色动态应用（系统切深浅时自动跟随） */
+    private fun applySettingsTheme() = applySettingsTheme(UiTheme.isDark(this))
+
+    private fun applySettingsTheme(dark: Boolean) {
+        val p = UiTheme.settingsPalette(dark)
+        val dp = resources.displayMetrics.density
+        findViewById<View>(R.id.settingsRoot).setBackgroundColor(p.bg)
+        findViewById<TextView>(R.id.titleSettings).setTextColor(p.label)
+        findViewById<ImageButton>(R.id.btnBack).imageTintList = ColorStateList.valueOf(p.label)
+        findViewById<View>(R.id.contentCard).background = GradientDrawable().apply {
+            setColor(p.card); cornerRadius = 14 * dp
+        }
+        findViewById<TextView>(R.id.groupTitleMusic).setTextColor(p.value)
+        findViewById<TextView>(R.id.groupTitleSteering).setTextColor(p.value)
+        findViewById<TextView>(R.id.groupTitleAppearance).setTextColor(p.value)
+        findViewById<View>(R.id.dividerMusic).setBackgroundColor(p.divider)
+        findViewById<View>(R.id.dividerSteering).setBackgroundColor(p.divider)
+        findViewById<View>(R.id.dividerAdd).setBackgroundColor(p.divider)
+        findViewById<View>(R.id.dividerAppearance).setBackgroundColor(p.divider)
+        findViewById<TextView>(R.id.tvLyricAlphaValue).setTextColor(p.value)
+        findViewById<TextView>(R.id.lyricHint).setTextColor(p.value)
+        checkSystem.setTextColor(p.accent)
+        checkDark.setTextColor(p.accent)
+        checkLight.setTextColor(p.accent)
+        seekLyricAlpha.progressTintList = ColorStateList.valueOf(p.accent)
+        seekLyricAlpha.thumbTintList = ColorStateList.valueOf(p.accent)
+        findViewById<Button>(R.id.btnAdd).background = RippleDrawable(
+            ColorStateList.valueOf(p.ripple), null,
+            GradientDrawable().apply { setColor(p.accent); cornerRadius = 12 * dp },
+        )
+        // 刷新当前 tab 高亮/文字色
+        selectTab(currentTab, dark)
+        render(dark)
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        applySettingsTheme(UiTheme.isDark(this, newConfig))
+        renderAppearance()
     }
 
     /** 按当前外观模式刷新勾选 */
@@ -114,13 +166,17 @@ class SettingsActivity : AppCompatActivity() {
         renderAppearance()
     }
 
-    private fun render() {
+    private fun render() = render(UiTheme.isDark(this))
+
+    private fun render(dark: Boolean) {
+        val p = UiTheme.settingsPalette(dark)
+        val dp = resources.displayMetrics.density
         recordList.removeAllViews()
         val records = KeyMapConfig.load(this)
         if (records.isEmpty()) {
             val empty = TextView(this).apply {
                 text = "暂无映射，点击下方按钮添加"
-                setTextColor(getColor(R.color.settings_value))
+                setTextColor(p.value)
                 textSize = 16f
                 gravity = Gravity.CENTER
                 setPadding(0, dp(16), 0, dp(16))
@@ -129,12 +185,30 @@ class SettingsActivity : AppCompatActivity() {
         }
         records.forEach { rec ->
             val v = layoutInflater.inflate(R.layout.item_keymap, recordList, false)
-            v.findViewById<TextView>(R.id.tvKeyCode).text = "KeyCode: ${rec.keyCode}"
-            v.findViewById<TextView>(R.id.tvAction).text = KeyMapConfig.actionName(rec.action)
-            v.findViewById<View>(R.id.btnEdit).setOnClickListener { startEdit(rec) }
-            v.findViewById<View>(R.id.btnDelete).setOnClickListener {
-                KeyMapConfig.remove(this, rec)
-                render()
+            v.findViewById<TextView>(R.id.tvKeyCode).apply {
+                text = "KeyCode: ${rec.keyCode}"
+                setTextColor(p.label)
+            }
+            v.findViewById<TextView>(R.id.tvAction).apply {
+                text = KeyMapConfig.actionName(rec.action)
+                setTextColor(p.accent)
+            }
+            v.findViewById<View>(R.id.btnEdit).apply {
+                background = RippleDrawable(
+                    ColorStateList.valueOf(p.ripple), null,
+                    GradientDrawable().apply { setColor(p.btnBg); cornerRadius = 12 * dp },
+                )
+                setOnClickListener { startEdit(rec) }
+            }
+            v.findViewById<View>(R.id.btnDelete).apply {
+                background = RippleDrawable(
+                    ColorStateList.valueOf(p.ripple), null,
+                    GradientDrawable().apply { setColor(p.btnBg); cornerRadius = 12 * dp },
+                )
+                setOnClickListener {
+                    KeyMapConfig.remove(this@SettingsActivity, rec)
+                    render()
+                }
             }
             recordList.addView(v)
         }
@@ -147,20 +221,25 @@ class SettingsActivity : AppCompatActivity() {
 
         val dp = resources.displayMetrics.density
         val pad = (16 * dp).toInt()
+        val p = UiTheme.settingsPalette(this)
+        val fieldBg = RippleDrawable(
+            ColorStateList.valueOf(p.ripple), null,
+            GradientDrawable().apply { setColor(p.btnBg); cornerRadius = 12 * dp },
+        )
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad * 2, pad, pad * 2, pad)
         }
         val tvKey = TextView(this).apply {
             textSize = 18f
-            setTextColor(getColor(R.color.settings_label))
-            background = getDrawable(R.drawable.bg_settings_btn)
+            setTextColor(p.label)
+            background = fieldBg
             setPadding(pad, pad, pad, pad)
         }
         val tvAction = TextView(this).apply {
             textSize = 18f
-            setTextColor(getColor(R.color.settings_label))
-            background = getDrawable(R.drawable.bg_settings_btn)
+            setTextColor(p.label)
+            background = fieldBg
             setPadding(pad, pad, pad, pad)
         }
         fun refreshTexts() {
@@ -176,7 +255,7 @@ class SettingsActivity : AppCompatActivity() {
         tvAction.setOnClickListener {
             val names = KeyMapConfig.ACTIONS.values.toList()
             val ids = KeyMapConfig.ACTIONS.keys.toList()
-            AlertDialog.Builder(this)
+            dialogBuilder()
                 .setTitle(R.string.select_action)
                 .setItems(names.toTypedArray()) { _, which ->
                     action = ids[which]
@@ -189,7 +268,7 @@ class SettingsActivity : AppCompatActivity() {
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = pad })
 
-        AlertDialog.Builder(this)
+        dialogBuilder()
             .setTitle(if (existing == null) R.string.add_key_mapping else R.string.edit)
             .setView(root)
             .setPositiveButton(R.string.save) { _, _ ->
@@ -202,10 +281,18 @@ class SettingsActivity : AppCompatActivity() {
             .show()
     }
 
+    /** 对话框跟随深浅模式 */
+    private fun dialogBuilder(): AlertDialog.Builder = AlertDialog.Builder(
+        this,
+        if (UiTheme.isDark(this)) android.R.style.Theme_Material_Dialog
+        else android.R.style.Theme_Material_Light_Dialog,
+    )
+
     /** 手动输入 keycode，也可点"监听按键"物理捕获 */
     private fun showKeyCodeInput(current: Int, onKey: (Int) -> Unit) {
         val dp = resources.displayMetrics.density
         val pad = (16 * dp).toInt()
+        val p = UiTheme.settingsPalette(this)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(pad, pad, pad, pad)
@@ -214,11 +301,11 @@ class SettingsActivity : AppCompatActivity() {
             inputType = android.text.InputType.TYPE_CLASS_NUMBER
             hint = "如 88 / 87 / 275"
             setText(if (current >= 0) current.toString() else "")
-            setTextColor(getColor(R.color.settings_label))
-            setHintTextColor(getColor(R.color.settings_value))
+            setTextColor(p.label)
+            setHintTextColor(p.value)
         }
         root.addView(et)
-        AlertDialog.Builder(this)
+        dialogBuilder()
             .setTitle(R.string.key_code)
             .setView(root)
             .setNeutralButton(R.string.listening_key) { _, _ ->

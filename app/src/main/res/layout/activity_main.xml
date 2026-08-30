@@ -12,7 +12,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- 左侧 Dock 栏（固定不动，始终在最上层） -->
+    <!-- 左侧 Dock 栏（固定不动，始终在最上层；贴左缘，CarPlay 风格） -->
     <LinearLayout
         android:id="@+id/dockBar"
         android:layout_width="96dp"
@@ -25,7 +25,6 @@
         android:paddingStart="12dp"
         android:paddingEnd="12dp"
         android:layout_marginVertical="20dp"
-        android:layout_marginStart="20dp"
         android:background="@drawable/bg_dock">
 
         <TextClock

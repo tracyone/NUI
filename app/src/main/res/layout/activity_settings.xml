@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/settingsRoot"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="horizontal"
@@ -30,6 +31,7 @@
                 android:contentDescription="@string/back" />
 
             <TextView
+                android:id="@+id/titleSettings"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
@@ -85,6 +87,7 @@
 
     <!-- 右侧：详细设置 -->
     <LinearLayout
+        android:id="@+id/contentCard"
         android:layout_width="0dp"
         android:layout_height="match_parent"
         android:layout_weight="1"
@@ -101,6 +104,7 @@
             android:orientation="vertical">
 
             <TextView
+                android:id="@+id/groupTitleMusic"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/music"
@@ -108,6 +112,7 @@
                 android:textSize="14sp" />
 
             <View
+                android:id="@+id/dividerMusic"
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
                 android:layout_marginTop="12dp"
@@ -147,6 +152,7 @@
             </LinearLayout>
 
             <TextView
+                android:id="@+id/lyricHint"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
@@ -164,6 +170,7 @@
             android:visibility="gone">
 
             <TextView
+                android:id="@+id/groupTitleSteering"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/steering_wheel"
@@ -171,6 +178,7 @@
                 android:textSize="14sp" />
 
             <View
+                android:id="@+id/dividerSteering"
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
                 android:layout_marginTop="12dp"
@@ -210,6 +218,7 @@
             android:visibility="gone">
 
             <TextView
+                android:id="@+id/groupTitleAppearance"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/appearance"
@@ -217,6 +226,7 @@
                 android:textSize="14sp" />
 
             <View
+                android:id="@+id/dividerAppearance"
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
                 android:layout_marginTop="12dp"

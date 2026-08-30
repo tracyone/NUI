@@ -145,7 +145,8 @@ class MainActivity : AppCompatActivity() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         if (UiTheme.mode(this) == UiTheme.Mode.SYSTEM) {
-            applyTheme()
+            // resources 可能尚未同步，用 newConfig 判断深浅
+            applyTheme(UiTheme.isSystemDark(newConfig))
             if (::musicHost.isInitialized) musicHost.refresh()
         }
     }
@@ -184,10 +185,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** 按深浅模式应用桌面配色（Dock / 右侧面板 / 地图卡片） */
-    private fun applyTheme() {
-        val p = UiTheme.palette(this)
+    private fun applyTheme() = applyTheme(UiTheme.isDark(this))
+
+    private fun applyTheme(dark: Boolean) {
+        val p = UiTheme.palette(dark)
         val density = resources.displayMetrics.density
-        val dark = UiTheme.isDark(this)
 
         // Dock 栏：半透明圆角背景 + 时钟/图标色
         binding.dockBar.background = GradientDrawable().apply {
@@ -439,34 +441,18 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    /** 同步右侧面板位置（Page 0 的 mapPanel 右边 + gap） */
+    /** 右侧面板固定贴右缘（不随地图移动）；地图右缘限制在音乐栏左侧，避免遮挡 */
     private fun syncRightPanel() {
         val rp = desktopRightPanel ?: return
-        val map = desktopMapPanel ?: return
-        val gap = (12 * resources.displayMetrics.density).toInt()
-        val panelWidth = (240 * resources.displayMetrics.density).toInt()
-        val rightMargin = (20 * resources.displayMetrics.density).toInt()
+        val density = resources.displayMetrics.density
         val sw = resources.displayMetrics.widthPixels
-        val mapLp = map.layoutParams as android.widget.FrameLayout.LayoutParams
-        val mapRight = mapLp.leftMargin + map.width
-        val lp = rp.layoutParams as android.widget.FrameLayout.LayoutParams
-        val availForPanel = sw - rightMargin - mapRight - gap
-        when {
-            availForPanel >= panelWidth -> {
-                rp.visibility = android.view.View.VISIBLE
-                lp.leftMargin = mapRight + gap
-                lp.width = panelWidth
-            }
-            availForPanel >= panelWidth / 2 -> {
-                rp.visibility = android.view.View.VISIBLE
-                lp.leftMargin = mapRight + gap
-                lp.width = availForPanel
-            }
-            else -> {
-                rp.visibility = android.view.View.GONE
-            }
-        }
-        rp.layoutParams = lp
+        val rightMargin = (16 * density).toInt()
+        val panelWidth = (240 * density).toInt()
+        val gap = (12 * density).toInt()
+        rp.visibility = android.view.View.VISIBLE
+        // 地图最大右边缘 = 屏幕宽 - 音乐栏右距 - 音乐栏宽 - gap
+        val maxMapRight = sw - rightMargin - panelWidth - gap
+        if (::mapHost.isInitialized) mapHost.setRightLimit(maxMapRight)
     }
 
     private fun applyImmersive() {

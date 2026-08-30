@@ -35,9 +35,18 @@ object UiTheme {
     }
 
     /** 系统当前是否为深色模式 */
-    fun isSystemDark(ctx: Context): Boolean =
-        (ctx.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
-                Configuration.UI_MODE_NIGHT_YES
+    fun isSystemDark(ctx: Context): Boolean = isSystemDark(ctx.resources.configuration)
+
+    /** 基于 Configuration 判断系统深浅（onConfigurationChanged 时 resources 可能未同步，用 newConfig 判断） */
+    fun isSystemDark(config: Configuration): Boolean =
+        (config.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+
+    /** 最终是否深色：手动指定优先，否则跟随系统（用 config 判断系统，适用于配置变化回调） */
+    fun isDark(ctx: Context, config: Configuration): Boolean = when (mode(ctx)) {
+        Mode.DARK -> true
+        Mode.LIGHT -> false
+        Mode.SYSTEM -> isSystemDark(config)
+    }
 
     /** 配色集 */
     data class Palette(
@@ -74,4 +83,46 @@ object UiTheme {
     )
 
     fun palette(ctx: Context): Palette = if (isDark(ctx)) DARK else LIGHT
+
+    fun palette(dark: Boolean): Palette = if (dark) DARK else LIGHT
+
+    /** 设置页配色集（iOS 风格，深浅两套） */
+    data class SettingsPalette(
+        val bg: Int,          // 根背景
+        val card: Int,        // 卡片背景
+        val label: Int,       // 主文字
+        val value: Int,       // 次文字 / 分组标题
+        val divider: Int,
+        val accent: Int,      // 选中/强调色
+        val btnBg: Int,       // 次要按钮底
+        val ripple: Int,      // 行按压波纹
+    )
+
+    private val SETTINGS_LIGHT = SettingsPalette(
+        bg = 0xFFF2F2F7.toInt(),
+        card = 0xFFFFFFFF.toInt(),
+        label = 0xFF1C1C1E.toInt(),
+        value = 0xFF8E8E93.toInt(),
+        divider = 0xFFE5E5EA.toInt(),
+        accent = 0xFF007AFF.toInt(),
+        btnBg = 0xFFE9E9EB.toInt(),
+        ripple = 0x22000000.toInt(),
+    )
+
+    private val SETTINGS_DARK = SettingsPalette(
+        bg = 0xFF000000.toInt(),
+        card = 0xFF1C1C1E.toInt(),
+        label = 0xFFF2F2F7.toInt(),
+        value = 0xFF98989E.toInt(),
+        divider = 0xFF2C2C2E.toInt(),
+        accent = 0xFF0A84FF.toInt(),
+        btnBg = 0xFF2C2C2E.toInt(),
+        ripple = 0x33FFFFFF.toInt(),
+    )
+
+    fun settingsPalette(ctx: Context): SettingsPalette =
+        if (isDark(ctx)) SETTINGS_DARK else SETTINGS_LIGHT
+
+    fun settingsPalette(dark: Boolean): SettingsPalette =
+        if (dark) SETTINGS_DARK else SETTINGS_LIGHT
 }

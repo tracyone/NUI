@@ -58,7 +58,7 @@
         <activity
             android:name=".settings.SettingsActivity"
             android:exported="false"
-            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
             android:screenOrientation="landscape"
             android:theme="@style/Theme.NUI" />
 

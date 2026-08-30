@@ -64,6 +64,21 @@ class MapHost(
     private var startWidth = 0
     private var startHeight = 0
     private var resizeMode = ResizeMode.NONE
+    /** 地图右缘上限（px）：由外部 syncRightPanel 按右侧音乐栏位置设定，0=不限制 */
+    private var rightLimit = 0
+
+    /** 设置地图右缘上限；若当前地图超出则立即缩回 */
+    fun setRightLimit(px: Int) {
+        rightLimit = px
+        if (px <= 0) return
+        val lp = mapPanel.layoutParams as FrameLayout.LayoutParams
+        val maxW = (px - lp.leftMargin).coerceAtLeast(MIN_SIZE)
+        if (lp.width > maxW) {
+            lp.width = maxW
+            mapPanel.layoutParams = lp
+            onGeometryChanged?.invoke()
+        }
+    }
 
     private enum class ResizeMode { NONE, RIGHT, BOTTOM, BOTH }
 
@@ -440,7 +455,8 @@ class MapHost(
     private fun clampSizeFixed(x: Int, y: Int, w: Int, h: Int): IntArray {
         val sw = context.resources.displayMetrics.widthPixels
         val sh = context.resources.displayMetrics.heightPixels
-        val maxRight = sw - dp(20)     // 右距 20dp，地图可铺满到屏幕右边
+        // 右侧面板固定贴边后：地图右缘不超过 rightLimit（有值用值，无值用 屏幕宽-20dp）
+        val maxRight = if (rightLimit > 0) rightLimit else sw - dp(20)
         val maxBottom = sh - dp(20)     // 不碰到底边
         var nw = w.coerceAtLeast(MIN_SIZE)
         var nh = h.coerceAtLeast(MIN_SIZE)
