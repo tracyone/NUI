@@ -494,9 +494,9 @@ class MapHost(
     private fun clampSizeFixed(x: Int, y: Int, w: Int, h: Int): IntArray {
         val sw = context.resources.displayMetrics.widthPixels
         val sh = context.resources.displayMetrics.heightPixels
-        // 右侧面板固定贴边后：地图右缘不超过 rightLimit（有值用值，无值用 屏幕宽-20dp）
-        val maxRight = if (rightLimit > 0) rightLimit else sw - dp(20)
-        val maxBottom = sh - dp(20)     // 不碰到底边
+        // 右侧面板固定贴边后：地图右缘不超过 rightLimit（有值用值，无值用 屏幕宽-8dp）
+        val maxRight = if (rightLimit > 0) rightLimit else sw - dp(8)
+        val maxBottom = sh - dp(8)     // 不碰到底边，与 normalizeVerticalMargins 的 8dp 一致
         var nw = w.coerceAtLeast(MIN_SIZE)
         var nh = h.coerceAtLeast(MIN_SIZE)
         if (x + nw > maxRight) nw = (maxRight - x).coerceAtLeast(MIN_SIZE)
