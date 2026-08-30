@@ -51,6 +51,7 @@ class MainActivity : AppCompatActivity() {
     private var page0Ready = false
     private var appGridLoaded = false
     private var appGridView: androidx.recyclerview.widget.RecyclerView? = null
+    private var appListAdapter: AppListAdapter? = null
 
     private inner class PagerAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         override fun getItemCount() = 2
@@ -147,6 +148,8 @@ class MainActivity : AppCompatActivity() {
             musicHost.refresh()
             musicHost.setFloatAreaVisible(true)
         }
+        // 设置页可能改了应用列表图标比例，返回时刷新
+        appListAdapter?.notifyDataSetChanged()
     }
 
     /** 系统深浅模式切换（跟随系统模式）时同步重刷桌面配色 */
@@ -295,13 +298,22 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** 渲染 dock 槽位：空槽显示加号，已填显示应用图标（图标大小随 [UiTheme.dockIconScale]） */
+    /** 渲染 dock 槽位：空槽显示加号，已填显示应用图标（图标大小随 [UiTheme.dockIconScale]）。
+     *  数量自适应：按 dockItems 可用高度计算能完整显示多少个，显示不下的直接去掉（不滚动）。 */
     private fun renderDock() {
         binding.dockItems.removeAllViews()
         val dp = resources.displayMetrics.density
         val scale = UiTheme.dockIconScale(this)
         val size = (UiTheme.DEFAULT_DOCK_ICON_DP * dp * scale).toInt()
         val gap = (4 * dp).toInt()   // 紧凑：图标间距 4dp
+        // 自适应数量：可用高度 / (图标大小+间距)，向下取整，确保每个都完整显示（不滚动）
+        val availableH = binding.dockItems.height
+        if (availableH <= 0) {
+            binding.dockItems.post { renderDock() }
+            return
+        }
+        val maxVisible = (availableH / (size + gap)).coerceAtLeast(1)
+        val slotCount = minOf(DockConfig.SLOT_COUNT, maxVisible)
         val dark = UiTheme.isDark(this)
         val p = UiTheme.palette(this)
         val itemBg = RippleDrawable(
@@ -311,13 +323,17 @@ class MainActivity : AppCompatActivity() {
         )
         val addIcon = androidx.core.content.ContextCompat.getDrawable(this, R.drawable.ic_dock_add)
         val apps = DockConfig.loadApps(this)
-        for (i in 0 until DockConfig.SLOT_COUNT) {
+        for (i in 0 until slotCount) {
             val app = apps.getOrNull(i)
             val btn = android.widget.ImageButton(this).apply {
                 scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
                 background = itemBg
                 if (app != null) {
                     setImageDrawable(app.icon)
+                    // 原车桌面图标跟随深浅模式 tint（浅色背景下可见）
+                    if (app.packageName == StockHome.PKG_STOCK_HOME) {
+                        imageTintList = ColorStateList.valueOf(p.dockIconTint)
+                    }
                     setOnClickListener {
                         if (app.packageName == StockHome.PKG_STOCK_HOME) {
                             val ok = StockHome.launch(this@MainActivity)
@@ -502,11 +518,12 @@ class MainActivity : AppCompatActivity() {
                 launchIntent = Intent(this, com.nui.launcher.settings.SettingsActivity::class.java),
             )
             runOnUiThread {
-                grid.adapter = AppListAdapter(
+                appListAdapter = AppListAdapter(
                     context = this,
                     apps = listOf(settingsEntry) + apps,
                     onClick = { app -> startActivity(app.launchIntent) },
                 )
+                grid.adapter = appListAdapter
             }
         }.start()
     }

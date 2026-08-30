@@ -485,6 +485,49 @@
                         android:text="@string/dock_icon_scale_hint"
                         android:textColor="@color/settings_value"
                         android:textSize="13sp" />
+
+                    <!-- 应用列表图标大小 -->
+                    <TextView
+                        android:id="@+id/tvAppIconTitle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="20dp"
+                        android:text="@string/app_icon_scale"
+                        android:textColor="@color/settings_label"
+                        android:textSize="17sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <SeekBar
+                            android:id="@+id/seekAppIcon"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="12dp"
+                            android:max="80" />
+
+                        <TextView
+                            android:id="@+id/tvAppIconValue"
+                            android:layout_width="56dp"
+                            android:layout_height="wrap_content"
+                            android:gravity="end"
+                            android:text="100%"
+                            android:textColor="@color/settings_value"
+                            android:textSize="17sp" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="@string/app_icon_scale_hint"
+                        android:textColor="@color/settings_value"
+                        android:textSize="13sp" />
                 </LinearLayout>
             </ScrollView>
         </LinearLayout>

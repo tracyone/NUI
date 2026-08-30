@@ -648,27 +648,28 @@ class MusicHost(
      */
     private fun pickPreferredApp(onPickedLaunch: Boolean = false) {
         val pm = context.packageManager
-        val apps = mutableListOf<Pair<String, String>>()
+        val apps = mutableListOf<Triple<String, String, android.graphics.drawable.Drawable>>()
         // 列出已安装的常用音乐 App
         for (pkg in MUSIC_PACKAGES) {
             val launch = pm.getLaunchIntentForPackage(pkg) ?: continue
             val label = runCatching {
                 pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
             }.getOrDefault(pkg)
-            apps.add(pkg to label)
+            val icon = runCatching { pm.getApplicationIcon(pkg) }.getOrDefault(pm.defaultActivityIcon)
+            apps.add(Triple(pkg, label, icon))
         }
         if (apps.isEmpty()) {
             NuiToast.show(context, "未检测到常用音乐 App，可从应用列表打开", Toast.LENGTH_LONG)
             return
         }
-        val labels = apps.map { it.second }.toTypedArray()
         onHideFloat?.invoke()
+        val adapter = com.nui.launcher.IconTextAdapter(context, apps.map { it.third to it.second })
         val d = AlertDialog.Builder(context)
             .setTitle("选择音乐 App")
-            .setItems(labels) { _, which ->
-                val chosenPkg = apps[which].first
-                prefs.edit { putString(KEY_APP, chosenPkg) }
-                NuiToast.show(context, "已选择 ${labels[which]}", Toast.LENGTH_SHORT)
+            .setAdapter(adapter) { _, which ->
+                val chosen = apps[which]
+                prefs.edit { putString(KEY_APP, chosen.first) }
+                NuiToast.show(context, "已选择 ${chosen.second}", Toast.LENGTH_SHORT)
                 if (onPickedLaunch) {
                     // 选完立即启动新 App，复用 launchPreferredApp 的浮窗 hide/show 逻辑
                     handler.postDelayed({ launchPreferredApp() }, 180L)

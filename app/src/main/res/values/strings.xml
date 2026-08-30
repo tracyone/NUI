@@ -24,6 +24,8 @@
     <string name="dock_style_float">悬浮（圆角）</string>
     <string name="dock_icon_scale">Dock 图标大小</string>
     <string name="dock_icon_scale_hint">数值越大图标越大（默认 100%）</string>
+    <string name="app_icon_scale">应用列表图标大小</string>
+    <string name="app_icon_scale_hint">数值越大图标越大（默认 100%）</string>
     <string name="lyric_bg_alpha">悬浮歌词背景不透明度</string>
     <string name="lyric_bg_alpha_hint">数值越大背景越不透明（100% 为完全不透明）</string>
     <string name="key_mapping_list">方向盘按键映射</string>

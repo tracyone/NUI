@@ -14,9 +14,12 @@ object UiTheme {
     private const val KEY_MODE = "theme_mode"
     private const val KEY_DOCK_STYLE = "dock_style"
     private const val KEY_DOCK_ICON_SCALE = "dock_icon_scale"
+    private const val KEY_APP_ICON_SCALE = "app_icon_scale"
 
     /** 默认 Dock 图标大小（dp），renderDock 按 [dockIconScale] 缩放 */
     const val DEFAULT_DOCK_ICON_DP = 64
+    /** 默认应用列表图标大小（dp），AppListAdapter 按 [appIconScale] 缩放 */
+    const val DEFAULT_APP_ICON_DP = 72
 
     fun dockStyle(ctx: Context): DockStyle =
         if (ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_DOCK_STYLE, 0) == 1)
@@ -35,6 +38,16 @@ object UiTheme {
     fun setDockIconScale(ctx: Context, scale: Float) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putFloat(KEY_DOCK_ICON_SCALE, scale.coerceIn(0.6f, 1.4f)).apply()
+    }
+
+    /** 应用列表图标缩放比例（0.6~1.4，1.0=默认 72dp） */
+    fun appIconScale(ctx: Context): Float =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getFloat(KEY_APP_ICON_SCALE, 1f).coerceIn(0.6f, 1.4f)
+
+    fun setAppIconScale(ctx: Context, scale: Float) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putFloat(KEY_APP_ICON_SCALE, scale.coerceIn(0.6f, 1.4f)).apply()
     }
 
     /** 当前是否深色：手动指定优先，否则跟随系统 DayNight */

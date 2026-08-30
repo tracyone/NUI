@@ -27,7 +27,13 @@ class AppListAdapter(
 
     override fun onBindViewHolder(holder: AppVH, position: Int) {
         val app = apps[position]
-        holder.binding.appIcon.setImageDrawable(app.icon)
+        // 图标大小随 UiTheme.appIconScale 动态调整（0.6~1.4，默认 72dp）
+        val scale = UiTheme.appIconScale(context)
+        val sizePx = (UiTheme.DEFAULT_APP_ICON_DP * context.resources.displayMetrics.density * scale).toInt()
+        holder.binding.appIcon.layoutParams = holder.binding.appIcon.layoutParams.apply {
+            width = sizePx; height = sizePx
+        }
+        holder.binding.appIcon.setImageBitmap(IconUtils.toBitmap(app.icon, sizePx))
         holder.binding.appLabel.text = app.label
         holder.binding.root.setOnClickListener { onClick(app) }
         holder.binding.root.setOnLongClickListener { onLongClick(app); true }

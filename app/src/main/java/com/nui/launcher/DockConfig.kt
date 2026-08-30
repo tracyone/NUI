@@ -14,7 +14,7 @@ import androidx.core.content.edit
 object DockConfig {
     private const val PREFS = "nui_dock"
     private const val KEY = "slots"
-    const val SLOT_COUNT = 6
+    const val SLOT_COUNT = 8
 
     fun slots(context: Context): List<String?> {
         val s = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

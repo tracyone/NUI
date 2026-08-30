@@ -29,9 +29,9 @@ object StockHome {
                 ?.let { pm.getApplicationIcon(it).mutate() }
                 ?: ContextCompat.getDrawable(context, R.drawable.ic_launcher_foreground)!!
         }.getOrDefault(ContextCompat.getDrawable(context, R.drawable.ic_launcher_foreground)!!)
-        val icon: Drawable = baseIcon.apply {
-            DrawableCompat.setTint(this, android.graphics.Color.parseColor("#ECEFF1"))
-        }
+        // 不固定 tint：由调用方（如 MainActivity.renderDock）按深浅模式设置，
+        // 避免浅色背景下浅灰图标看不清
+        val icon: Drawable = baseIcon
         val launchIntent = Intent().apply {
             // 不通过具体包，直接走我们的自定义 action；
             // 最终点击时在 MainActivity 侧按 PKG_STOCK_HOME 拦截 -> launch(context)

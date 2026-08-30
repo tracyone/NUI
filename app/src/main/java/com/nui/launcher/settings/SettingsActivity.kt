@@ -48,6 +48,9 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var tvDockIconTitle: TextView
     private lateinit var seekDockIcon: SeekBar
     private lateinit var tvDockIconValue: TextView
+    private lateinit var seekAppIcon: SeekBar
+    private lateinit var tvAppIconValue: TextView
+    private lateinit var tvAppIconTitle: TextView
     private var currentTab = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -79,6 +82,9 @@ class SettingsActivity : AppCompatActivity() {
         tvDockIconTitle = findViewById(R.id.tvDockIconTitle)
         seekDockIcon = findViewById(R.id.seekDockIcon)
         tvDockIconValue = findViewById(R.id.tvDockIconValue)
+        seekAppIcon = findViewById(R.id.seekAppIcon)
+        tvAppIconValue = findViewById(R.id.tvAppIconValue)
+        tvAppIconTitle = findViewById(R.id.tvAppIconTitle)
 
         // 左侧分类切换
         tabMusic.setOnClickListener { selectTab(0) }
@@ -121,6 +127,22 @@ class SettingsActivity : AppCompatActivity() {
                         val scale = 0.6f + progress / 80f * 0.8f
                         UiTheme.setDockIconScale(this@SettingsActivity, scale)
                         tvDockIconValue.text = "${(scale * 100).toInt()}%"
+                    }
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
+        }
+        // 应用列表图标大小：0.6~1.4，默认 1.0（100%），拖动实时保存
+        tvAppIconValue.text = "${(UiTheme.appIconScale(this) * 100).toInt()}%"
+        seekAppIcon.apply {
+            progress = ((UiTheme.appIconScale(this@SettingsActivity) - 0.6f) / 0.8f * 80).toInt()
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    if (fromUser) {
+                        val scale = 0.6f + progress / 80f * 0.8f
+                        UiTheme.setAppIconScale(this@SettingsActivity, scale)
+                        tvAppIconValue.text = "${(scale * 100).toInt()}%"
                     }
                 }
                 override fun onStartTrackingTouch(seekBar: SeekBar?) {}
@@ -192,6 +214,7 @@ class SettingsActivity : AppCompatActivity() {
         tvOptDockEdge.setTextColor(p.label)
         tvOptDockFloat.setTextColor(p.label)
         tvDockIconTitle.setTextColor(p.label)
+        tvAppIconTitle.setTextColor(p.label)
         findViewById<TextView>(R.id.groupTitleDock).setTextColor(p.value)
         findViewById<View>(R.id.dividerDock).setBackgroundColor(p.divider)
         checkSystem.setTextColor(p.accent)
@@ -203,6 +226,8 @@ class SettingsActivity : AppCompatActivity() {
         seekLyricAlpha.thumbTintList = ColorStateList.valueOf(p.accent)
         seekDockIcon.progressTintList = ColorStateList.valueOf(p.accent)
         seekDockIcon.thumbTintList = ColorStateList.valueOf(p.accent)
+        seekAppIcon.progressTintList = ColorStateList.valueOf(p.accent)
+        seekAppIcon.thumbTintList = ColorStateList.valueOf(p.accent)
         findViewById<Button>(R.id.btnAdd).background = RippleDrawable(
             ColorStateList.valueOf(p.ripple), null,
             GradientDrawable().apply { setColor(p.accent); cornerRadius = 12 * dp },

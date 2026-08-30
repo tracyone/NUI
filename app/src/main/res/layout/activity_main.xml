@@ -37,20 +37,13 @@
             android:textSize="20sp"
             android:textStyle="bold" />
 
-        <ScrollView
+        <LinearLayout
+            android:id="@+id/dockItems"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:scrollbars="none"
-            android:fillViewport="true">
-
-            <LinearLayout
-                android:id="@+id/dockItems"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:gravity="center_horizontal" />
-        </ScrollView>
+            android:orientation="vertical"
+            android:gravity="center_horizontal" />
 
         <ImageButton
             android:id="@+id/dockApps"
