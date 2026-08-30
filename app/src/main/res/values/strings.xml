@@ -11,4 +11,15 @@
     <string name="dock_map">地图</string>
     <string name="dock_music">音乐</string>
     <string name="dock_settings">设置</string>
+
+    <string name="desktop_settings">桌面设置</string>
+    <string name="key_mapping_list">方向盘按键映射</string>
+    <string name="add_key_mapping">添加按键映射</string>
+    <string name="edit">编辑</string>
+    <string name="delete">删除</string>
+    <string name="listening_key">请按下方向盘按键…</string>
+    <string name="key_code">按键code（点击开始监听按键）</string>
+    <string name="action_to_run">执行操作（点击选择）</string>
+    <string name="save">保存</string>
+    <string name="select_action">选择操作</string>
 </resources>

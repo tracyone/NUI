@@ -43,6 +43,13 @@
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:screenOrientation="landscape" />
 
+        <activity
+            android:name=".settings.SettingsActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.NUI" />
+
         <service
             android:name=".music.MusicListenerService"
             android:exported="false"

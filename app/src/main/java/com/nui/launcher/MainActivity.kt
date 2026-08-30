@@ -101,6 +101,17 @@ class MainActivity : AppCompatActivity() {
         setupPageIndicator()
     }
 
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            if (com.nui.launcher.settings.KeyMapExecutor.handle(
+                    this, event.keyCode,
+                    if (::musicHost.isInitialized) musicHost else null,
+                    if (::navHost.isInitialized) navHost else null,
+                )) return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         wallpaper.onActivityResult(requestCode, resultCode, data)
@@ -326,10 +337,16 @@ class MainActivity : AppCompatActivity() {
                         ?: Intent(Intent.ACTION_MAIN).setPackage(pkg),
                 )
             }.sortedBy { it.label.lowercase() }
+            val settingsEntry = AppModel(
+                label = getString(R.string.desktop_settings),
+                packageName = packageName,
+                icon = androidx.core.content.ContextCompat.getDrawable(this, R.drawable.ic_dock_settings)!!,
+                launchIntent = Intent(this, com.nui.launcher.settings.SettingsActivity::class.java),
+            )
             runOnUiThread {
                 grid.adapter = AppListAdapter(
                     context = this,
-                    apps = apps,
+                    apps = listOf(settingsEntry) + apps,
                     onClick = { app -> startActivity(app.launchIntent) },
                 )
             }

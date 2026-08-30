@@ -98,6 +98,10 @@ class MusicHost(
     }
 
     /** 用户点击"去授权"时调用：跳到通知监听权限设置页 */
+    /** 方向盘按键用：下一首/上一首 */
+    fun next() { currentController?.let { safe { it.transportControls.skipToNext() } } }
+    fun prev() { currentController?.let { safe { it.transportControls.skipToPrevious() } } }
+
     fun requestPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             val i = Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")

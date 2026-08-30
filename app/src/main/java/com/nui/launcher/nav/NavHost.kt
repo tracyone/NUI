@@ -75,6 +75,15 @@ class NavHost(
         bind(companyBtn)
     }
 
+    /** 方向盘按键用：一键回家/去公司（有坐标走坐标导航，无坐标走 naviSpecial） */
+    fun naviHome() {
+        loadTarget(KEY_HOME)?.let { startNavigation(it) } ?: naviSpecial(DEST_HOME)
+    }
+
+    fun naviCompany() {
+        loadTarget(KEY_COMPANY)?.let { startNavigation(it) } ?: naviSpecial(DEST_COMPANY)
+    }
+
     /** 绑定按钮：有坐标→10007 广播导航；无坐标→navi2SpecialDest?dest=home/crop 一键导航。 */
     private fun bind(b: NavBtn) {
         b.icon.setImageResource(b.iconRes)

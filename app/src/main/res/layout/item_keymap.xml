@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:layout_marginTop="12dp"
+    android:padding="16dp"
+    android:background="@drawable/bg_panel">
+
+    <TextView
+        android:id="@+id/tvKeyCode"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:textColor="@color/text_primary"
+        android:textSize="20sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/tvAction"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:textColor="@color/accent"
+        android:textSize="20sp" />
+
+    <Button
+        android:id="@+id/btnEdit"
+        android:layout_width="wrap_content"
+        android:layout_height="48dp"
+        android:background="@drawable/bg_dock_item"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:text="@string/edit"
+        android:textColor="@color/text_primary"
+        android:textSize="16sp" />
+
+    <Button
+        android:id="@+id/btnDelete"
+        android:layout_width="wrap_content"
+        android:layout_height="48dp"
+        android:layout_marginStart="12dp"
+        android:background="@drawable/bg_dock_item"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:text="@string/delete"
+        android:textColor="#FF6B6B"
+        android:textSize="16sp" />
+</LinearLayout>
