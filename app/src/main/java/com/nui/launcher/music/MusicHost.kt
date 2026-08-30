@@ -400,7 +400,9 @@ class MusicHost(
         if (key == lyricFetchKey) return
         lyricFetchKey = key
         android.util.Log.d("NUI.MusicHost", "maybeFetchLyric: $t - $lastArtist")
-        lyricFetcher.requestLyric(t, lastArtist)
+        // 传入歌曲时长，供 QQ 音乐纯文本歌词估算时间戳
+        val duration = currentController?.metadata?.getLong(android.media.MediaMetadata.METADATA_KEY_DURATION) ?: 0L
+        lyricFetcher.requestLyric(t, lastArtist, duration)
     }
 
     /** 启动首选音乐 App，延迟返回 NUI（与地图逻辑一致）。
@@ -681,7 +683,7 @@ class MusicHost(
 
     /** LRC 元数据行关键字（作词/作曲/编曲等），解析时过滤掉，避免当前句高亮到这些行。 */
     private val LRC_META = Regex(
-        """^(作词|作曲|编曲|制作人|制作|监制|混音|母带|录音|和声|合声|吉他|贝斯|键盘|弦乐|钢琴|鼓|发行|出品|版权|原唱|翻唱|纯音乐|OP|SP)\s*[:：]?.*$"""
+        """^(作词|作曲|编曲|制作人|制作|监制|混音|母带|录音|和声|合声|吉他|贝斯|键盘|弦乐|钢琴|鼓|发行|出品|版权|原唱|翻唱|纯音乐|OP|SP|演唱|统筹|企划|营销|宣传|推广|出版|授权|策划|填词|谱曲|原曲|原词|念白|口白|说唱|配唱|人声|封面|视觉|设计|插画|摄影|导演|编剧|剪辑|特效|调色|字幕|翻译|校对|审核|鸣谢|感谢|联合出品|联合发行|独家发行|独家出品|音乐统筹|音乐发行|音乐出品|音乐制作|音乐监制|音乐企划|音乐营销|音乐宣传|音乐推广|出品人|发行人|监制人|厂牌|唱片公司|经纪公司|经纪|代理|总代理|独家代理|发行代理|版权代理|词曲版权|录音版权|词曲|词曲作者|词曲创作|创作|创作者|创作人|原创|专辑|单曲|EP|流派|风格|语言|地区|国家|发行时间|发行日期|ISRC|UPC|EAN|条形码|唱片编号|版权所有|翻录必究|版权声明|法律声明)\s*[:：]?.*$"""
     )
 
     /** 解析 LRC 格式歌词：[mm:ss.xx]歌词文本 → (timeMs, text) 列表。 */
@@ -805,6 +807,8 @@ class MusicHost(
             "cn.kuwo.kwmusiccar",
             "com.android.mediacenter",
             "com.spotify.music",
+            "com.luna.music",
+            "com.luna.music.car",
         )
     }
 }
