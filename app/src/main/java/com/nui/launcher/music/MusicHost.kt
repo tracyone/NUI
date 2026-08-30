@@ -31,6 +31,16 @@ import android.content.BroadcastReceiver
 import android.content.IntentFilter
 import com.nui.launcher.UiTheme
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
+import android.graphics.Rect
+import android.graphics.drawable.GradientDrawable
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
+import android.view.animation.LinearInterpolator
+import kotlin.math.min
 import com.nui.launcher.NuiToast
 import com.nui.launcher.R
 
@@ -69,6 +79,8 @@ class MusicHost(
     private val lyricFetcher = LyricFetcher(context)
     /** 当前已发起网络抓词的歌 key（"title||artist"），用于防止同一首重复请求 */
     private var lyricFetchKey: String? = null
+    /** 唱碟旋转动画（播放时旋转，暂停时停止） */
+    private var discRotationAnim: ObjectAnimator? = null
     init {
         lyricFetcher.onLyricReady = { lrc, _ ->
             // 对收到的 LRC 做基本一致性校验：不重复采用相同内容
@@ -116,6 +128,9 @@ class MusicHost(
             // 封面或歌词更新后，立即重绘一次（不等待 refresh() 轮询）
             if (currentController != null && (cover != null || !lyric.isNullOrBlank())) {
                 renderPlaying(currentController!!)
+            } else if (currentController == null && (!title.isNullOrBlank() || !artist.isNullOrBlank())) {
+                // 还没有媒体会话但收到了音乐通知：主动 refresh 拉取会话（解决播放时悬浮歌词不出现的问题）
+                refresh()
             }
         }
     }
@@ -163,6 +178,13 @@ class MusicHost(
         renderEmpty()
         val f = IntentFilter(MusicListenerService.ACTION_NOTIFY)
         lbm.registerReceiver(notifyReceiver, f)
+        // 监听媒体会话变化（从无到有/切换 App），及时触发 refresh 渲染播放面板
+        try {
+            val sessionListener = android.media.session.MediaSessionManager.OnActiveSessionsChangedListener { refresh() }
+            sessionManager.addOnActiveSessionsChangedListener(sessionListener, notificationListener)
+        } catch (e: Exception) {
+            android.util.Log.w("NUI.MusicHost", "注册会话变化监听器失败: ${e.message}")
+        }
         refresh()
     }
 
@@ -279,63 +301,131 @@ class MusicHost(
         }, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
         ).apply { topMargin = dp(2) })
-        // 控制按钮行
-        val btnTint = if (art != null) 0xFFFFFFFF.toInt() else p.dockIconTint
-        val ctrls = LinearLayout(context).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
+        // 唱碟（黑胶唱片+封面）+ 唱臂；播放时唱片旋转、唱臂落在唱片上；停止时唱片停、唱臂离开
+        // 去掉播放按钮和内嵌歌词，整个唱碟区域可点击播放/暂停；view 里只显示歌曲名和歌手
+        val playing = isPlaying(controller.playbackState)
+
+        // 计算唱碟大小：尽量大，前提是唱臂能塞进去；container 已测量则直接算，否则给默认值避免布局抖动
+        val discSize = if (container.width > 0 && container.height > 0) {
+            val dw = container.width - dp(24)
+            val dh = container.height - dp(56)  // 标题+歌手+上下 padding
+            min(dw, dh).coerceAtLeast(dp(96))
+        } else {
+            dp(170)
         }
-        ctrls.addView(ctrlBtn(android.R.drawable.ic_media_previous, btnTint) {
-            safe { controller.transportControls.skipToPrevious() }
+        val coverSize = (discSize * 0.62f).toInt()
+        val armLen = (discSize * 0.52f).toInt()
+
+        // 唱碟容器（唱碟+唱臂，可点击）
+        val discWrap = FrameLayout(context).apply {
+            layoutParams = LinearLayout.LayoutParams(discSize, discSize).apply {
+                topMargin = dp(4); bottomMargin = dp(4)
+            }
+        }
+        // 黑胶唱片
+        val disc = FrameLayout(context).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(0xFF141414.toInt())
+                setStroke(dp(2), 0xFF3A3A3A.toInt())
+            }
+        }
+        // 封面（圆形裁剪，比唱碟小一圈）
+        val cover = ImageView(context).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            if (art != null) setImageBitmap(toCircleBitmap(art))
+        }
+        disc.addView(cover, FrameLayout.LayoutParams(coverSize, coverSize, Gravity.CENTER))
+        discWrap.addView(disc, FrameLayout.LayoutParams(discSize, discSize, Gravity.CENTER))
+
+        // 唱臂：转轴底座 + 唱杆 + 唱头，绕转轴中心旋转
+        val tonearm = FrameLayout(context).apply {
+            // 转轴底座（大圆，银色渐变）
+            addView(View(context).apply {
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    colors = intArrayOf(0xFFE8E8E8.toInt(), 0xFFB0B0B0.toInt(), 0xFF888888.toInt())
+                    setStroke(dp(1), 0xFF666666.toInt())
+                }
+            }, FrameLayout.LayoutParams(dp(22), dp(22), Gravity.TOP or Gravity.START))
+            // 转轴中心小点
+            addView(View(context).apply {
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(0xFF555555.toInt())
+                }
+            }, FrameLayout.LayoutParams(dp(6), dp(6), Gravity.TOP or Gravity.START).apply {
+                leftMargin = dp(8); topMargin = dp(8)
+            })
+            // 唱杆（细矩形，从转轴中心向右延伸）
+            addView(View(context).apply {
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    colors = intArrayOf(0xFFD8D8D8.toInt(), 0xFFA0A0A0.toInt())
+                    setStroke(dp(1), 0xFF777777.toInt())
+                }
+            }, FrameLayout.LayoutParams(armLen, dp(5), Gravity.TOP or Gravity.START).apply {
+                leftMargin = dp(11); topMargin = dp(9)
+            })
+            // 唱头（小圆，在唱杆末端）
+            addView(View(context).apply {
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(0xFF333333.toInt())
+                    setStroke(dp(1), 0xFF666666.toInt())
+                }
+            }, FrameLayout.LayoutParams(dp(11), dp(11), Gravity.TOP or Gravity.START).apply {
+                leftMargin = dp(11) + armLen - dp(3); topMargin = dp(6)
+            })
+            // 旋转中心点：转轴中心
+            pivotX = dp(11).toFloat(); pivotY = dp(11).toFloat()
+            rotation = if (playing) 22f else -18f
+        }
+        discWrap.addView(tonearm, FrameLayout.LayoutParams(dp(22) + armLen + dp(8), dp(22), Gravity.TOP or Gravity.START).apply {
+            leftMargin = dp(2); topMargin = dp(2)
         })
-        ctrls.addView(ctrlBtn(
-            if (isPlaying(controller.playbackState)) android.R.drawable.ic_media_pause
-            else android.R.drawable.ic_media_play,
-            btnTint,
-        ) {
+
+        // 整个唱碟区域可点击播放/暂停
+        discWrap.setOnClickListener {
             safe {
                 if (isPlaying(controller.playbackState)) controller.transportControls.pause()
                 else controller.transportControls.play()
             }
-        })
-        ctrls.addView(ctrlBtn(android.R.drawable.ic_media_next, btnTint) {
-            safe { controller.transportControls.skipToNext() }
-        })
-        col.addView(ctrls, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-        ).apply { topMargin = dp(10) })
-        // 歌词区：2行（当前+下一句），紧凑布局不遮挡时钟；悬浮歌词显示时隐藏此处
-        val floatShowing = lyricFloatView != null
-        val lyricScroll = android.widget.ScrollView(context).apply {
-            isVerticalScrollBarEnabled = false
-            overScrollMode = View.OVER_SCROLL_NEVER
-            visibility = if (floatShowing) View.GONE else View.VISIBLE
         }
-        val lyricContainer = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(4), dp(2), dp(4), dp(2))
-        }
-        val lyricLines = Array(2) {
-            TextView(context).apply {
-                setTextColor(subColor)
-                textSize = 11f
-                gravity = Gravity.CENTER
-                maxLines = 1
-                ellipsize = TextUtils.TruncateAt.END
-                setPadding(0, dp(2), 0, dp(2))
+        // container 大小变化时同步调整唱碟大小（避免第一次测量不准）
+        container.post {
+            val dw = container.width - dp(24)
+            val dh = container.height - dp(56)
+            val newSize = min(dw, dh).coerceAtLeast(dp(96))
+            if (newSize != discSize) {
+                val newCover = (newSize * 0.62f).toInt()
+                val newArm = (newSize * 0.52f).toInt()
+                discWrap.layoutParams = (discWrap.layoutParams as LinearLayout.LayoutParams).apply {
+                    width = newSize; height = newSize
+                }
+                disc.layoutParams = (disc.layoutParams as FrameLayout.LayoutParams).apply {
+                    width = newSize; height = newSize
+                }
+                cover.layoutParams = (cover.layoutParams as FrameLayout.LayoutParams).apply {
+                    width = newCover; height = newCover
+                }
             }
         }
-        lyricLines.forEach { lyricContainer.addView(it, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)) }
-        lyricScroll.addView(lyricContainer)
-        col.addView(lyricScroll, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, dp(56)
-        ).apply { topMargin = dp(6) })
-        val lyricView = lyricLines[0]  // 第0行 = 当前句（用于 tag 兼容）
-        lyricView.text = if (lyrics.isNotEmpty()) "\u266A" else "暂无歌词"
-        container.setTag(R.id.tag_lyric_scroll, lyricScroll)
-        container.setTag(R.id.tag_lyric_lines, lyricLines)
+        // 播放时唱片旋转（20秒一圈），暂停时停止
+        discRotationAnim?.cancel()
+        if (playing) {
+            discRotationAnim = ObjectAnimator.ofFloat(disc, "rotation", 0f, 360f).apply {
+                duration = 20000
+                repeatCount = ValueAnimator.INFINITE
+                interpolator = LinearInterpolator()
+                start()
+            }
+        }
+        col.addView(discWrap)
+
+        // 歌词行引用（悬浮歌词刷新时用，view 里不显示内嵌歌词）
+        val lyricLines = arrayOfNulls<TextView>(2)
+        val lyricView = TextView(context)  // 占位，保持 tag 兼容
 
         container.addView(col)
         // 单击：启动当前绑定的音乐 App（先 hideFloat 关外部地图浮窗，回 NUI 后 showFloat 恢复）
@@ -347,6 +437,7 @@ class MusicHost(
         }
 
         container.setTag(R.id.tag_lyric_view, lyricView)
+        container.setTag(R.id.tag_lyric_lines, lyricLines)
         // 持久歌词循环：只在未启动时启动一次，不再被高频渲染反复重置
         if (!lyricTickRunning) {
             lyricTickRunning = true
@@ -364,6 +455,19 @@ class MusicHost(
             setOnClickListener { onClick() }
             setPadding(dp(10), dp(10), dp(10), dp(10))
         }
+
+    /** 把 bitmap 裁剪成圆形 */
+    private fun toCircleBitmap(bitmap: Bitmap): Bitmap {
+        val size = min(bitmap.width, bitmap.height)
+        val output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(output)
+        val paint = Paint().apply { isAntiAlias = true }
+        val rect = Rect(0, 0, size, size)
+        canvas.drawCircle(size / 2f, size / 2f, size / 2f, paint)
+        paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+        canvas.drawBitmap(bitmap, rect, rect, paint)
+        return output
+    }
 
     private fun safe(block: () -> Unit) {
         runCatching { block() }
@@ -487,7 +591,6 @@ class MusicHost(
     }
 
     fun setFloatAreaVisible(v: Boolean) {
-        if (desktopVisible == v) return
         desktopVisible = v
         updateLyricFloat()
     }
@@ -730,71 +833,24 @@ class MusicHost(
         return result.sortedBy { it.first }
     }
 
-    /** 根据当前播放进度更新歌词高亮行。 */
+    /** 根据当前播放进度更新歌词高亮行（仅悬浮歌词，内嵌歌词已移除）。 */
     private fun refreshLyric() {
-        if (lyrics.isEmpty()) { hideLyricFloat(); return }
         val controller = currentController
-        val pos = controller?.playbackState?.position ?: -1L
         playingNow = controller?.playbackState?.state == PlaybackState.STATE_PLAYING
+        if (lyrics.isEmpty()) { hideLyricFloat(); return }
+        val pos = controller?.playbackState?.position ?: -1L
         if (pos < 0L) { updateLyricFloat(); return }
 
         var idx = -1
         for (i in lyrics.indices) {
             if (lyrics[i].first <= pos) idx = i else break
         }
-        // 播放位置早于首句歌词（前奏/无词段）：默认显示第一句，避免一直停留在 ♪
+        // 播放位置早于首句歌词（前奏/无词段）：默认显示第一句
         if (idx < 0 && lyrics.isNotEmpty()) idx = 0
         if (idx >= 0 && idx != lyricHighlight) lyricHighlight = idx
-        if (lyricHighlight < 0) { updateLyricFloat(); return }
-        val idx2 = lyricHighlight
-
-        val lyricLines = container.getTag(R.id.tag_lyric_lines) as? Array<TextView>
-        val lyricScroll = container.getTag(R.id.tag_lyric_scroll) as? android.widget.ScrollView
-        if (lyricLines != null) {
-            // 2行：第0行当前句（高亮白加粗12号），第1行下一句（次白普通10.5号）
-            val hi = Color.parseColor("#FFFFFF")
-            val sub = Color.parseColor("#90A4AE")
-            // line 0 = current
-            val tv0 = lyricLines[0]
-            tv0.text = lyrics[idx2].second
-            tv0.setTextColor(hi)
-            tv0.setTypeface(null, android.graphics.Typeface.BOLD)
-            tv0.textSize = 12f
-            tv0.alpha = 1f
-            // line 1 = next
-            val tv1 = lyricLines[1]
-            val nextIdx = idx2 + 1
-            if (nextIdx in lyrics.indices) {
-                tv1.text = lyrics[nextIdx].second
-                tv1.setTextColor(sub)
-                tv1.setTypeface(null, android.graphics.Typeface.NORMAL)
-                tv1.textSize = 10.5f
-                tv1.alpha = 0.85f
-            } else {
-                tv1.text = ""
-            }
-        } else {
-            val lyricView = container.getTag(R.id.tag_lyric_view) as? TextView
-            if (lyricView != null) {
-                val sb = android.text.SpannableStringBuilder()
-                val dim = Color.parseColor("#78909C")
-                val hi = Color.parseColor("#FFFFFF")
-                fun appendLine(text: String, color: Int, bold: Boolean) {
-                    val start = sb.length
-                    sb.append(text)
-                    sb.setSpan(android.text.style.ForegroundColorSpan(color),
-                        start, sb.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                    if (bold) sb.setSpan(android.text.style.StyleSpan(android.graphics.Typeface.BOLD),
-                        start, sb.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                }
-                if (idx2 > 0) appendLine(lyrics[idx2 - 1].second + "\n", dim, false)
-                appendLine(lyrics[idx2].second, hi, true)
-                if (idx2 + 1 < lyrics.size) appendLine("\n" + lyrics[idx2 + 1].second, dim, false)
-                lyricView.text = sb
-            }
-        }
         updateLyricFloat()
     }
+
     private fun dp(v: Int): Int =
         (v * context.resources.displayMetrics.density).toInt()
 
