@@ -10,17 +10,17 @@
         android:layout_width="600dp"
         android:layout_height="400dp"
         android:layout_marginStart="132dp"
-        android:layout_marginTop="20dp"
+        android:layout_marginTop="8dp"
         app:cardCornerRadius="24dp"
         app:cardElevation="10dp"
-        app:cardBackgroundColor="@color/map_bg"
+        app:cardBackgroundColor="@android:color/transparent"
         app:strokeWidth="0dp">
 
         <FrameLayout
             android:id="@+id/mapContainer"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:background="@color/map_bg" />
+            android:background="@android:color/transparent" />
 
         <ImageButton
             android:id="@+id/btnSwitchMap"
@@ -43,8 +43,8 @@
         android:layout_gravity="top|end"
         android:orientation="vertical"
         android:padding="16dp"
-        android:layout_marginTop="20dp"
-        android:layout_marginBottom="20dp"
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="8dp"
         android:layout_marginEnd="16dp"
         android:background="@drawable/bg_panel">
 

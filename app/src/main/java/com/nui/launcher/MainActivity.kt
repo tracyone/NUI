@@ -218,7 +218,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         // 地图卡片
-        desktopMapPanel?.setCardBackgroundColor(p.mapBg)
+        // 地图卡片背景全透明：高德浮窗可能比卡片窄，边缘透出壁纸而非黑色背景
+        desktopMapPanel?.setCardBackgroundColor(android.graphics.Color.TRANSPARENT)
         desktopBtnSwitchMap?.imageTintList = ColorStateList.valueOf(p.textPrimary)
 
         // 右侧面板：背景 + 导航图标/文字 + 时钟
@@ -266,23 +267,25 @@ class MainActivity : AppCompatActivity() {
             barLp.bottomMargin = 0
             barLp.gravity = android.view.Gravity.START
         } else {
-            // 悬浮：紧凑竖条垂直居中，四边留 20dp（元素上下不再分散）
+            // 悬浮：紧凑竖条垂直居中，四边留 8dp（元素上下不再分散）
             barLp.height = FrameLayout.LayoutParams.WRAP_CONTENT
-            barLp.leftMargin = (20 * dp).toInt()
-            barLp.topMargin = (20 * dp).toInt()
-            barLp.bottomMargin = (20 * dp).toInt()
+            barLp.leftMargin = (8 * dp).toInt()
+            barLp.topMargin = (8 * dp).toInt()
+            barLp.bottomMargin = (8 * dp).toInt()
             barLp.gravity = android.view.Gravity.START or android.view.Gravity.CENTER_VERTICAL
         }
         binding.dockBar.layoutParams = barLp
         applyDockVisual()
 
-        // 地图卡片：dock 贴边时左移贴近 dock（dock宽+16dp），悬浮时再让出 20dp
+        // 地图卡片：dock 贴边时左移贴近 dock（dock宽+16dp），悬浮时再让出 8dp
         desktopMapPanel?.let { mp ->
             val lp = mp.layoutParams as FrameLayout.LayoutParams
-            val left = if (edge) dockW + 16 else 20 + dockW + 16
+            val left = if (edge) dockW + 16 else 8 + dockW + 16
             if (lp.leftMargin != (left * dp).toInt()) {
                 lp.leftMargin = (left * dp).toInt()
                 mp.layoutParams = lp
+                // dock 形态切换导致地图位置变化，刷新高德浮窗几何（否则边缘露出卡片背景）
+                mp.post { mapHost?.refreshFloat() }
             }
         }
         // 应用网格：dock 贴边时压缩左侧 padding
@@ -524,8 +527,16 @@ class MainActivity : AppCompatActivity() {
         val mapRight = mlp.leftMargin + mp.width
         val panelW = availableRight - gap - mapRight
         if (panelW < minPanel) {
-            // 音乐栏太窄：隐藏，地图可占满右侧
+            // 音乐栏太窄：隐藏，地图自动扩展到右缘（不留空）
             rp.visibility = android.view.View.GONE
+            val targetW = availableRight - mlp.leftMargin
+            if (mlp.width < targetW - 2) {
+                mlp.width = targetW
+                mp.layoutParams = mlp
+            }
+            // 音乐栏消失后刷新高德浮窗几何：布局可能尚未完成，post 确保取到最新 width
+            // （否则浮窗比卡片窄，右边缘露出卡片深色背景）
+            mp.post { mapHost?.refreshFloat() }
         } else {
             rp.visibility = android.view.View.VISIBLE
             val lp = rp.layoutParams

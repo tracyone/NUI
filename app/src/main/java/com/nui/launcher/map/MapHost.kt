@@ -80,6 +80,24 @@ class MapHost(
         }
     }
 
+    /** 外部（如 dock 形态切换）导致地图卡片位置变化后，刷新高德浮窗几何并重发显示广播 */
+    fun refreshFloat() {
+        // 等待布局完成后再取几何，否则 getLocationOnScreen / width 可能是旧值或过渡值
+        // 用 OnLayoutChangeListener 确保在本次布局完成后取数；兜底 200ms 防止无布局变化时不触发
+        mapPanel.addOnLayoutChangeListener(object : android.view.View.OnLayoutChangeListener {
+            override fun onLayoutChange(v: android.view.View, left: Int, top: Int, right: Int, bottom: Int,
+                                         oldLeft: Int, oldTop: Int, oldRight: Int, oldBottom: Int) {
+                v.removeOnLayoutChangeListener(this)
+                primeCache()
+                showFloat()
+            }
+        })
+        mapPanel.postDelayed({
+            primeCache()
+            showFloat()
+        }, 200)
+    }
+
     private enum class ResizeMode { NONE, RIGHT, BOTTOM, BOTH }
 
     init {
@@ -230,6 +248,14 @@ class MapHost(
     private fun primeCache() {
         val loc = IntArray(2)
         mapPanel.getLocationOnScreen(loc)
+        val sw = context.resources.displayMetrics.widthPixels
+        val sh = context.resources.displayMetrics.heightPixels
+        // 合理性检查：视图必须在屏幕内，否则可能是布局过渡中取到的错误坐标，跳过更新
+        if (loc[0] < 0 || loc[0] >= sw || loc[1] < 0 || loc[1] >= sh ||
+            mapPanel.width <= 0 || mapPanel.height <= 0) {
+            Log.w(TAG, "primeCache skip: loc=${loc[0]},${loc[1]} size=${mapPanel.width}x${mapPanel.height}")
+            return
+        }
         cachedX = loc[0]
         cachedY = loc[1]
         cachedW = cachedX + mapPanel.width
@@ -499,18 +525,33 @@ class MapHost(
             if (p.size == 4) {
                 val c = clampSizeFixed(p[0], p[1], p[2], p[3])
                 applyGeometry(c[0], c[1], c[2], c[3])
+                normalizeVerticalMargins()
                 return
             }
         }
-        // 默认位置：左边贴 dock 栏右侧（dock 96dp+20margin+12gap≈128dp），上边 20dp
+        // 默认位置：左边贴 dock 栏右侧（dock 96dp+20margin+12gap≈128dp），上边 8dp
         val x = dp(128)
-        val y = dp(20)
+        val y = dp(8)
         val sw = context.resources.displayMetrics.widthPixels
         val sh = context.resources.displayMetrics.heightPixels
         val defaultW = (sw - x - dp(240)).coerceAtLeast(MIN_SIZE) // 留右侧信息栏
-        val defaultH = (sh - y - dp(40)).coerceAtLeast(MIN_SIZE)
+        val defaultH = (sh - y - dp(16)).coerceAtLeast(MIN_SIZE)   // 上下各 8dp
         val c = clampSizeFixed(x, y, defaultW, defaultH)
         applyGeometry(c[0], c[1], c[2], c[3])
+    }
+
+    /** 强制地图上下边距为 8dp（保留左右位置和宽度），避免上下留空过大 */
+    private fun normalizeVerticalMargins() {
+        val lp = mapPanel.layoutParams as FrameLayout.LayoutParams
+        val sh = context.resources.displayMetrics.heightPixels
+        val targetTop = dp(8)
+        val targetH = (sh - targetTop - dp(8)).coerceAtLeast(MIN_SIZE)
+        if (lp.topMargin != targetTop || lp.height != targetH) {
+            lp.topMargin = targetTop
+            lp.height = targetH
+            mapPanel.layoutParams = lp
+            onGeometryChanged?.invoke()
+        }
     }
 
     private fun saveGeometry() {
