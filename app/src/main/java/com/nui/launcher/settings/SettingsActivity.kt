@@ -29,6 +29,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var panelMusic: View
     private lateinit var panelSteering: View
     private lateinit var panelAppearance: View
+    private lateinit var checkSystem: TextView
     private lateinit var checkDark: TextView
     private lateinit var checkLight: TextView
 
@@ -47,6 +48,7 @@ class SettingsActivity : AppCompatActivity() {
         panelMusic = findViewById(R.id.panelMusic)
         panelSteering = findViewById(R.id.panelSteering)
         panelAppearance = findViewById(R.id.panelAppearance)
+        checkSystem = findViewById(R.id.checkSystem)
         checkDark = findViewById(R.id.checkDark)
         checkLight = findViewById(R.id.checkLight)
 
@@ -56,12 +58,15 @@ class SettingsActivity : AppCompatActivity() {
         tabAppearance.setOnClickListener { selectTab(2) }
         selectTab(0)
 
-        // 外观：深色 / 浅色
+        // 外观：跟随系统 / 深色 / 浅色
+        findViewById<View>(R.id.optSystem).setOnClickListener {
+            UiTheme.setMode(this, UiTheme.Mode.SYSTEM); renderAppearance()
+        }
         findViewById<View>(R.id.optDark).setOnClickListener {
-            UiTheme.setMode(this, true); renderAppearance()
+            UiTheme.setMode(this, UiTheme.Mode.DARK); renderAppearance()
         }
         findViewById<View>(R.id.optLight).setOnClickListener {
-            UiTheme.setMode(this, false); renderAppearance()
+            UiTheme.setMode(this, UiTheme.Mode.LIGHT); renderAppearance()
         }
         renderAppearance()
 
@@ -95,11 +100,12 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    /** 按当前深浅模式刷新勾选 */
+    /** 按当前外观模式刷新勾选 */
     private fun renderAppearance() {
-        val dark = UiTheme.isDark(this)
-        checkDark.visibility = if (dark) View.VISIBLE else View.GONE
-        checkLight.visibility = if (dark) View.GONE else View.VISIBLE
+        val m = UiTheme.mode(this)
+        checkSystem.visibility = if (m == UiTheme.Mode.SYSTEM) View.VISIBLE else View.GONE
+        checkDark.visibility = if (m == UiTheme.Mode.DARK) View.VISIBLE else View.GONE
+        checkLight.visibility = if (m == UiTheme.Mode.LIGHT) View.VISIBLE else View.GONE
     }
 
     override fun onResume() {

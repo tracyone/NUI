@@ -16,6 +16,7 @@
     <string name="music">音乐</string>
     <string name="steering_wheel">方向盘</string>
     <string name="appearance">外观</string>
+    <string name="theme_system">跟随系统</string>
     <string name="theme_dark">深色模式</string>
     <string name="theme_light">浅色模式</string>
     <string name="lyric_bg_alpha">悬浮歌词背景不透明度</string>

@@ -223,6 +223,42 @@
                 android:layout_marginBottom="16dp"
                 android:background="@color/settings_divider" />
 
+            <!-- 跟随系统 -->
+            <LinearLayout
+                android:id="@+id/optSystem"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="@drawable/bg_settings_row_ripple"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/theme_system"
+                    android:textColor="@color/settings_label"
+                    android:textSize="17sp" />
+
+                <TextView
+                    android:id="@+id/checkSystem"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="✓"
+                    android:textColor="@color/settings_btn_text"
+                    android:textSize="20sp"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/settings_divider" />
+
             <!-- 深色模式 -->
             <LinearLayout
                 android:id="@+id/optDark"

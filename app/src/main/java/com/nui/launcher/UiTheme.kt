@@ -1,26 +1,43 @@
 package com.nui.launcher
 
 import android.content.Context
+import android.content.res.Configuration
 
-/** 桌面深浅模式：两套配色 + 模式存取（默认深色） */
+/** 桌面深浅模式：跟随系统 / 深色 / 浅色，默认跟随系统 */
 object UiTheme {
-    enum class Mode { DARK, LIGHT }
+    enum class Mode { SYSTEM, DARK, LIGHT }
 
     private const val PREFS = "nui_ui"
     private const val KEY_MODE = "theme_mode"
 
-    /** 当前是否深色模式（默认深色） */
-    fun isDark(ctx: Context): Boolean = mode(ctx) == Mode.DARK
-
-    fun mode(ctx: Context): Mode =
-        if (ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getInt(KEY_MODE, 1) == 1
-        ) Mode.DARK else Mode.LIGHT
-
-    fun setMode(ctx: Context, dark: Boolean) {
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit().putInt(KEY_MODE, if (dark) 1 else 0).apply()
+    /** 当前是否深色：手动指定优先，否则跟随系统 DayNight */
+    fun isDark(ctx: Context): Boolean = when (mode(ctx)) {
+        Mode.DARK -> true
+        Mode.LIGHT -> false
+        Mode.SYSTEM -> isSystemDark(ctx)
     }
+
+    fun mode(ctx: Context): Mode = when (
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_MODE, 0)
+    ) {
+        1 -> Mode.DARK
+        2 -> Mode.LIGHT
+        else -> Mode.SYSTEM
+    }
+
+    fun setMode(ctx: Context, mode: Mode) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putInt(KEY_MODE, when (mode) {
+                Mode.SYSTEM -> 0
+                Mode.DARK -> 1
+                Mode.LIGHT -> 2
+            }).apply()
+    }
+
+    /** 系统当前是否为深色模式 */
+    fun isSystemDark(ctx: Context): Boolean =
+        (ctx.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+                Configuration.UI_MODE_NIGHT_YES
 
     /** 配色集 */
     data class Palette(

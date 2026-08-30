@@ -2,6 +2,7 @@ package com.nui.launcher
 
 import android.content.Intent
 import android.content.res.ColorStateList
+import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
@@ -137,6 +138,15 @@ class MainActivity : AppCompatActivity() {
         if (::musicHost.isInitialized) {
             musicHost.refresh()
             musicHost.setFloatAreaVisible(true)
+        }
+    }
+
+    /** 系统深浅模式切换（跟随系统模式）时同步重刷桌面配色 */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (UiTheme.mode(this) == UiTheme.Mode.SYSTEM) {
+            applyTheme()
+            if (::musicHost.isInitialized) musicHost.refresh()
         }
     }
 
