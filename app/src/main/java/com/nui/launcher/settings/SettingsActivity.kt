@@ -28,6 +28,7 @@ class SettingsActivity : AppCompatActivity() {
     // 缓存 view 引用，避免回调中重复 findViewById（拖动滑块时可能返回 null）
     private lateinit var seekLyricAlpha: SeekBar
     private lateinit var tvLyricAlphaValue: TextView
+    private lateinit var tvLyricTitle: TextView
     private lateinit var tabMusic: TextView
     private lateinit var tabSteering: TextView
     private lateinit var tabAppearance: TextView
@@ -37,6 +38,16 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var checkSystem: TextView
     private lateinit var checkDark: TextView
     private lateinit var checkLight: TextView
+    private lateinit var tvOptSystem: TextView
+    private lateinit var tvOptDark: TextView
+    private lateinit var tvOptLight: TextView
+    private lateinit var checkDockEdge: TextView
+    private lateinit var checkDockFloat: TextView
+    private lateinit var tvOptDockEdge: TextView
+    private lateinit var tvOptDockFloat: TextView
+    private lateinit var tvDockIconTitle: TextView
+    private lateinit var seekDockIcon: SeekBar
+    private lateinit var tvDockIconValue: TextView
     private var currentTab = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -48,6 +59,7 @@ class SettingsActivity : AppCompatActivity() {
         recordList = findViewById(R.id.recordList)
         seekLyricAlpha = findViewById(R.id.seekLyricAlpha)
         tvLyricAlphaValue = findViewById(R.id.tvLyricAlphaValue)
+        tvLyricTitle = findViewById(R.id.tvLyricTitle)
         tabMusic = findViewById(R.id.tabMusic)
         tabSteering = findViewById(R.id.tabSteering)
         tabAppearance = findViewById(R.id.tabAppearance)
@@ -57,6 +69,16 @@ class SettingsActivity : AppCompatActivity() {
         checkSystem = findViewById(R.id.checkSystem)
         checkDark = findViewById(R.id.checkDark)
         checkLight = findViewById(R.id.checkLight)
+        tvOptSystem = findViewById(R.id.tvOptSystem)
+        tvOptDark = findViewById(R.id.tvOptDark)
+        tvOptLight = findViewById(R.id.tvOptLight)
+        checkDockEdge = findViewById(R.id.checkDockEdge)
+        checkDockFloat = findViewById(R.id.checkDockFloat)
+        tvOptDockEdge = findViewById(R.id.tvOptDockEdge)
+        tvOptDockFloat = findViewById(R.id.tvOptDockFloat)
+        tvDockIconTitle = findViewById(R.id.tvDockIconTitle)
+        seekDockIcon = findViewById(R.id.seekDockIcon)
+        tvDockIconValue = findViewById(R.id.tvDockIconValue)
 
         // 左侧分类切换
         tabMusic.setOnClickListener { selectTab(0) }
@@ -64,15 +86,46 @@ class SettingsActivity : AppCompatActivity() {
         tabAppearance.setOnClickListener { selectTab(2) }
         selectTab(0)
 
-        // 外观：跟随系统 / 深色 / 浅色
+        // 外观：跟随系统 / 深色 / 浅色（切换后立即整页刷新配色）
         findViewById<View>(R.id.optSystem).setOnClickListener {
-            UiTheme.setMode(this, UiTheme.Mode.SYSTEM); renderAppearance()
+            UiTheme.setMode(this, UiTheme.Mode.SYSTEM)
+            renderAppearance()
+            applySettingsTheme()
         }
         findViewById<View>(R.id.optDark).setOnClickListener {
-            UiTheme.setMode(this, UiTheme.Mode.DARK); renderAppearance()
+            UiTheme.setMode(this, UiTheme.Mode.DARK)
+            renderAppearance()
+            applySettingsTheme()
         }
         findViewById<View>(R.id.optLight).setOnClickListener {
-            UiTheme.setMode(this, UiTheme.Mode.LIGHT); renderAppearance()
+            UiTheme.setMode(this, UiTheme.Mode.LIGHT)
+            renderAppearance()
+            applySettingsTheme()
+        }
+        // Dock 形态：贴边（矩形）/ 悬浮（圆角）
+        findViewById<View>(R.id.optDockEdge).setOnClickListener {
+            UiTheme.setDockStyle(this, UiTheme.DockStyle.EDGE)
+            renderAppearance()
+        }
+        findViewById<View>(R.id.optDockFloat).setOnClickListener {
+            UiTheme.setDockStyle(this, UiTheme.DockStyle.FLOAT)
+            renderAppearance()
+        }
+        // Dock 图标大小：0.6~1.4，默认 1.0（100%），拖动实时保存
+        tvDockIconValue.text = "${(UiTheme.dockIconScale(this) * 100).toInt()}%"
+        seekDockIcon.apply {
+            progress = ((UiTheme.dockIconScale(this@SettingsActivity) - 0.6f) / 0.8f * 80).toInt()
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    if (fromUser) {
+                        val scale = 0.6f + progress / 80f * 0.8f
+                        UiTheme.setDockIconScale(this@SettingsActivity, scale)
+                        tvDockIconValue.text = "${(scale * 100).toInt()}%"
+                    }
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
         }
         renderAppearance()
         applySettingsTheme()
@@ -132,11 +185,24 @@ class SettingsActivity : AppCompatActivity() {
         findViewById<View>(R.id.dividerAppearance).setBackgroundColor(p.divider)
         findViewById<TextView>(R.id.tvLyricAlphaValue).setTextColor(p.value)
         findViewById<TextView>(R.id.lyricHint).setTextColor(p.value)
+        tvLyricTitle.setTextColor(p.label)
+        tvOptSystem.setTextColor(p.label)
+        tvOptDark.setTextColor(p.label)
+        tvOptLight.setTextColor(p.label)
+        tvOptDockEdge.setTextColor(p.label)
+        tvOptDockFloat.setTextColor(p.label)
+        tvDockIconTitle.setTextColor(p.label)
+        findViewById<TextView>(R.id.groupTitleDock).setTextColor(p.value)
+        findViewById<View>(R.id.dividerDock).setBackgroundColor(p.divider)
         checkSystem.setTextColor(p.accent)
         checkDark.setTextColor(p.accent)
         checkLight.setTextColor(p.accent)
+        checkDockEdge.setTextColor(p.accent)
+        checkDockFloat.setTextColor(p.accent)
         seekLyricAlpha.progressTintList = ColorStateList.valueOf(p.accent)
         seekLyricAlpha.thumbTintList = ColorStateList.valueOf(p.accent)
+        seekDockIcon.progressTintList = ColorStateList.valueOf(p.accent)
+        seekDockIcon.thumbTintList = ColorStateList.valueOf(p.accent)
         findViewById<Button>(R.id.btnAdd).background = RippleDrawable(
             ColorStateList.valueOf(p.ripple), null,
             GradientDrawable().apply { setColor(p.accent); cornerRadius = 12 * dp },
@@ -152,12 +218,15 @@ class SettingsActivity : AppCompatActivity() {
         renderAppearance()
     }
 
-    /** 按当前外观模式刷新勾选 */
+    /** 按当前外观模式 + Dock 形态刷新勾选 */
     private fun renderAppearance() {
         val m = UiTheme.mode(this)
         checkSystem.visibility = if (m == UiTheme.Mode.SYSTEM) View.VISIBLE else View.GONE
         checkDark.visibility = if (m == UiTheme.Mode.DARK) View.VISIBLE else View.GONE
         checkLight.visibility = if (m == UiTheme.Mode.LIGHT) View.VISIBLE else View.GONE
+        val ds = UiTheme.dockStyle(this)
+        checkDockEdge.visibility = if (ds == UiTheme.DockStyle.EDGE) View.VISIBLE else View.GONE
+        checkDockFloat.visibility = if (ds == UiTheme.DockStyle.FLOAT) View.VISIBLE else View.GONE
     }
 
     override fun onResume() {

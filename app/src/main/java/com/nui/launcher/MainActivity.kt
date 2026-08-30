@@ -12,6 +12,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -49,6 +50,7 @@ class MainActivity : AppCompatActivity() {
     private var desktopBtnNavCompany: View? = null
     private var page0Ready = false
     private var appGridLoaded = false
+    private var appGridView: androidx.recyclerview.widget.RecyclerView? = null
 
     private inner class PagerAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         override fun getItemCount() = 2
@@ -82,12 +84,14 @@ class MainActivity : AppCompatActivity() {
             page0Ready = true
             v.post {
                 setupMap(); setupNav(); setupMusic(); setupWallpaper(); syncRightPanel()
+                applyDockStyle()
                 applyTheme()
             }
         }
     }
 
     private fun bindAppGrid(v: View) {
+        appGridView = v.findViewById(R.id.appGridMain)
         loadAppGrid(v.findViewById(R.id.appGridMain))
     }
 
@@ -109,6 +113,7 @@ class MainActivity : AppCompatActivity() {
         })
 
         setupDock()
+        applyDockStyle()
         setupPageIndicator()
     }
 
@@ -131,6 +136,9 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         applyTheme()
+        // 设置页可能改了 Dock 形态/图标比例，返回时刷新
+        applyDockStyle()
+        renderDock()
         if (::mapHost.isInitialized) {
             if (binding.viewPager.currentItem == 0) mapHost.showFloat()
             mapHost.onResume()
@@ -191,12 +199,8 @@ class MainActivity : AppCompatActivity() {
         val p = UiTheme.palette(dark)
         val density = resources.displayMetrics.density
 
-        // Dock 栏：半透明圆角背景 + 时钟/图标色
-        binding.dockBar.background = GradientDrawable().apply {
-            setColor(p.dockBg)
-            cornerRadius = 28 * density
-            setStroke(1, p.divider)
-        }
+        // Dock 栏：半透明背景 + 时钟/图标色（圆角随 Dock 形态：贴边矩形 / 悬浮圆角）
+        applyDockVisual()
         binding.dockClock.setTextColor(p.textPrimary)
         binding.dockApps.imageTintList = ColorStateList.valueOf(p.dockIconTint)
         val itemBg = RippleDrawable(
@@ -234,11 +238,62 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** 渲染 dock 槽位：空槽显示加号，已填显示应用图标 */
+    /** Dock 栏背景：颜色随深浅，圆角随形态（贴边矩形 / 悬浮圆角） */
+    private fun applyDockVisual() {
+        val p = UiTheme.palette(this)
+        val dp = resources.displayMetrics.density
+        val edge = UiTheme.dockStyle(this) == UiTheme.DockStyle.EDGE
+        binding.dockBar.background = GradientDrawable().apply {
+            setColor(p.dockBg)
+            cornerRadius = if (edge) 12 * dp else 28 * dp
+            setStroke(1, p.divider)
+        }
+    }
+
+    /** 按 Dock 形态（贴边矩形 / 圆角悬浮）调整 dock 位置边距 + 宽度 + 地图/应用网格让位 */
+    private fun applyDockStyle() {
+        val dp = resources.displayMetrics.density
+        val edge = UiTheme.dockStyle(this) == UiTheme.DockStyle.EDGE
+        // Dock 宽度跟随图标比例：图标 + 两侧 12dp padding + 4dp 余量
+        val dockW = UiTheme.DEFAULT_DOCK_ICON_DP * UiTheme.dockIconScale(this) + 28
+        val barLp = binding.dockBar.layoutParams as FrameLayout.LayoutParams
+        barLp.width = (dockW * dp).toInt()
+        if (edge) {
+            // 贴边：上下+左边都贴边
+            barLp.leftMargin = 0
+            barLp.topMargin = 0
+            barLp.bottomMargin = 0
+        } else {
+            // 悬浮：四边留 20dp
+            barLp.leftMargin = (20 * dp).toInt()
+            barLp.topMargin = (20 * dp).toInt()
+            barLp.bottomMargin = (20 * dp).toInt()
+        }
+        binding.dockBar.layoutParams = barLp
+        applyDockVisual()
+
+        // 地图卡片：dock 贴边时左移贴近 dock（dock宽+16dp），悬浮时再让出 20dp
+        desktopMapPanel?.let { mp ->
+            val lp = mp.layoutParams as FrameLayout.LayoutParams
+            val left = if (edge) dockW + 16 else 20 + dockW + 16
+            if (lp.leftMargin != (left * dp).toInt()) {
+                lp.leftMargin = (left * dp).toInt()
+                mp.layoutParams = lp
+            }
+        }
+        // 应用网格：dock 贴边时压缩左侧 padding
+        appGridView?.let { g ->
+            val leftPad = if (edge) dockW + 8 else 20 + dockW + 8
+            g.setPadding((leftPad * dp.toFloat()).toInt(), g.paddingTop, g.paddingEnd, g.paddingBottom)
+        }
+    }
+
+    /** 渲染 dock 槽位：空槽显示加号，已填显示应用图标（图标大小随 [UiTheme.dockIconScale]） */
     private fun renderDock() {
         binding.dockItems.removeAllViews()
         val dp = resources.displayMetrics.density
-        val size = (64 * dp).toInt()
+        val scale = UiTheme.dockIconScale(this)
+        val size = (UiTheme.DEFAULT_DOCK_ICON_DP * dp * scale).toInt()
         val gap = (8 * dp).toInt()
         val dark = UiTheme.isDark(this)
         val p = UiTheme.palette(this)
@@ -277,6 +332,14 @@ class MainActivity : AppCompatActivity() {
                 btn,
                 LinearLayout.LayoutParams(size, size).apply { topMargin = gap },
             )
+        }
+        // dockApps 底部按钮大小跟随图标比例
+        val asize = (UiTheme.DEFAULT_DOCK_ICON_DP * dp * scale).toInt()
+        val appsLp = binding.dockApps.layoutParams
+        if (appsLp.width != asize) {
+            appsLp.width = asize
+            appsLp.height = asize
+            binding.dockApps.layoutParams = appsLp
         }
     }
 

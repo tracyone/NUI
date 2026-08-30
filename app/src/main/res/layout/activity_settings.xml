@@ -120,6 +120,7 @@
                 android:background="@color/settings_divider" />
 
             <TextView
+                android:id="@+id/tvLyricTitle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/lyric_bg_alpha"
@@ -217,124 +218,275 @@
             android:orientation="vertical"
             android:visibility="gone">
 
-            <TextView
-                android:id="@+id/groupTitleAppearance"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/appearance"
-                android:textColor="@color/settings_group_title"
-                android:textSize="14sp" />
-
-            <View
-                android:id="@+id/dividerAppearance"
+            <ScrollView
                 android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:layout_marginTop="12dp"
-                android:layout_marginBottom="16dp"
-                android:background="@color/settings_divider" />
+                android:layout_height="match_parent"
+                android:fillViewport="true"
+                android:scrollbars="none">
 
-            <!-- 跟随系统 -->
-            <LinearLayout
-                android:id="@+id/optSystem"
-                android:layout_width="match_parent"
-                android:layout_height="56dp"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:clickable="true"
-                android:focusable="true"
-                android:background="@drawable/bg_settings_row_ripple"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp">
-
-                <TextView
-                    android:layout_width="0dp"
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="@string/theme_system"
-                    android:textColor="@color/settings_label"
-                    android:textSize="17sp" />
+                    android:orientation="vertical">
 
-                <TextView
-                    android:id="@+id/checkSystem"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="✓"
-                    android:textColor="@color/settings_btn_text"
-                    android:textSize="20sp"
-                    android:visibility="gone" />
-            </LinearLayout>
+                    <TextView
+                        android:id="@+id/groupTitleAppearance"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/appearance"
+                        android:textColor="@color/settings_group_title"
+                        android:textSize="14sp" />
 
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:background="@color/settings_divider" />
+                    <View
+                        android:id="@+id/dividerAppearance"
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="12dp"
+                        android:layout_marginBottom="16dp"
+                        android:background="@color/settings_divider" />
 
-            <!-- 深色模式 -->
-            <LinearLayout
-                android:id="@+id/optDark"
-                android:layout_width="match_parent"
-                android:layout_height="56dp"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:clickable="true"
-                android:focusable="true"
-                android:background="@drawable/bg_settings_row_ripple"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp">
+                    <!-- 跟随系统 -->
+                    <LinearLayout
+                        android:id="@+id/optSystem"
+                        android:layout_width="match_parent"
+                        android:layout_height="56dp"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:background="@drawable/bg_settings_row_ripple"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp">
 
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="@string/theme_dark"
-                    android:textColor="@color/settings_label"
-                    android:textSize="17sp" />
+                        <TextView
+                            android:id="@+id/tvOptSystem"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/theme_system"
+                            android:textColor="@color/settings_label"
+                            android:textSize="17sp" />
 
-                <TextView
-                    android:id="@+id/checkDark"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="✓"
-                    android:textColor="@color/settings_btn_text"
-                    android:textSize="20sp"
-                    android:visibility="gone" />
-            </LinearLayout>
+                        <TextView
+                            android:id="@+id/checkSystem"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="✓"
+                            android:textColor="@color/settings_btn_text"
+                            android:textSize="20sp"
+                            android:visibility="gone" />
+                    </LinearLayout>
 
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:background="@color/settings_divider" />
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="@color/settings_divider" />
 
-            <!-- 浅色模式 -->
-            <LinearLayout
-                android:id="@+id/optLight"
-                android:layout_width="match_parent"
-                android:layout_height="56dp"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:clickable="true"
-                android:focusable="true"
-                android:background="@drawable/bg_settings_row_ripple"
-                android:paddingStart="8dp"
-                android:paddingEnd="8dp">
+                    <!-- 深色模式 -->
+                    <LinearLayout
+                        android:id="@+id/optDark"
+                        android:layout_width="match_parent"
+                        android:layout_height="56dp"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:background="@drawable/bg_settings_row_ripple"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp">
 
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="@string/theme_light"
-                    android:textColor="@color/settings_label"
-                    android:textSize="17sp" />
+                        <TextView
+                            android:id="@+id/tvOptDark"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/theme_dark"
+                            android:textColor="@color/settings_label"
+                            android:textSize="17sp" />
 
-                <TextView
-                    android:id="@+id/checkLight"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="✓"
-                    android:textColor="@color/settings_btn_text"
-                    android:textSize="20sp"
-                    android:visibility="gone" />
-            </LinearLayout>
+                        <TextView
+                            android:id="@+id/checkDark"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="✓"
+                            android:textColor="@color/settings_btn_text"
+                            android:textSize="20sp"
+                            android:visibility="gone" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="@color/settings_divider" />
+
+                    <!-- 浅色模式 -->
+                    <LinearLayout
+                        android:id="@+id/optLight"
+                        android:layout_width="match_parent"
+                        android:layout_height="56dp"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:background="@drawable/bg_settings_row_ripple"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp">
+
+                        <TextView
+                            android:id="@+id/tvOptLight"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/theme_light"
+                            android:textColor="@color/settings_label"
+                            android:textSize="17sp" />
+
+                        <TextView
+                            android:id="@+id/checkLight"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="✓"
+                            android:textColor="@color/settings_btn_text"
+                            android:textSize="20sp"
+                            android:visibility="gone" />
+                    </LinearLayout>
+
+                    <!-- Dock 形态分组 -->
+                    <TextView
+                        android:id="@+id/groupTitleDock"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="20dp"
+                        android:text="@string/dock_style"
+                        android:textColor="@color/settings_group_title"
+                        android:textSize="14sp" />
+
+                    <View
+                        android:id="@+id/dividerDock"
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="12dp"
+                        android:layout_marginBottom="16dp"
+                        android:background="@color/settings_divider" />
+
+                    <!-- 贴边（矩形） -->
+                    <LinearLayout
+                        android:id="@+id/optDockEdge"
+                        android:layout_width="match_parent"
+                        android:layout_height="56dp"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:background="@drawable/bg_settings_row_ripple"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp">
+
+                        <TextView
+                            android:id="@+id/tvOptDockEdge"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/dock_style_edge"
+                            android:textColor="@color/settings_label"
+                            android:textSize="17sp" />
+
+                        <TextView
+                            android:id="@+id/checkDockEdge"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="✓"
+                            android:textColor="@color/settings_btn_text"
+                            android:textSize="20sp"
+                            android:visibility="gone" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="@color/settings_divider" />
+
+                    <!-- 悬浮（圆角） -->
+                    <LinearLayout
+                        android:id="@+id/optDockFloat"
+                        android:layout_width="match_parent"
+                        android:layout_height="56dp"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:background="@drawable/bg_settings_row_ripple"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp">
+
+                        <TextView
+                            android:id="@+id/tvOptDockFloat"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/dock_style_float"
+                            android:textColor="@color/settings_label"
+                            android:textSize="17sp" />
+
+                        <TextView
+                            android:id="@+id/checkDockFloat"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="✓"
+                            android:textColor="@color/settings_btn_text"
+                            android:textSize="20sp"
+                            android:visibility="gone" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="@color/settings_divider" />
+
+                    <!-- Dock 图标大小 -->
+                    <TextView
+                        android:id="@+id/tvDockIconTitle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="20dp"
+                        android:text="@string/dock_icon_scale"
+                        android:textColor="@color/settings_label"
+                        android:textSize="17sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <SeekBar
+                            android:id="@+id/seekDockIcon"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="12dp"
+                            android:max="80" />
+
+                        <TextView
+                            android:id="@+id/tvDockIconValue"
+                            android:layout_width="56dp"
+                            android:layout_height="wrap_content"
+                            android:gravity="end"
+                            android:text="100%"
+                            android:textColor="@color/settings_value"
+                            android:textSize="17sp" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="@string/dock_icon_scale_hint"
+                        android:textColor="@color/settings_value"
+                        android:textSize="13sp" />
+                </LinearLayout>
+            </ScrollView>
         </LinearLayout>
     </LinearLayout>
 </LinearLayout>

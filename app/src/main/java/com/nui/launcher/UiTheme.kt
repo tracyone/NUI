@@ -7,8 +7,35 @@ import android.content.res.Configuration
 object UiTheme {
     enum class Mode { SYSTEM, DARK, LIGHT }
 
+    /** Dock 栏形态：贴边矩形（CarPlay 风格） / 圆角悬浮 */
+    enum class DockStyle { EDGE, FLOAT }
+
     private const val PREFS = "nui_ui"
     private const val KEY_MODE = "theme_mode"
+    private const val KEY_DOCK_STYLE = "dock_style"
+    private const val KEY_DOCK_ICON_SCALE = "dock_icon_scale"
+
+    /** 默认 Dock 图标大小（dp），renderDock 按 [dockIconScale] 缩放 */
+    const val DEFAULT_DOCK_ICON_DP = 64
+
+    fun dockStyle(ctx: Context): DockStyle =
+        if (ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_DOCK_STYLE, 0) == 1)
+            DockStyle.FLOAT else DockStyle.EDGE
+
+    fun setDockStyle(ctx: Context, style: DockStyle) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putInt(KEY_DOCK_STYLE, if (style == DockStyle.FLOAT) 1 else 0).apply()
+    }
+
+    /** Dock 图标缩放比例（0.6~1.4，1.0=默认 64dp） */
+    fun dockIconScale(ctx: Context): Float =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getFloat(KEY_DOCK_ICON_SCALE, 1f).coerceIn(0.6f, 1.4f)
+
+    fun setDockIconScale(ctx: Context, scale: Float) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putFloat(KEY_DOCK_ICON_SCALE, scale.coerceIn(0.6f, 1.4f)).apply()
+    }
 
     /** 当前是否深色：手动指定优先，否则跟随系统 DayNight */
     fun isDark(ctx: Context): Boolean = when (mode(ctx)) {
