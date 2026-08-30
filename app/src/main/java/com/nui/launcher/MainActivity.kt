@@ -52,6 +52,10 @@ class MainActivity : AppCompatActivity() {
     private var appGridLoaded = false
     private var appGridView: androidx.recyclerview.widget.RecyclerView? = null
     private var appListAdapter: AppListAdapter? = null
+    /** 是否从桌面启动了外部 app——按 home 回来时恢复到启动前的 page */
+    private var launchedExternalApp = false
+    /** 启动外部 app 前所在的 page */
+    private var pageBeforeLaunch = 0
 
     private inner class PagerAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         override fun getItemCount() = 2
@@ -134,13 +138,27 @@ class MainActivity : AppCompatActivity() {
         wallpaper.onActivityResult(requestCode, resultCode, data)
     }
 
+    override fun startActivity(intent: Intent?) {
+        super.startActivity(intent)
+        // 启动的不是自己（外部 app），记录标志位和当前 page，按 home 回来时恢复
+        if (intent?.component?.packageName != packageName) {
+            launchedExternalApp = true
+            pageBeforeLaunch = binding.viewPager.currentItem
+        }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        // Home 键触发：在 page 0（桌面）和 page 1（应用列表）之间切换
-        // onNewIntent 仅在系统启动 Launcher（Home 键）时被调用
-        if (binding.viewPager.currentItem == 0) binding.viewPager.currentItem = 1
-        else binding.viewPager.currentItem = 0
+        if (launchedExternalApp) {
+            // 从外部 app 按 home 回来：恢复到启动前的 page
+            binding.viewPager.currentItem = pageBeforeLaunch
+            launchedExternalApp = false
+        } else {
+            // 在桌面内按 home：在 page0（桌面）和 page1（应用列表）之间切换
+            if (binding.viewPager.currentItem == 0) binding.viewPager.currentItem = 1
+            else binding.viewPager.currentItem = 0
+        }
     }
 
     override fun onResume() {
@@ -150,8 +168,10 @@ class MainActivity : AppCompatActivity() {
         applyDockStyle()
         renderDock()
         if (::mapHost.isInitialized) {
-            if (binding.viewPager.currentItem == 0) mapHost.showFloat()
             mapHost.onResume()
+            // 根据当前 page 决定悬浮地图显示状态
+            if (binding.viewPager.currentItem == 0) mapHost.showFloat()
+            else mapHost.closeFloat()
         }
         if (::musicHost.isInitialized) {
             musicHost.refresh()
@@ -207,6 +227,14 @@ class MainActivity : AppCompatActivity() {
     /** 按深浅模式应用桌面配色（Dock / 右侧面板 / 地图卡片） */
     private fun applyTheme() = applyTheme(UiTheme.isDark(this))
 
+    /** 设置面板切换外观时调用：立即刷新桌面主题/dock/音乐栏 */
+    fun refreshForThemeChange() {
+        applyTheme()
+        applyDockStyle()
+        renderDock()
+        if (::musicHost.isInitialized) musicHost.refresh()
+    }
+
     private fun applyTheme(dark: Boolean) {
         val p = UiTheme.palette(dark)
         val density = resources.displayMetrics.density
@@ -214,7 +242,7 @@ class MainActivity : AppCompatActivity() {
         // Dock 栏：半透明背景 + 时钟/图标色（圆角随 Dock 形态：贴边矩形 / 悬浮圆角）
         applyDockVisual()
         binding.dockClock.setTextColor(p.textPrimary)
-        binding.dockApps.imageTintList = ColorStateList.valueOf(p.dockIconTint)
+        // dockApps 用现代N标彩色图标，不做 tint 染色
         val itemBg = RippleDrawable(
             ColorStateList.valueOf(if (dark) 0x33FFFFFF.toInt() else 0x33000000.toInt()),
             null,
@@ -525,7 +553,17 @@ class MainActivity : AppCompatActivity() {
                 packageName = packageName,
                 icon = androidx.core.content.ContextCompat.getDrawable(this, R.drawable.ic_dock_settings)!!,
                 launchIntent = Intent(),
-                onClick = { com.nui.launcher.settings.SettingsDialog(this).show() },
+                onClick = {
+                    val dlg = com.nui.launcher.settings.SettingsDialog(this)
+                    // 设置面板关闭时刷新桌面主题/dock/音乐栏（Dialog 关闭不触发 onResume）
+                    dlg.setOnDismissListener {
+                        applyTheme()
+                        applyDockStyle()
+                        renderDock()
+                        if (::musicHost.isInitialized) musicHost.refresh()
+                    }
+                    dlg.show()
+                },
             )
             runOnUiThread {
                 appListAdapter = AppListAdapter(

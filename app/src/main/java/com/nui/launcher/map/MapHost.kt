@@ -130,39 +130,51 @@ class MapHost(
         src?.let {
             prefs.edit { putString(KEY_SOURCE, it.id) }
             render(it)
-            if (autoLaunch) launchAndReturnHome()
+            // 首次启动 NUI 时自动启动外部地图（高德），Activity 重建不重复执行
+            if (autoLaunch && !autoLaunched) {
+                launchAndReturnHome()
+                autoLaunched = true
+            }
         }
     }
 
     fun select(source: MapSource, autoLaunch: Boolean = false) {
         prefs.edit { putString(KEY_SOURCE, source.id) }
         render(source)
-        if (autoLaunch) launchAndReturnHome()
+        if (autoLaunch && !autoLaunched) {
+            launchAndReturnHome()
+            autoLaunched = true
+        }
     }
 
     /**
      * 启动外部地图应用，延迟 [delayMs] 毫秒后返回桌面（HOME）。
      * 回桌面后再恢复浮窗（高德浮窗需地图进程在运行才生效）。
      * 内置 OSM 无需启动外部应用，直接返回。
+     * @return 是否成功发起启动
      */
-    fun launchAndReturnHome(delayMs: Long = 3000L) {
-        val src = current ?: return
-        if (src.type == MapSource.Type.EMBEDDED_OSM) return
-        val launch = src.launchIntent ?: return
-        runCatching { context.startActivity(launch) }
-            .onFailure { Log.e(TAG, "launch external map failed", it); return }
+    fun launchAndReturnHome(delayMs: Long = 3000L): Boolean {
+        val src = current ?: return false
+        if (src.type == MapSource.Type.EMBEDDED_OSM) return false
+        val launch = src.launchIntent ?: return false
+        val started = runCatching { context.startActivity(launch) }.isSuccess
+        if (!started) {
+            Log.e(TAG, "launch external map failed: ${src.packageName}")
+            return false
+        }
         container.postDelayed({
-            // 显式返回 NUI（不依赖是否为默认 Launcher，HOME 可能回到其他桌面）
-            val back = Intent().apply {
-                setClassName(context, "com.nui.launcher.MainActivity")
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-            }
-            runCatching { context.startActivity(back) }
+            // 回桌面：发送 HOME 广播，系统启动默认 Launcher（NUI）
+            // 不用显式 startActivity(MainActivity)，避免 singleTask 实例重建导致重复 setupMap
+            val home = Intent(Intent.ACTION_MAIN)
+                .addCategory(Intent.CATEGORY_HOME)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            runCatching { context.startActivity(home) }
             // 回 NUI 后再恢复浮窗
             if (src.type == MapSource.Type.EXTERNAL_FLOAT) {
                 container.postDelayed({ showFloat() }, 500L)
             }
         }, delayMs)
+        return true
     }
 
     private fun render(source: MapSource) {
@@ -307,7 +319,7 @@ class MapHost(
 
     fun onResume() {
         mapView?.onResume()
-        showFloat()
+        // 悬浮地图显示/关闭由 MainActivity 根据当前 page 统一控制，避免与 closeFloat 竞争
     }
 
     fun onPause() {
@@ -571,5 +583,7 @@ class MapHost(
         private const val KEY_GEOM_V2 = "geometry_v2" // 新版几何标记（dock 变窄后重置旧位置）
         private const val EDGE_ZONE_DP = 28   // 右/下边缘把手宽度
         private val MIN_SIZE = 240 // px，缩放下限
+        /** autoLaunch 是否已执行过——静态变量，防止 Activity 重建导致重复启动外部地图 */
+        private var autoLaunched = false
     }
 }

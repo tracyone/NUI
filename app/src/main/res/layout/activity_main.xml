@@ -47,14 +47,14 @@
 
         <ImageButton
             android:id="@+id/dockApps"
-            android:layout_width="64dp"
-            android:layout_height="64dp"
+            android:layout_width="88dp"
+            android:layout_height="56dp"
             android:layout_marginTop="8dp"
             android:background="@drawable/bg_dock_item"
             android:contentDescription="@string/dock_apps"
             android:src="@drawable/ic_dock_n"
-            android:scaleType="centerInside"
-            android:tint="@color/dock_icon_tint" />
+            android:scaleType="fitCenter"
+            android:padding="2dp" />
     </LinearLayout>
 
     <!-- 底部分页小圆点指示器 -->

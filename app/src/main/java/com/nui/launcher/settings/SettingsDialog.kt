@@ -97,16 +97,19 @@ class SettingsDialog(context: Context) : Dialog(context) {
             UiTheme.setMode(context, UiTheme.Mode.SYSTEM)
             renderAppearance()
             applySettingsTheme()
+            (context as? com.nui.launcher.MainActivity)?.refreshForThemeChange()
         }
         findViewById<View>(R.id.optDark).setOnClickListener {
             UiTheme.setMode(context, UiTheme.Mode.DARK)
             renderAppearance()
             applySettingsTheme()
+            (context as? com.nui.launcher.MainActivity)?.refreshForThemeChange()
         }
         findViewById<View>(R.id.optLight).setOnClickListener {
             UiTheme.setMode(context, UiTheme.Mode.LIGHT)
             renderAppearance()
             applySettingsTheme()
+            (context as? com.nui.launcher.MainActivity)?.refreshForThemeChange()
         }
         findViewById<View>(R.id.optDockEdge).setOnClickListener {
             UiTheme.setDockStyle(context, UiTheme.DockStyle.EDGE)
