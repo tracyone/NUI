@@ -3,6 +3,9 @@ package com.nui.launcher.music
 import android.app.Notification
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.drawable.Drawable
+import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
 import android.service.notification.NotificationListenerService
@@ -39,12 +42,19 @@ class MusicListenerService : NotificationListenerService() {
         val artist = extras.getString(Notification.EXTRA_TEXT)?.toString()?.trim()
             ?: extras.getCharSequence("android.text")?.toString()?.trim()
         val bigText = extras.getCharSequence("android.bigText")?.toString()
-        val pic = runCatching { notify.extras?.getParcelableCompat<Bitmap>(Notification.EXTRA_PICTURE) }
-            .getOrNull()
-        val largeIcon = runCatching {
+        // 封面：API 23+ 通知 largeIcon 存的是 Icon 对象，需 loadDrawable 转 Bitmap；
+        // 旧版或 fallback 从 extras 取 Bitmap，最后再试 bigPicture
+        val cover = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                // 通知 largeIcon 存的是 Icon 对象（getLargeIcon() 在某些情况下返回 null，直接从 extras 取更可靠）
+                val icon = notify.extras?.get(Notification.EXTRA_LARGE_ICON) as? Icon
+                icon?.loadDrawable(this)?.toBitmap()
+            } else null
+        }.getOrNull() ?: runCatching {
             notify.extras?.getParcelableCompat<Bitmap>(Notification.EXTRA_LARGE_ICON)
+        }.getOrNull() ?: runCatching {
+            notify.extras?.getParcelableCompat<Bitmap>(Notification.EXTRA_PICTURE)
         }.getOrNull()
-        val cover = pic ?: largeIcon
 
         // 歌词：优先从 EXTRA_BIG_TEXT（通知大视图已显示的整段文本）里扒 LRC
         val candidate = when {
@@ -80,6 +90,7 @@ class MusicListenerService : NotificationListenerService() {
             "com.netease.cloudmusic", "com.netease.cloudmusic.car",
             "com.tencent.qqmusic", "com.tencent.qqmusiccar",
             "com.android.mediacenter",
+            "com.luna.music", "com.luna.music.car",
         )
         private inline fun <reified T> Bundle.getParcelableCompat(key: String): T? =
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
@@ -87,4 +98,16 @@ class MusicListenerService : NotificationListenerService() {
             else
                 @Suppress("DEPRECATION") get(key) as? T
     }
+}
+
+/** Drawable 转 Bitmap（用于通知 Icon.loadDrawable 后的封面提取） */
+private fun Drawable.toBitmap(): Bitmap {
+    if (intrinsicWidth <= 0 || intrinsicHeight <= 0) {
+        return Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+    }
+    val bmp = Bitmap.createBitmap(intrinsicWidth, intrinsicHeight, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bmp)
+    setBounds(0, 0, canvas.width, canvas.height)
+    draw(canvas)
+    return bmp
 }

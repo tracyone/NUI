@@ -224,7 +224,7 @@ class MusicHost(
         if (songSwitched) {
             lastTitle = newTitle
             newArtist?.let { lastArtist = it }
-            if (newArt != null) lastCover = newArt
+            lastCover = newArt   // 切歌时重置封面：新歌没提供就设 null，让通知兜底获取
             lastLyricRaw = newLyricRaw   // null 也接受 —— 新歌词没拿到时先清空，杜绝跨歌复用
         } else {
             // 同首歌：只更新有值的字段（不覆盖已有封面）
