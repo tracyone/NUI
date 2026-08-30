@@ -1,6 +1,10 @@
 package com.nui.launcher
 
 import android.content.Intent
+import android.content.res.ColorStateList
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.os.Bundle
 import android.util.Log
 import android.view.LayoutInflater
@@ -8,7 +12,9 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.GridLayoutManager
@@ -21,6 +27,7 @@ import com.nui.launcher.map.MapPickerDialog
 import com.nui.launcher.map.MapSources
 import com.nui.launcher.music.MusicHost
 import com.nui.launcher.nav.NavHost
+import com.nui.launcher.UiTheme
 
 class MainActivity : AppCompatActivity() {
 
@@ -72,7 +79,10 @@ class MainActivity : AppCompatActivity() {
         desktopBtnNavCompany = v.findViewById(R.id.btnNavCompany)
         if (!page0Ready) {
             page0Ready = true
-            v.post { setupMap(); setupNav(); setupMusic(); setupWallpaper(); syncRightPanel() }
+            v.post {
+                setupMap(); setupNav(); setupMusic(); setupWallpaper(); syncRightPanel()
+                applyTheme()
+            }
         }
     }
 
@@ -119,6 +129,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        applyTheme()
         if (::mapHost.isInitialized) {
             if (binding.viewPager.currentItem == 0) mapHost.showFloat()
             mapHost.onResume()
@@ -160,6 +171,50 @@ class MainActivity : AppCompatActivity() {
             true
         }
         renderDock()
+    }
+
+    /** 按深浅模式应用桌面配色（Dock / 右侧面板 / 地图卡片） */
+    private fun applyTheme() {
+        val p = UiTheme.palette(this)
+        val density = resources.displayMetrics.density
+        val dark = UiTheme.isDark(this)
+
+        // Dock 栏：半透明圆角背景 + 时钟/图标色
+        binding.dockBar.background = GradientDrawable().apply {
+            setColor(p.dockBg)
+            cornerRadius = 28 * density
+            setStroke(1, p.divider)
+        }
+        binding.dockClock.setTextColor(p.textPrimary)
+        binding.dockApps.imageTintList = ColorStateList.valueOf(p.dockIconTint)
+        val itemBg = RippleDrawable(
+            ColorStateList.valueOf(if (dark) 0x33FFFFFF.toInt() else 0x33000000.toInt()),
+            null,
+            GradientDrawable().apply { setColor(Color.WHITE); cornerRadius = 16 * density },
+        )
+        for (i in 0 until binding.dockItems.childCount) {
+            binding.dockItems.getChildAt(i).background = itemBg
+        }
+
+        // 地图卡片
+        desktopMapPanel?.setCardBackgroundColor(p.mapBg)
+        desktopBtnSwitchMap?.imageTintList = ColorStateList.valueOf(p.textPrimary)
+
+        // 右侧面板：背景 + 导航图标/文字 + 时钟
+        desktopRightPanel?.let { rp ->
+            rp.background = GradientDrawable().apply {
+                setColor(p.panelBg)
+                cornerRadius = 24 * density
+                setStroke(1, p.divider)
+            }
+            rp.findViewById<ImageView>(R.id.navIconHome)?.setColorFilter(p.dockIconTint)
+            rp.findViewById<ImageView>(R.id.navIconCompany)?.setColorFilter(p.dockIconTint)
+            rp.findViewById<TextView>(R.id.navLabelHome)?.setTextColor(p.textPrimary)
+            rp.findViewById<TextView>(R.id.navLabelCompany)?.setTextColor(p.textPrimary)
+            rp.findViewById<TextView>(R.id.clockTime)?.setTextColor(p.textPrimary)
+            rp.findViewById<TextView>(R.id.clockDate)?.setTextColor(p.textSecondary)
+            rp.findViewById<MaterialCardView>(R.id.musicPanel)?.setCardBackgroundColor(p.mapBg)
+        }
     }
 
     /** 渲染 dock 槽位：空槽显示加号，已填显示应用图标 */

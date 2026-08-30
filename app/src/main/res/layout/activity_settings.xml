@@ -2,145 +2,293 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
+    android:orientation="horizontal"
     android:background="@color/settings_bg"
     android:padding="24dp">
 
+    <!-- 左侧：设置分类 -->
     <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:layout_marginBottom="16dp">
-
-        <ImageButton
-            android:id="@+id/btnBack"
-            android:layout_width="44dp"
-            android:layout_height="44dp"
-            android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:src="@drawable/ic_back"
-            android:scaleType="centerInside"
-            android:tint="@color/settings_label"
-            android:contentDescription="@string/back" />
-
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="8dp"
-            android:text="@string/desktop_settings"
-            android:textColor="@color/settings_label"
-            android:textSize="28sp"
-            android:textStyle="bold" />
-    </LinearLayout>
-
-    <ScrollView
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:fillViewport="true">
+        android:layout_width="240dp"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="20dp">
+
+            <ImageButton
+                android:id="@+id/btnBack"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:src="@drawable/ic_back"
+                android:scaleType="centerInside"
+                android:tint="@color/settings_label"
+                android:contentDescription="@string/back" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="@string/desktop_settings"
+                android:textColor="@color/settings_label"
+                android:textSize="26sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tabMusic"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:background="@drawable/bg_settings_tab"
+            android:gravity="center_vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:text="@string/music"
+            android:textColor="@color/settings_label"
+            android:textSize="18sp" />
+
+        <TextView
+            android:id="@+id/tabSteering"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_settings_tab"
+            android:gravity="center_vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:text="@string/steering_wheel"
+            android:textColor="@color/settings_label"
+            android:textSize="18sp" />
+
+        <TextView
+            android:id="@+id/tabAppearance"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_settings_tab"
+            android:gravity="center_vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:text="@string/appearance"
+            android:textColor="@color/settings_label"
+            android:textSize="18sp" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+    </LinearLayout>
+
+    <!-- 右侧：详细设置 -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:layout_marginStart="24dp"
+        android:orientation="vertical"
+        android:background="@drawable/bg_settings_card"
+        android:padding="24dp">
+
+        <!-- 音乐详情 -->
+        <LinearLayout
+            android:id="@+id/panelMusic"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
             android:orientation="vertical">
 
-            <!-- 组标题：音乐 -->
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/music"
                 android:textColor="@color/settings_group_title"
-                android:textSize="14sp"
-                android:layout_marginStart="16dp"
-                android:layout_marginBottom="8dp" />
+                android:textSize="14sp" />
 
-            <!-- 音乐组卡片 -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="12dp"
+                android:layout_marginBottom="20dp"
+                android:background="@color/settings_divider" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/lyric_bg_alpha"
+                android:textColor="@color/settings_label"
+                android:textSize="17sp" />
+
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:background="@drawable/bg_settings_card"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp">
+                android:layout_marginTop="12dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
 
-                <LinearLayout
-                    android:layout_width="match_parent"
+                <SeekBar
+                    android:id="@+id/seekLyricAlpha"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:paddingTop="14dp"
-                    android:paddingBottom="14dp">
+                    android:layout_weight="1"
+                    android:layout_marginEnd="12dp"
+                    android:max="100" />
 
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/lyric_bg_alpha"
-                        android:textColor="@color/settings_label"
-                        android:textSize="17sp" />
-
-                    <SeekBar
-                        android:id="@+id/seekLyricAlpha"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:layout_marginStart="16dp"
-                        android:layout_marginEnd="12dp"
-                        android:max="100" />
-
-                    <TextView
-                        android:id="@+id/tvLyricAlphaValue"
-                        android:layout_width="56dp"
-                        android:layout_height="wrap_content"
-                        android:gravity="end"
-                        android:text="80%"
-                        android:textColor="@color/settings_value"
-                        android:textSize="17sp" />
-                </LinearLayout>
+                <TextView
+                    android:id="@+id/tvLyricAlphaValue"
+                    android:layout_width="56dp"
+                    android:layout_height="wrap_content"
+                    android:gravity="end"
+                    android:text="20%"
+                    android:textColor="@color/settings_value"
+                    android:textSize="17sp" />
             </LinearLayout>
 
-            <!-- 组标题：方向盘 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/lyric_bg_alpha_hint"
+                android:textColor="@color/settings_value"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <!-- 方向盘详情 -->
+        <LinearLayout
+            android:id="@+id/panelSteering"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:visibility="gone">
+
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/steering_wheel"
                 android:textColor="@color/settings_group_title"
-                android:textSize="14sp"
-                android:layout_marginStart="16dp"
-                android:layout_marginTop="28dp"
-                android:layout_marginBottom="8dp" />
+                android:textSize="14sp" />
 
-            <!-- 方向盘组卡片 -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="12dp"
+                android:layout_marginBottom="16dp"
+                android:background="@color/settings_divider" />
+
             <LinearLayout
+                android:id="@+id/recordList"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:background="@drawable/bg_settings_card"
-                android:padding="16dp">
+                android:orientation="vertical" />
 
-                <LinearLayout
-                    android:id="@+id/recordList"
-                    android:layout_width="match_parent"
+            <View
+                android:id="@+id/dividerAdd"
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="16dp"
+                android:background="@color/settings_divider" />
+
+            <Button
+                android:id="@+id/btnAdd"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/bg_settings_btn"
+                android:text="@string/add_key_mapping"
+                android:textColor="@color/settings_btn_text"
+                android:textSize="17sp" />
+        </LinearLayout>
+
+        <!-- 外观详情 -->
+        <LinearLayout
+            android:id="@+id/panelAppearance"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/appearance"
+                android:textColor="@color/settings_group_title"
+                android:textSize="14sp" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="12dp"
+                android:layout_marginBottom="16dp"
+                android:background="@color/settings_divider" />
+
+            <!-- 深色模式 -->
+            <LinearLayout
+                android:id="@+id/optDark"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="@drawable/bg_settings_row_ripple"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
+
+                <TextView
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:orientation="vertical" />
-
-                <View
-                    android:id="@+id/dividerAdd"
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:layout_marginTop="12dp"
-                    android:background="@color/settings_divider" />
-
-                <Button
-                    android:id="@+id/btnAdd"
-                    android:layout_width="match_parent"
-                    android:layout_height="56dp"
-                    android:layout_marginTop="8dp"
-                    android:background="@drawable/bg_settings_btn"
-                    android:text="@string/add_key_mapping"
-                    android:textColor="@color/settings_btn_text"
+                    android:layout_weight="1"
+                    android:text="@string/theme_dark"
+                    android:textColor="@color/settings_label"
                     android:textSize="17sp" />
+
+                <TextView
+                    android:id="@+id/checkDark"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="✓"
+                    android:textColor="@color/settings_btn_text"
+                    android:textSize="20sp"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/settings_divider" />
+
+            <!-- 浅色模式 -->
+            <LinearLayout
+                android:id="@+id/optLight"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="@drawable/bg_settings_row_ripple"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/theme_light"
+                    android:textColor="@color/settings_label"
+                    android:textSize="17sp" />
+
+                <TextView
+                    android:id="@+id/checkLight"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="✓"
+                    android:textColor="@color/settings_btn_text"
+                    android:textSize="20sp"
+                    android:visibility="gone" />
             </LinearLayout>
         </LinearLayout>
-    </ScrollView>
+    </LinearLayout>
 </LinearLayout>

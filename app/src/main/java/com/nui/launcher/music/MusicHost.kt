@@ -29,6 +29,7 @@ import androidx.core.content.edit
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
+import com.nui.launcher.UiTheme
 import android.graphics.Bitmap
 import com.nui.launcher.NuiToast
 import com.nui.launcher.R
@@ -246,23 +247,24 @@ class MusicHost(
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding(dp(12), dp(14), dp(12), dp(14))
         }
+        val p = UiTheme.palette(context)
         // 封面
         val cover = ImageView(context).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
             if (art != null) setImageBitmap(art)
             else setImageResource(android.R.drawable.ic_media_play)
-            setBackgroundColor(Color.parseColor("#1F2A38"))
+            setBackgroundColor(p.panelBg)
         }
         col.addView(cover, LinearLayout.LayoutParams(dp(84), dp(84)).apply { bottomMargin = dp(10) })
         // 标题
         col.addView(TextView(context).apply {
-            text = title; setTextColor(Color.parseColor("#ECEFF1")); textSize = 15f
+            text = title; setTextColor(p.textPrimary); textSize = 15f
             maxLines = 1; ellipsize = TextUtils.TruncateAt.END
             gravity = Gravity.CENTER
         })
         // 艺术家
         col.addView(TextView(context).apply {
-            text = artist; setTextColor(Color.parseColor("#9AA0A6")); textSize = 12f
+            text = artist; setTextColor(p.textSecondary); textSize = 12f
             maxLines = 1; ellipsize = TextUtils.TruncateAt.END
             gravity = Gravity.CENTER
         }, LinearLayout.LayoutParams(
@@ -303,7 +305,7 @@ class MusicHost(
         }
         val lyricLines = Array(2) {
             TextView(context).apply {
-                setTextColor(Color.parseColor("#607D8B"))
+                setTextColor(p.textSecondary)
                 textSize = 11f
                 gravity = Gravity.CENTER
                 maxLines = 1
@@ -345,7 +347,7 @@ class MusicHost(
         ImageButton(context).apply {
             setImageResource(icon)
             background = null
-            setColorFilter(Color.parseColor("#ECEFF1"))
+            setColorFilter(UiTheme.palette(context).dockIconTint)
             setOnClickListener { onClick() }
             setPadding(dp(10), dp(10), dp(10), dp(10))
         }
@@ -368,6 +370,7 @@ class MusicHost(
         hideLyricFloat()
 
         container.removeAllViews()
+        val p = UiTheme.palette(context)
         val v = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -375,11 +378,11 @@ class MusicHost(
         }
         v.addView(ImageView(context).apply {
             setImageResource(android.R.drawable.ic_media_play)
-            setColorFilter(Color.parseColor("#9AA0A6"))
+            setColorFilter(p.textSecondary)
         }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { bottomMargin = dp(6) })
         v.addView(TextView(context).apply {
             text = if (hasPermission) "点击打开音乐" else "点击授权读取歌曲"
-            setTextColor(Color.parseColor("#9AA0A6"))
+            setTextColor(p.textSecondary)
             textSize = 13f
             gravity = Gravity.CENTER
         })

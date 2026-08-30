@@ -2,6 +2,7 @@ package com.nui.launcher.settings
 
 import android.app.AlertDialog
 import android.app.Dialog
+import android.graphics.Color
 import android.os.Bundle
 import android.view.Gravity
 import android.view.KeyEvent
@@ -12,15 +13,24 @@ import android.widget.SeekBar
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.nui.launcher.R
+import com.nui.launcher.UiTheme
 import com.nui.launcher.music.MusicHost
 
-/** 桌面设置（iOS 分组风格）：音乐（悬浮歌词背景不透明度）+ 方向盘按键映射 */
+/** 桌面设置：左侧分类（音乐 / 方向盘 / 外观）+ 右侧详情（iOS 风格） */
 class SettingsActivity : AppCompatActivity() {
 
     private lateinit var recordList: LinearLayout
     // 缓存 view 引用，避免回调中重复 findViewById（拖动滑块时可能返回 null）
     private lateinit var seekLyricAlpha: SeekBar
     private lateinit var tvLyricAlphaValue: TextView
+    private lateinit var tabMusic: TextView
+    private lateinit var tabSteering: TextView
+    private lateinit var tabAppearance: TextView
+    private lateinit var panelMusic: View
+    private lateinit var panelSteering: View
+    private lateinit var panelAppearance: View
+    private lateinit var checkDark: TextView
+    private lateinit var checkLight: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -31,8 +41,31 @@ class SettingsActivity : AppCompatActivity() {
         recordList = findViewById(R.id.recordList)
         seekLyricAlpha = findViewById(R.id.seekLyricAlpha)
         tvLyricAlphaValue = findViewById(R.id.tvLyricAlphaValue)
+        tabMusic = findViewById(R.id.tabMusic)
+        tabSteering = findViewById(R.id.tabSteering)
+        tabAppearance = findViewById(R.id.tabAppearance)
+        panelMusic = findViewById(R.id.panelMusic)
+        panelSteering = findViewById(R.id.panelSteering)
+        panelAppearance = findViewById(R.id.panelAppearance)
+        checkDark = findViewById(R.id.checkDark)
+        checkLight = findViewById(R.id.checkLight)
 
-        // 悬浮歌词背景不透明度（0-100，默认 80，拖动实时保存）
+        // 左侧分类切换
+        tabMusic.setOnClickListener { selectTab(0) }
+        tabSteering.setOnClickListener { selectTab(1) }
+        tabAppearance.setOnClickListener { selectTab(2) }
+        selectTab(0)
+
+        // 外观：深色 / 浅色
+        findViewById<View>(R.id.optDark).setOnClickListener {
+            UiTheme.setMode(this, true); renderAppearance()
+        }
+        findViewById<View>(R.id.optLight).setOnClickListener {
+            UiTheme.setMode(this, false); renderAppearance()
+        }
+        renderAppearance()
+
+        // 悬浮歌词背景不透明度（0-100，默认 20，拖动实时保存）
         tvLyricAlphaValue.text = "${MusicHost.lyricBgAlpha(this)}%"
         seekLyricAlpha.apply {
             max = 100
@@ -50,9 +83,29 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
+    /** 切换分类：0=音乐，1=方向盘，2=外观 */
+    private fun selectTab(index: Int) {
+        val tabs = listOf(tabMusic, tabSteering, tabAppearance)
+        val panels = listOf(panelMusic, panelSteering, panelAppearance)
+        tabs.forEachIndexed { i, tab ->
+            val isSel = i == index
+            tab.isSelected = isSel
+            tab.setTextColor(if (isSel) Color.WHITE else getColor(R.color.settings_label))
+            panels[i].visibility = if (isSel) View.VISIBLE else View.GONE
+        }
+    }
+
+    /** 按当前深浅模式刷新勾选 */
+    private fun renderAppearance() {
+        val dark = UiTheme.isDark(this)
+        checkDark.visibility = if (dark) View.VISIBLE else View.GONE
+        checkLight.visibility = if (dark) View.GONE else View.VISIBLE
+    }
+
     override fun onResume() {
         super.onResume()
         render()
+        renderAppearance()
     }
 
     private fun render() {
