@@ -280,32 +280,36 @@ class MusicHost(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
         ).apply { topMargin = dp(2) })
         // 控制按钮行
+        val btnTint = if (art != null) 0xFFFFFFFF.toInt() else p.dockIconTint
         val ctrls = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-        ctrls.addView(ctrlBtn(android.R.drawable.ic_media_previous) {
+        ctrls.addView(ctrlBtn(android.R.drawable.ic_media_previous, btnTint) {
             safe { controller.transportControls.skipToPrevious() }
         })
         ctrls.addView(ctrlBtn(
             if (isPlaying(controller.playbackState)) android.R.drawable.ic_media_pause
             else android.R.drawable.ic_media_play,
+            btnTint,
         ) {
             safe {
                 if (isPlaying(controller.playbackState)) controller.transportControls.pause()
                 else controller.transportControls.play()
             }
         })
-        ctrls.addView(ctrlBtn(android.R.drawable.ic_media_next) {
+        ctrls.addView(ctrlBtn(android.R.drawable.ic_media_next, btnTint) {
             safe { controller.transportControls.skipToNext() }
         })
         col.addView(ctrls, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
         ).apply { topMargin = dp(10) })
-        // 歌词区：2行（当前+下一句），紧凑布局不遮挡时钟
+        // 歌词区：2行（当前+下一句），紧凑布局不遮挡时钟；悬浮歌词显示时隐藏此处
+        val floatShowing = lyricFloatView != null
         val lyricScroll = android.widget.ScrollView(context).apply {
             isVerticalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_NEVER
+            visibility = if (floatShowing) View.GONE else View.VISIBLE
         }
         val lyricContainer = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -352,11 +356,11 @@ class MusicHost(
         refreshLyric()
     }
 
-    private fun ctrlBtn(icon: Int, onClick: () -> Unit): View =
+    private fun ctrlBtn(icon: Int, tint: Int, onClick: () -> Unit): View =
         ImageButton(context).apply {
             setImageResource(icon)
             background = null
-            setColorFilter(UiTheme.palette(context).dockIconTint)
+            setColorFilter(tint)
             setOnClickListener { onClick() }
             setPadding(dp(10), dp(10), dp(10), dp(10))
         }
@@ -608,10 +612,13 @@ class MusicHost(
     }
 
     private fun hideLyricFloat() {
+        val wasShowing = lyricFloatView != null
         lyricFloatView?.let { runCatching { wm.removeView(it) } }
         lyricFloatView = null
         karaokeView = null
         lyricFloatNext = null
+        // 悬浮歌词消失时重绘音乐栏，恢复内嵌歌词
+        if (wasShowing) currentController?.let { renderPlaying(it) }
     }
 
     private fun updateLyricFloat() {
@@ -634,6 +641,8 @@ class MusicHost(
             }
             runCatching { wm.addView(lyricFloatView!!, lp) }
                 .onFailure { hideLyricFloat(); return }
+            // 悬浮歌词出现时重绘音乐栏，隐藏内嵌歌词
+            currentController?.let { renderPlaying(it) }
         }
         applyFloatLayout()
         val idx = lyricHighlight.coerceAtLeast(0)
