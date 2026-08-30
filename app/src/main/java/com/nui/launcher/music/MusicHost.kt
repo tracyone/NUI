@@ -104,7 +104,9 @@ class MusicHost(
             // 仅在缺值时才填（不覆盖 MediaSession 已有）
             if (!title.isNullOrBlank() && lastTitle.isBlank()) lastTitle = title
             if (!artist.isNullOrBlank() && lastArtist.isBlank()) lastArtist = artist
-            if (cover != null && lastCover == null) lastCover = cover
+            // 封面只在通知标题与当前歌曲匹配时才设置（避免切歌后收到上一首的通知导致封面张冠李戴）
+            val titleMatch = title.isNullOrBlank() || lastTitle.isBlank() || title == lastTitle
+            if (cover != null && lastCover == null && titleMatch) lastCover = cover
             if (!lyric.isNullOrBlank() && lastLyricRaw == null) lastLyricRaw = lyric
             // 如果歌词从无变有，重新 parseLrc 触发悬浮窗显示
             if (!lyric.isNullOrBlank() && lyrics.isEmpty()) {
@@ -242,29 +244,36 @@ class MusicHost(
         // 歌词为空（MediaSession 元数据不带歌词）：按歌名+歌手走网络抓词（通用兜底，QQ/酷我等均适用）
         maybeFetchLyric()
 
+        val p = UiTheme.palette(context)
+        // 有封面时作为音乐区背景铺满（直接设到 container 上，避免被卡片背景遮挡），无封面时清空
+        if (art != null) {
+            container.background = android.graphics.drawable.BitmapDrawable(context.resources, art).apply {
+                gravity = android.view.Gravity.FILL
+            }
+        } else {
+            container.background = null
+        }
         val col = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding(dp(12), dp(14), dp(12), dp(14))
+            // 有封面时加半透明遮罩保证文字清晰，无封面时用默认背景色
+            if (art != null) {
+                setBackgroundColor(0x99000000.toInt())
+            }
         }
-        val p = UiTheme.palette(context)
-        // 封面
-        val cover = ImageView(context).apply {
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            if (art != null) setImageBitmap(art)
-            else setImageResource(android.R.drawable.ic_media_play)
-            setBackgroundColor(p.panelBg)
-        }
-        col.addView(cover, LinearLayout.LayoutParams(dp(84), dp(84)).apply { bottomMargin = dp(10) })
+        // 有封面背景时文字用白色，无封面时用主题色
+        val titleColor = if (art != null) 0xFFFFFFFF.toInt() else p.textPrimary
+        val subColor = if (art != null) 0xCCCCCCFF.toInt() else p.textSecondary
         // 标题
         col.addView(TextView(context).apply {
-            text = title; setTextColor(p.textPrimary); textSize = 15f
+            text = title; setTextColor(titleColor); textSize = 15f
             maxLines = 1; ellipsize = TextUtils.TruncateAt.END
             gravity = Gravity.CENTER
         })
         // 艺术家
         col.addView(TextView(context).apply {
-            text = artist; setTextColor(p.textSecondary); textSize = 12f
+            text = artist; setTextColor(subColor); textSize = 12f
             maxLines = 1; ellipsize = TextUtils.TruncateAt.END
             gravity = Gravity.CENTER
         }, LinearLayout.LayoutParams(
@@ -305,7 +314,7 @@ class MusicHost(
         }
         val lyricLines = Array(2) {
             TextView(context).apply {
-                setTextColor(p.textSecondary)
+                setTextColor(subColor)
                 textSize = 11f
                 gravity = Gravity.CENTER
                 maxLines = 1
