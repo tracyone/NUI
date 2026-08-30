@@ -203,7 +203,12 @@ class MainActivity : AppCompatActivity() {
             GradientDrawable().apply { setColor(Color.WHITE); cornerRadius = 16 * density },
         )
         for (i in 0 until binding.dockItems.childCount) {
-            binding.dockItems.getChildAt(i).background = itemBg
+            val c = binding.dockItems.getChildAt(i)
+            c.background = itemBg
+            // 空槽加号：跟随深浅模式换色
+            if (c.tag == "add") {
+                (c as ImageButton).imageTintList = ColorStateList.valueOf(p.dockIconTint)
+            }
         }
 
         // 地图卡片
@@ -233,14 +238,20 @@ class MainActivity : AppCompatActivity() {
         val dp = resources.displayMetrics.density
         val size = (64 * dp).toInt()
         val gap = (8 * dp).toInt()
-        val bg = androidx.core.content.ContextCompat.getDrawable(this, R.drawable.bg_dock_item)
+        val dark = UiTheme.isDark(this)
+        val p = UiTheme.palette(this)
+        val itemBg = RippleDrawable(
+            ColorStateList.valueOf(if (dark) 0x33FFFFFF.toInt() else 0x33000000.toInt()),
+            null,
+            GradientDrawable().apply { setColor(Color.WHITE); cornerRadius = 16 * dp },
+        )
         val addIcon = androidx.core.content.ContextCompat.getDrawable(this, R.drawable.ic_dock_add)
         val apps = DockConfig.loadApps(this)
         for (i in 0 until DockConfig.SLOT_COUNT) {
             val app = apps.getOrNull(i)
             val btn = android.widget.ImageButton(this).apply {
                 scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
-                background = bg
+                background = itemBg
                 if (app != null) {
                     setImageDrawable(app.icon)
                     setOnClickListener {
@@ -254,6 +265,9 @@ class MainActivity : AppCompatActivity() {
                     setOnLongClickListener { confirmRemove(i, app); true }
                 } else {
                     setImageDrawable(addIcon)
+                    // 加号颜色跟随深浅模式：深色下浅色 +，浅色下深色 +
+                    imageTintList = ColorStateList.valueOf(p.dockIconTint)
+                    tag = "add"
                     setOnClickListener { openPicker(i) }
                 }
             }
