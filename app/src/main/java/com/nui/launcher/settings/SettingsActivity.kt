@@ -2,6 +2,7 @@ package com.nui.launcher.settings
 
 import android.app.AlertDialog
 import android.app.Dialog
+import android.content.Intent
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Color
@@ -58,6 +59,12 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var checkVoiceFemale: TextView
     private lateinit var tvOptVoiceMale: TextView
     private lateinit var checkVoiceMale: TextView
+    private lateinit var optWallpaperDay: View
+    private lateinit var optWallpaperNight: View
+    private lateinit var tvWallpaperDayStatus: TextView
+    private lateinit var tvWallpaperNightStatus: TextView
+    private lateinit var tvWallpaperHint: TextView
+    private lateinit var wallpaper: com.nui.launcher.WallpaperController
     private var currentTab = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -98,6 +105,11 @@ class SettingsActivity : AppCompatActivity() {
         checkVoiceFemale = findViewById(R.id.checkVoiceFemale)
         tvOptVoiceMale = findViewById(R.id.tvOptVoiceMale)
         checkVoiceMale = findViewById(R.id.checkVoiceMale)
+        optWallpaperDay = findViewById(R.id.optWallpaperDay)
+        optWallpaperNight = findViewById(R.id.optWallpaperNight)
+        tvWallpaperDayStatus = findViewById(R.id.tvWallpaperDayStatus)
+        tvWallpaperNightStatus = findViewById(R.id.tvWallpaperNightStatus)
+        tvWallpaperHint = findViewById(R.id.tvWallpaperHint)
 
         // 左侧分类切换
         tabMusic.setOnClickListener { selectTab(0) }
@@ -143,6 +155,12 @@ class SettingsActivity : AppCompatActivity() {
             renderVoice()
         }
         renderVoice()
+        // 外观 → 壁纸：白天 / 晚上（本 Activity 自持控制器，应用于自身根视图做预览）
+        wallpaper = com.nui.launcher.WallpaperController(this, findViewById(R.id.settingsRoot))
+        wallpaper.applyOnStart()
+        optWallpaperDay.setOnClickListener { wallpaper.showMenu(com.nui.launcher.WallpaperController.Slot.DAY) }
+        optWallpaperNight.setOnClickListener { wallpaper.showMenu(com.nui.launcher.WallpaperController.Slot.NIGHT) }
+        refreshWallpaper()
         // Dock 图标大小：0.6~1.4，默认 1.0（100%），拖动实时保存
         tvDockIconValue.text = "${(UiTheme.dockIconScale(this) * 100).toInt()}%"
         seekDockIcon.apply {
@@ -247,6 +265,14 @@ class SettingsActivity : AppCompatActivity() {
         findViewById<View>(R.id.dividerVoice).setBackgroundColor(p.divider)
         tvOptVoiceFemale.setTextColor(p.label)
         tvOptVoiceMale.setTextColor(p.label)
+        // 外观 → 壁纸
+        findViewById<TextView>(R.id.groupTitleWallpaper).setTextColor(p.value)
+        findViewById<View>(R.id.dividerWallpaper).setBackgroundColor(p.divider)
+        findViewById<TextView>(R.id.tvOptWallpaperDay).setTextColor(p.label)
+        findViewById<TextView>(R.id.tvOptWallpaperNight).setTextColor(p.label)
+        tvWallpaperDayStatus.setTextColor(p.value)
+        tvWallpaperNightStatus.setTextColor(p.value)
+        tvWallpaperHint.setTextColor(p.value)
         checkVoiceFemale.setTextColor(p.accent)
         checkVoiceMale.setTextColor(p.accent)
         checkSystem.setTextColor(p.accent)
@@ -291,6 +317,20 @@ class SettingsActivity : AppCompatActivity() {
         val g = NuiTts.voiceGender(this)
         checkVoiceFemale.visibility = if (g == NuiTts.VOICE_FEMALE) View.VISIBLE else View.GONE
         checkVoiceMale.visibility = if (g == NuiTts.VOICE_MALE) View.VISIBLE else View.GONE
+    }
+
+    /** 刷新壁纸槽位状态文字（默认/已设置） */
+    private fun refreshWallpaper() {
+        tvWallpaperDayStatus.text = if (wallpaper.hasCustom(com.nui.launcher.WallpaperController.Slot.DAY)) getString(R.string.wallpaper_set) else getString(R.string.wallpaper_default)
+        tvWallpaperNightStatus.text = if (wallpaper.hasCustom(com.nui.launcher.WallpaperController.Slot.NIGHT)) getString(R.string.wallpaper_set) else getString(R.string.wallpaper_default)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == com.nui.launcher.WallpaperController.REQ_PICK) {
+            if (::wallpaper.isInitialized) wallpaper.onActivityResult(requestCode, resultCode, data)
+            refreshWallpaper()
+        }
     }
 
     override fun onResume() {

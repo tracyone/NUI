@@ -60,6 +60,18 @@ class SettingsDialog(context: Context) : Dialog(context) {
     private lateinit var checkVoiceFemale: TextView
     private lateinit var tvOptVoiceMale: TextView
     private lateinit var checkVoiceMale: TextView
+    private lateinit var optWallpaperDay: View
+    private lateinit var optWallpaperNight: View
+    private lateinit var tvWallpaperDayStatus: TextView
+    private lateinit var tvWallpaperNightStatus: TextView
+    private lateinit var tvWallpaperHint: TextView
+
+    /** 壁纸槽位是否已设置（由 MainActivity 注入，读 WallpaperController 状态） */
+    var wallpaperHasCustom: ((com.nui.launcher.WallpaperController.Slot) -> Boolean)? = null
+
+    /** 点击壁纸槽位（由 MainActivity 注入，弹出该槽位的壁纸菜单） */
+    var onWallpaperPick: ((com.nui.launcher.WallpaperController.Slot) -> Unit)? = null
+
     private var currentTab = 0
 
     init {
@@ -100,6 +112,12 @@ class SettingsDialog(context: Context) : Dialog(context) {
         checkVoiceFemale = findViewById(R.id.checkVoiceFemale)
         tvOptVoiceMale = findViewById(R.id.tvOptVoiceMale)
         checkVoiceMale = findViewById(R.id.checkVoiceMale)
+        // 外观 → 壁纸（白天 / 晚上）
+        optWallpaperDay = findViewById(R.id.optWallpaperDay)
+        optWallpaperNight = findViewById(R.id.optWallpaperNight)
+        tvWallpaperDayStatus = findViewById(R.id.tvWallpaperDayStatus)
+        tvWallpaperNightStatus = findViewById(R.id.tvWallpaperNightStatus)
+        tvWallpaperHint = findViewById(R.id.tvWallpaperHint)
 
         tabMusic.setOnClickListener { selectTab(0) }
         tabSteering.setOnClickListener { selectTab(1) }
@@ -145,6 +163,10 @@ class SettingsDialog(context: Context) : Dialog(context) {
             renderVoice()
         }
         renderVoice()
+        // 外观 → 壁纸：白天 / 晚上（点击弹菜单，由宿主接管选图）
+        optWallpaperDay.setOnClickListener { onWallpaperPick?.invoke(com.nui.launcher.WallpaperController.Slot.DAY) }
+        optWallpaperNight.setOnClickListener { onWallpaperPick?.invoke(com.nui.launcher.WallpaperController.Slot.NIGHT) }
+        refreshWallpaper()
         tvDockIconValue.text = "${(UiTheme.dockIconScale(context) * 100).toInt()}%"
         seekDockIcon.apply {
             progress = ((UiTheme.dockIconScale(context) - 0.6f) / 0.8f * 80).toInt()
@@ -258,6 +280,14 @@ class SettingsDialog(context: Context) : Dialog(context) {
         findViewById<View>(R.id.dividerVoice).setBackgroundColor(p.divider)
         tvOptVoiceFemale.setTextColor(p.label)
         tvOptVoiceMale.setTextColor(p.label)
+        // 外观 → 壁纸
+        findViewById<TextView>(R.id.groupTitleWallpaper).setTextColor(p.value)
+        findViewById<View>(R.id.dividerWallpaper).setBackgroundColor(p.divider)
+        findViewById<TextView>(R.id.tvOptWallpaperDay).setTextColor(p.label)
+        findViewById<TextView>(R.id.tvOptWallpaperNight).setTextColor(p.label)
+        tvWallpaperDayStatus.setTextColor(p.value)
+        tvWallpaperNightStatus.setTextColor(p.value)
+        tvWallpaperHint.setTextColor(p.value)
         checkVoiceFemale.setTextColor(p.accent)
         checkVoiceMale.setTextColor(p.accent)
         checkSystem.setTextColor(p.accent)
@@ -293,6 +323,14 @@ class SettingsDialog(context: Context) : Dialog(context) {
         val g = NuiTts.voiceGender(context)
         checkVoiceFemale.visibility = if (g == NuiTts.VOICE_FEMALE) View.VISIBLE else View.GONE
         checkVoiceMale.visibility = if (g == NuiTts.VOICE_MALE) View.VISIBLE else View.GONE
+    }
+
+    /** 刷新壁纸槽位状态文字（默认/已设置），宿主选图返回后调用 */
+    fun refreshWallpaper() {
+        val daySet = wallpaperHasCustom?.invoke(com.nui.launcher.WallpaperController.Slot.DAY) ?: false
+        val nightSet = wallpaperHasCustom?.invoke(com.nui.launcher.WallpaperController.Slot.NIGHT) ?: false
+        tvWallpaperDayStatus.text = if (daySet) context.getString(R.string.wallpaper_set) else context.getString(R.string.wallpaper_default)
+        tvWallpaperNightStatus.text = if (nightSet) context.getString(R.string.wallpaper_set) else context.getString(R.string.wallpaper_default)
     }
 
     private fun render() = render(UiTheme.isDark(context))

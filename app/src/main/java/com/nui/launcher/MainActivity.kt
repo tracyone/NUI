@@ -50,6 +50,9 @@ class MainActivity : AppCompatActivity() {
     /** 桌面天气语音播报（首次获取 + 重大天气突发） */
     private lateinit var weatherVoice: WeatherVoice
 
+    /** 当前打开的桌面设置面板（选壁纸返回后刷新状态） */
+    private var settingsDialog: com.nui.launcher.settings.SettingsDialog? = null
+
     /** 桌面天气动画每次展示时长（毫秒），展示结束后淡出隐藏 */
     private val weatherLayerShowMs = 20_000L
     private val mapSources by lazy { MapSources.build(this) }
@@ -247,6 +250,10 @@ class MainActivity : AppCompatActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         wallpaper.onActivityResult(requestCode, resultCode, data)
+        // 从图库选壁纸返回后，刷新设置面板中壁纸的状态文字
+        if (requestCode == com.nui.launcher.WallpaperController.REQ_PICK) {
+            settingsDialog?.refreshWallpaper()
+        }
     }
 
     override fun startActivity(intent: Intent?) {
@@ -299,6 +306,7 @@ class MainActivity : AppCompatActivity() {
         if (UiTheme.mode(this) == UiTheme.Mode.SYSTEM) {
             // resources 可能尚未同步，用 newConfig 判断深浅
             applyTheme(UiTheme.isSystemDark(newConfig))
+            if (::wallpaper.isInitialized) wallpaper.applyForAppearance(UiTheme.isSystemDark(newConfig))
             if (::musicHost.isInitialized) musicHost.refresh()
         }
     }
@@ -348,6 +356,7 @@ class MainActivity : AppCompatActivity() {
         applyTheme()
         applyDockStyle()
         renderDock()
+        if (::wallpaper.isInitialized) wallpaper.applyForAppearance(UiTheme.isDark(this))
         if (::musicHost.isInitialized) musicHost.refresh()
     }
 
@@ -637,9 +646,6 @@ class MainActivity : AppCompatActivity() {
         wallpaper.applyOnStart()
         wallpaper.onHideFloat = { mapHost.closeFloat() }
         wallpaper.onShowFloat = { mapHost.showFloat() }
-        val rightPanel = desktopRightPanel ?: return
-        val clockArea = rightPanel.getChildAt(1) as? LinearLayout
-        clockArea?.setOnLongClickListener { wallpaper.showMenu(); true }
     }
 
     private fun loadAppGrid(grid: RecyclerView) {
@@ -672,13 +678,17 @@ class MainActivity : AppCompatActivity() {
                 launchIntent = Intent(),
                 onClick = {
                     val dlg = com.nui.launcher.settings.SettingsDialog(this)
+                    dlg.wallpaperHasCustom = { slot -> wallpaper.hasCustom(slot) }
+                    dlg.onWallpaperPick = { slot -> wallpaper.showMenu(slot) }
                     // 设置面板关闭时刷新桌面主题/dock/音乐栏（Dialog 关闭不触发 onResume）
                     dlg.setOnDismissListener {
+                        settingsDialog = null
                         applyTheme()
                         applyDockStyle()
                         renderDock()
                         if (::musicHost.isInitialized) musicHost.refresh()
                     }
+                    settingsDialog = dlg
                     dlg.show()
                 },
             )

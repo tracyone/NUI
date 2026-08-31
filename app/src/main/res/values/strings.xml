@@ -27,6 +27,12 @@
     <string name="dock_icon_scale_hint">数值越大图标越大（默认 100%）</string>
     <string name="app_icon_scale">应用列表图标大小</string>
     <string name="app_icon_scale_hint">数值越大图标越大（默认 100%）</string>
+    <string name="wallpaper_group">壁纸</string>
+    <string name="wallpaper_day">白天壁纸</string>
+    <string name="wallpaper_night">晚上壁纸</string>
+    <string name="wallpaper_set">已设置</string>
+    <string name="wallpaper_default">默认</string>
+    <string name="wallpaper_hint">白天壁纸用于浅色外观，晚上壁纸用于深色外观；晚上未设置时自动使用白天壁纸</string>
     <string name="voice_title">语音</string>
     <string name="voice_female">女声（小雅）</string>
     <string name="voice_male">男声（超文）</string>

@@ -13,45 +13,45 @@ import android.graphics.Matrix
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.ColorDrawable
 import android.net.Uri
-import android.provider.MediaStore
 import android.util.Log
 import android.view.View
 import android.widget.Toast
-import androidx.core.content.edit
 import java.io.File
-import java.io.InputStream
 
 /**
- * 桌面壁纸控制器。
+ * 桌面壁纸控制器（白天 / 晚上双槽位）。
  *
- * 选图方式：ACTION_PICK（系统图库选择器，直接返回选中图片 URI）
- *  - 兼容性好：所有 Android 版本的图库都支持
- *  - 无需 READ_EXTERNAL_STORAGE 权限（ACTION_PICK 由系统授权临时读权限）
+ * - 白天壁纸用于浅色外观，晚上壁纸用于深色外观（跟随 [UiTheme.isDark]）。
+ * - 回退规则：晚上未设置 → 用白天壁纸；白天未设置 → 用默认壁纸。
+ * - 选图方式：ACTION_GET_CONTENT（系统图库选择器，免存储权限，临时授权）。
+ * - 持久化：选中图片复制到 app 内部存储（filesDir/wallpaper_day.jpg 与 wallpaper_night.jpg），
+ *   重启后从内部文件加载，稳定可靠。
+ * - 渲染：居中裁剪到屏幕尺寸，设为根布局背景；默认壁纸为 default_wallpaper 深色渐变。
  *
- * 持久化：把选中图片复制到 app 内部存储（filesDir/wallpaper.jpg）
- *  - 避免 URI 权限丢失（ACTION_PICK 的 URI 不持久）
- *  - 重启后从内部文件加载，稳定可靠
- *
- * 渲染：居中裁剪到屏幕尺寸，设为根布局背景。
- * 默认壁纸：bg_launch 深色渐变。
- *
- * 触发：长按右侧面板时钟区 → "设置壁纸 / 恢复默认"。
+ * 入口：桌面设置 → 外观 → 壁纸（原长按时钟区入口已移除）。
  */
 class WallpaperController(
     private val activity: Activity,
     private val root: View,
 ) {
-    private val prefs = activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    enum class Slot(val fileName: String) {
+        DAY("wallpaper_day.jpg"),
+        NIGHT("wallpaper_night.jpg"),
+    }
 
     /** 弹菜单/选图前隐藏悬浮地图，关闭后恢复（由外部注入，同 NavHost/MusicHost 模式） */
     var onHideFloat: (() -> Unit)? = null
     var onShowFloat: (() -> Unit)? = null
-    // 选图会打开系统选择器：菜单关闭时若选择器将接管，则不恢复浮窗
+
+    /** 当前正在设置哪个槽位的壁纸（选图结果回填用） */
+    private var currentSlot: Slot = Slot.DAY
+
+    /** 选图会打开系统选择器：菜单关闭时若选择器将接管，则不恢复浮窗 */
     private var followUpPending = false
 
-    /** 启动系统图库选择器。需在 MainActivity.onActivityResult 接收回调。 */
-    fun pick() {
-        // ACTION_GET_CONTENT + OPENABLE：弹出系统选择器，直接返回选中图片 URI
+    /** 启动系统图库选择器。需在宿主 Activity.onActivityResult 接收回调。 */
+    fun pick(slot: Slot) {
+        currentSlot = slot
         val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "image/*"
@@ -59,7 +59,7 @@ class WallpaperController(
         runCatching {
             activity.startActivityForResult(Intent.createChooser(intent, "选择壁纸"), REQ_PICK)
         }.onFailure {
-            onShowFloat?.invoke() // 选择器未打开，恢复悬浮地图
+            onShowFloat?.invoke()
             NuiToast.show(activity, "无法打开图库选择器", Toast.LENGTH_SHORT)
             Log.e(TAG, "pick failed", it)
         }
@@ -71,36 +71,96 @@ class WallpaperController(
         onShowFloat?.invoke() // 系统选择器已关闭，恢复悬浮地图
         if (resultCode != Activity.RESULT_OK || data == null) return
         val uri = data.data ?: return
-        // 复制到内部存储持久化
-        if (copyToInternal(uri)) {
-            NuiToast.show(activity, "壁纸已设置", Toast.LENGTH_SHORT)
+        if (copyToInternal(uri, currentSlot)) {
+            NuiToast.show(activity, "${slotLabel(currentSlot)}已设置", Toast.LENGTH_SHORT)
         } else {
             NuiToast.show(activity, "壁纸加载失败", Toast.LENGTH_SHORT)
         }
     }
 
-    /** 把选中图片复制到内部存储，然后应用。 */
-    private fun copyToInternal(uri: Uri): Boolean {
+    /** 把选中图片复制到对应槽位内部文件，然后应用。 */
+    private fun copyToInternal(uri: Uri, slot: Slot): Boolean {
         return try {
-            val target = File(activity.filesDir, WALLPAPER_FILE)
+            val target = File(activity.filesDir, slot.fileName)
             activity.contentResolver.openInputStream(uri)?.use { input ->
                 target.outputStream().use { output ->
                     input.copyTo(output)
                 }
             } ?: return false
-            applyFromFile(target)
+            applyForAppearance(UiTheme.isDark(activity))
+            true
         } catch (e: Exception) {
             Log.e(TAG, "copyToInternal failed", e)
             false
         }
     }
 
-    /** 应用持久化的壁纸（启动时调用）。 */
+    /** 启动时应用壁纸（自动迁移旧版单壁纸 → 白天壁纸）。 */
     fun applyOnStart() {
-        val file = File(activity.filesDir, WALLPAPER_FILE)
-        if (!file.exists()) { applyDefault(); return }
-        if (!applyFromFile(file)) applyDefault()
+        migrateLegacy()
+        applyForAppearance(UiTheme.isDark(activity))
     }
+
+    /** 按当前外观深浅重新解析并应用壁纸（主题切换 / 系统深浅切换时调用）。 */
+    fun applyForAppearance(dark: Boolean) {
+        val file = resolveFile(dark)
+        if (file == null || !applyFromFile(file)) applyDefault()
+    }
+
+    /** 当前槽位是否已自定义壁纸。 */
+    fun hasCustom(slot: Slot): Boolean = File(activity.filesDir, slot.fileName).exists()
+
+    /** 恢复默认壁纸（指定槽位；默认双槽位全清）。 */
+    fun reset(slot: Slot? = null) {
+        val slots = slot?.let { listOf(it) } ?: Slot.values().toList()
+        for (s in slots) File(activity.filesDir, s.fileName).delete()
+        applyForAppearance(UiTheme.isDark(activity))
+        NuiToast.show(activity, "已恢复默认壁纸", Toast.LENGTH_SHORT)
+    }
+
+    /** 弹菜单：选择新壁纸 / 恢复默认（按槽位）。 */
+    fun showMenu(slot: Slot) {
+        val has = hasCustom(slot)
+        val items = if (has) arrayOf("选择新壁纸", "恢复默认壁纸") else arrayOf("选择壁纸")
+        onHideFloat?.invoke()
+        followUpPending = false
+        val d = AlertDialog.Builder(activity)
+            .setTitle(slotLabel(slot))
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> { followUpPending = true; pick(slot) } // 选择器将接管，浮窗保持隐藏
+                    1 -> reset(slot)
+                }
+            }.create()
+        d.setOnDismissListener { if (!followUpPending) onShowFloat?.invoke() }
+        d.show()
+    }
+
+    /** 旧版单壁纸 wallpaper.jpg → 白天壁纸（若白天槽位尚未设置） */
+    private fun migrateLegacy() {
+        val legacy = File(activity.filesDir, "wallpaper.jpg")
+        val day = File(activity.filesDir, Slot.DAY.fileName)
+        if (legacy.exists() && !day.exists()) {
+            runCatching { legacy.copyTo(day, overwrite = false) }
+            legacy.delete()
+        }
+    }
+
+    /** 解析当前外观应使用的壁纸文件（null = 用默认）。 */
+    private fun resolveFile(dark: Boolean): File? {
+        val day = File(activity.filesDir, Slot.DAY.fileName)
+        val night = File(activity.filesDir, Slot.NIGHT.fileName)
+        return if (dark) {
+            // 晚上：晚上壁纸 → 白天壁纸 → 默认
+            night.takeIf { it.exists() } ?: day.takeIf { it.exists() }
+        } else {
+            // 白天：白天壁纸 → 默认
+            day.takeIf { it.exists() }
+        }
+    }
+
+    private fun slotLabel(slot: Slot) =
+        if (slot == Slot.DAY) "白天壁纸" else "晚上壁纸"
 
     /** 从内部文件解码 + 居中裁剪到屏幕尺寸，设为根背景。 */
     private fun applyFromFile(file: File): Boolean {
@@ -114,7 +174,6 @@ class WallpaperController(
             val bmp = BitmapFactory.decodeFile(file.absolutePath, decode) ?: return false
             val fitted = centerCrop(bmp, sw, sh)
             root.background = BitmapDrawable(activity.resources, fitted)
-            prefs.edit { putBoolean(KEY_SET, true) }
             true
         } catch (e: Exception) {
             Log.e(TAG, "applyFromFile failed", e)
@@ -126,34 +185,6 @@ class WallpaperController(
         root.background = activity.getDrawable(R.drawable.default_wallpaper)
             ?: activity.getDrawable(R.drawable.bg_launch)
             ?: ColorDrawable(Color.parseColor("#0B0D11"))
-    }
-
-    /** 恢复默认壁纸。 */
-    fun reset() {
-        val file = File(activity.filesDir, WALLPAPER_FILE)
-        file.delete()
-        prefs.edit { putBoolean(KEY_SET, false) }
-        applyDefault()
-        NuiToast.show(activity, "已恢复默认壁纸", Toast.LENGTH_SHORT)
-    }
-
-    /** 弹菜单：设置壁纸 / 恢复默认。 */
-    fun showMenu() {
-        val hasCustom = File(activity.filesDir, WALLPAPER_FILE).exists()
-        val items = if (hasCustom) arrayOf("选择新壁纸", "恢复默认壁纸")
-        else arrayOf("选择壁纸")
-        onHideFloat?.invoke()
-        followUpPending = false
-        val d = AlertDialog.Builder(activity)
-            .setTitle("桌面壁纸")
-            .setItems(items) { _, which ->
-                when (which) {
-                    0 -> { followUpPending = true; pick() } // 选择器将接管，浮窗保持隐藏
-                    1 -> reset()
-                }
-            }.create()
-        d.setOnDismissListener { if (!followUpPending) onShowFloat?.invoke() }
-        d.show()
     }
 
     private fun calcSample(ow: Int, oh: Int, tw: Int, th: Int): Int {
@@ -181,9 +212,6 @@ class WallpaperController(
 
     companion object {
         private const val TAG = "WallpaperController"
-        private const val PREFS = "nui_wallpaper"
-        private const val KEY_SET = "wallpaper_set"
-        private const val WALLPAPER_FILE = "wallpaper.jpg"
         const val REQ_PICK = 0x1011
     }
 }
