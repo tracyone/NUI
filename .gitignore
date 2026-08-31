@@ -15,3 +15,7 @@ screenshot.png
 # 构建错误与运行日志
 .kotlin/
 *.log
+# 天气功能开发临时目录（截图/下载包/解压模型）
+weather-screen/
+# 临时截图
+android_screenshot.png

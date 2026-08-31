@@ -8,6 +8,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <!-- Android 11+ queries: 允许 bindService 到酷我/网易云/QQ/酷狗等音乐 App，不走 QUERY_ALL 兜底也能通 -->
     <queries>
@@ -61,6 +62,21 @@
             android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
             android:screenOrientation="landscape"
             android:theme="@style/Theme.NUI" />
+
+        <!-- 全屏天气页：带启动入口，可加入 Dock / 应用列表 -->
+        <activity
+            android:name=".weather.WeatherActivity"
+            android:exported="true"
+            android:icon="@drawable/ic_weather"
+            android:label="@string/weather_app_name"
+            android:configChanges="orientation|screenSize|keyboardHidden|navigation|smallestScreenSize|screenLayout|uiMode"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.NUI">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
 
         <service
             android:name=".music.MusicListenerService"

@@ -25,6 +25,11 @@ import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.card.MaterialCardView
 import com.nui.launcher.databinding.ActivityMainBinding
 import com.nui.launcher.map.MapHost
+import com.nui.launcher.weather.WeatherFetcher
+import com.nui.launcher.weather.WeatherActivity
+import com.nui.launcher.weather.WeatherSurfaceView
+import com.nui.launcher.weather.WeatherVoice
+import kotlin.concurrent.thread
 import com.nui.launcher.map.MapPickerDialog
 import com.nui.launcher.map.MapSources
 import com.nui.launcher.music.MusicHost
@@ -38,6 +43,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var navHost: NavHost
     private lateinit var musicHost: MusicHost
     private lateinit var wallpaper: WallpaperController
+    private lateinit var weatherFetcher: WeatherFetcher
+    private var weatherText: android.widget.TextView? = null
+    /** 桌面全屏透明天气动画层（叠加在壁纸/界面上方，跟随实时天气） */
+    private lateinit var weatherLayer: WeatherSurfaceView
+    /** 桌面天气语音播报（首次获取 + 重大天气突发） */
+    private lateinit var weatherVoice: WeatherVoice
+
+    /** 桌面天气动画每次展示时长（毫秒），展示结束后淡出隐藏 */
+    private val weatherLayerShowMs = 20_000L
     private val mapSources by lazy { MapSources.build(this) }
 
     // Page0 (desktop) 里的 view 引用
@@ -85,6 +99,8 @@ class MainActivity : AppCompatActivity() {
         desktopMusicContainer = v.findViewById(R.id.musicContainer)
         desktopBtnNavHome = v.findViewById(R.id.btnNavHome)
         desktopBtnNavCompany = v.findViewById(R.id.btnNavCompany)
+        weatherText = v.findViewById(R.id.weatherText)
+        weatherText?.setOnClickListener { startActivity(Intent(this, WeatherActivity::class.java)) }
         if (!page0Ready) {
             page0Ready = true
             v.post {
@@ -114,12 +130,107 @@ class MainActivity : AppCompatActivity() {
                 if (::mapHost.isInitialized) {
                     if (position == 0) mapHost.showFloat() else mapHost.closeFloat()
                 }
+                syncWeatherLayer(position)
             }
         })
 
         setupDock()
         applyDockStyle()
         setupPageIndicator()
+
+        // 桌面全屏透明天气动画层 + 语音播报
+        setupWeatherLayer()
+        weatherVoice = WeatherVoice(this)
+
+        // 天气：初始化并设置回调，获取到天气后更新桌面天气文字/动画层/语音播报
+        weatherFetcher = WeatherFetcher(this)
+        weatherFetcher.onWeatherReady = { info ->
+            weatherText?.text = "${info.city}  ${info.icon}  ${info.temperature.toInt()}°  ${info.description}"
+            weatherText?.visibility = android.view.View.VISIBLE
+            if (::weatherLayer.isInitialized) {
+                weatherLayer.effect = WeatherSurfaceView.effectFor(info.weatherCode)
+                weatherLayer.isDay = info.isDay == 1
+                showWeatherLayerBriefly()
+            }
+            if (::weatherVoice.isInitialized) weatherVoice.onWeather(info)
+        }
+        // 尝试获取当前位置，获取到后更新天气查询位置
+        tryLoadLocation()
+    }
+
+    /** 桌面天气动画层：透明叠加在最上层，触摸穿透不挡操作；默认隐藏，仅在天气刷新时短暂展示后淡出 */
+    private fun setupWeatherLayer() {
+        weatherLayer = WeatherSurfaceView(this).apply {
+            transparent = true
+            effect = "clear"
+            val h = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+            isDay = h in 6..18
+            visibility = View.GONE
+        }
+        binding.root.addView(weatherLayer, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+    }
+
+    private fun syncWeatherLayer(position: Int) {
+        if (!::weatherLayer.isInitialized) return
+        if (position != 0) {
+            // 切到应用列表页：取消展示任务并隐藏动画
+            weatherLayer.removeCallbacks(weatherLayerFadeRunnable)
+            weatherLayer.animate().cancel()
+            weatherLayer.visibility = View.GONE
+            weatherLayer.pauseAnimation()
+        }
+        // 切回桌面页保持当前状态（由 showWeatherLayerBriefly 统一管理）
+    }
+
+    /** 天气动画短暂展示：显示一段时间后淡出隐藏，不常驻 */
+    private fun showWeatherLayerBriefly() {
+        if (!::weatherLayer.isInitialized) return
+        if (binding.viewPager.currentItem != 0) return
+        weatherLayer.removeCallbacks(weatherLayerFadeRunnable)
+        weatherLayer.animate().cancel()
+        weatherLayer.alpha = 1f
+        weatherLayer.visibility = View.VISIBLE
+        weatherLayer.postDelayed(weatherLayerFadeRunnable, weatherLayerShowMs)
+    }
+
+    private val weatherLayerFadeRunnable = Runnable {
+        if (!::weatherLayer.isInitialized) return@Runnable
+        weatherLayer.animate().alpha(0f).setDuration(1500).withEndAction {
+            if (::weatherLayer.isInitialized) {
+                weatherLayer.visibility = View.GONE
+                weatherLayer.pauseAnimation()
+            }
+        }.start()
+    }
+
+    /** 检查定位权限并获取最后已知位置，传给天气模块 */
+    private fun tryLoadLocation() {
+        if (checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(android.Manifest.permission.ACCESS_COARSE_LOCATION), 1001)
+            return
+        }
+        val lm = getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
+        val location = runCatching {
+            lm.getProviders(true).asSequence()
+                .mapNotNull { lm.getLastKnownLocation(it) }
+                .maxByOrNull { it.time }
+        }.getOrNull()
+        if (location != null) {
+            val lat = location.latitude
+            val lon = location.longitude
+            // 用内置城市经纬度匹配表获取城市名（无需网络逆地理编码）
+            val city = weatherFetcher.nearestCity(lat, lon)
+            weatherFetcher.setLocation(lat, lon, city)
+            weatherFetcher.fetch(force = true)
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 1001 && grantResults.isNotEmpty() && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            tryLoadLocation()
+        }
     }
 
     override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
@@ -163,6 +274,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (::weatherFetcher.isInitialized) weatherFetcher.start()
         applyTheme()
         // 设置页可能改了 Dock 形态/图标比例，返回时刷新
         applyDockStyle()
@@ -193,11 +305,15 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        if (::weatherFetcher.isInitialized) weatherFetcher.stop()
+        if (::weatherVoice.isInitialized) weatherVoice.stop()
         if (::mapHost.isInitialized) mapHost.onPause()
         if (::musicHost.isInitialized) musicHost.setFloatAreaVisible(false)
     }
 
     override fun onDestroy() {
+        if (::weatherVoice.isInitialized) weatherVoice.shutdown()
+        if (::weatherLayer.isInitialized) weatherLayer.removeCallbacks(weatherLayerFadeRunnable)
         if (::mapHost.isInitialized) mapHost.onDestroy()
         if (::musicHost.isInitialized) musicHost.onDestroy()
         super.onDestroy()
@@ -275,6 +391,7 @@ class MainActivity : AppCompatActivity() {
             rp.findViewById<TextView>(R.id.navLabelCompany)?.setTextColor(p.textPrimary)
             rp.findViewById<TextView>(R.id.clockTime)?.setTextColor(p.textPrimary)
             rp.findViewById<TextView>(R.id.clockDate)?.setTextColor(p.textSecondary)
+            rp.findViewById<TextView>(R.id.weatherText)?.setTextColor(p.textSecondary)
             rp.findViewById<MaterialCardView>(R.id.musicPanel)?.setCardBackgroundColor(p.mapBg)
         }
     }

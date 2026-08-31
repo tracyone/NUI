@@ -151,6 +151,15 @@
                 android:textSize="14sp"
                 android:textColor="@color/text_secondary"
                 android:layout_marginTop="2dp" />
+
+            <TextView
+                android:id="@+id/weatherText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="14sp"
+                android:textColor="@color/text_secondary"
+                android:layout_marginTop="2dp"
+                android:visibility="gone" />
         </LinearLayout>
 
         <!-- 音乐区域 -->

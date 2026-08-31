@@ -4,7 +4,7 @@
     <string name="app_list_title">应用列表</string>
     <string name="back">返回</string>
     <string name="app_icon">应用图标</string>
-    <string name="weather_placeholder">天气插件（待接入）</string>
+    <string name="weather_app_name">天气</string>
 
     <string name="dock_apps">应用列表</string>
     <string name="dock_add">添加应用</string>
@@ -16,6 +16,7 @@
     <string name="music">音乐</string>
     <string name="steering_wheel">方向盘</string>
     <string name="appearance">外观</string>
+    <string name="sound">声音</string>
     <string name="theme_system">跟随系统</string>
     <string name="theme_dark">深色模式</string>
     <string name="theme_light">浅色模式</string>
@@ -26,6 +27,9 @@
     <string name="dock_icon_scale_hint">数值越大图标越大（默认 100%）</string>
     <string name="app_icon_scale">应用列表图标大小</string>
     <string name="app_icon_scale_hint">数值越大图标越大（默认 100%）</string>
+    <string name="voice_title">语音</string>
+    <string name="voice_female">女声（小雅）</string>
+    <string name="voice_male">男声（超文）</string>
     <string name="lyric_bg_alpha">悬浮歌词背景不透明度</string>
     <string name="lyric_bg_alpha_hint">数值越大背景越不透明（100% 为完全不透明）</string>
     <string name="key_mapping_list">方向盘按键映射</string>

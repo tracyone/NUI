@@ -23,6 +23,7 @@ import androidx.core.content.ContextCompat
 import com.nui.launcher.R
 import com.nui.launcher.UiTheme
 import com.nui.launcher.music.MusicHost
+import com.nui.launcher.voice.NuiTts
 
 /** 桌面设置：右侧滑入面板（CarPlay 风格，dock 栏始终可见） */
 class SettingsDialog(context: Context) : Dialog(context) {
@@ -34,9 +35,11 @@ class SettingsDialog(context: Context) : Dialog(context) {
     private lateinit var tabMusic: TextView
     private lateinit var tabSteering: TextView
     private lateinit var tabAppearance: TextView
+    private lateinit var tabVoice: TextView
     private lateinit var panelMusic: View
     private lateinit var panelSteering: View
     private lateinit var panelAppearance: View
+    private lateinit var panelVoice: View
     private lateinit var checkSystem: TextView
     private lateinit var checkDark: TextView
     private lateinit var checkLight: TextView
@@ -53,6 +56,10 @@ class SettingsDialog(context: Context) : Dialog(context) {
     private lateinit var seekAppIcon: SeekBar
     private lateinit var tvAppIconValue: TextView
     private lateinit var tvAppIconTitle: TextView
+    private lateinit var tvOptVoiceFemale: TextView
+    private lateinit var checkVoiceFemale: TextView
+    private lateinit var tvOptVoiceMale: TextView
+    private lateinit var checkVoiceMale: TextView
     private var currentTab = 0
 
     init {
@@ -68,9 +75,11 @@ class SettingsDialog(context: Context) : Dialog(context) {
         tabMusic = findViewById(R.id.tabMusic)
         tabSteering = findViewById(R.id.tabSteering)
         tabAppearance = findViewById(R.id.tabAppearance)
+        tabVoice = findViewById(R.id.tabVoice)
         panelMusic = findViewById(R.id.panelMusic)
         panelSteering = findViewById(R.id.panelSteering)
         panelAppearance = findViewById(R.id.panelAppearance)
+        panelVoice = findViewById(R.id.panelVoice)
         checkSystem = findViewById(R.id.checkSystem)
         checkDark = findViewById(R.id.checkDark)
         checkLight = findViewById(R.id.checkLight)
@@ -87,10 +96,15 @@ class SettingsDialog(context: Context) : Dialog(context) {
         seekAppIcon = findViewById(R.id.seekAppIcon)
         tvAppIconValue = findViewById(R.id.tvAppIconValue)
         tvAppIconTitle = findViewById(R.id.tvAppIconTitle)
+        tvOptVoiceFemale = findViewById(R.id.tvOptVoiceFemale)
+        checkVoiceFemale = findViewById(R.id.checkVoiceFemale)
+        tvOptVoiceMale = findViewById(R.id.tvOptVoiceMale)
+        checkVoiceMale = findViewById(R.id.checkVoiceMale)
 
         tabMusic.setOnClickListener { selectTab(0) }
         tabSteering.setOnClickListener { selectTab(1) }
         tabAppearance.setOnClickListener { selectTab(2) }
+        tabVoice.setOnClickListener { selectTab(3) }
         selectTab(0)
 
         findViewById<View>(R.id.optSystem).setOnClickListener {
@@ -119,6 +133,18 @@ class SettingsDialog(context: Context) : Dialog(context) {
             UiTheme.setDockStyle(context, UiTheme.DockStyle.FLOAT)
             renderAppearance()
         }
+        // 语音：女声 / 男声（通用离线语音服务，零下载）
+        findViewById<View>(R.id.optVoiceFemale).setOnClickListener {
+            NuiTts.setVoiceGender(context, NuiTts.VOICE_FEMALE)
+            NuiTts(context).switchVoice(NuiTts.VOICE_FEMALE)
+            renderVoice()
+        }
+        findViewById<View>(R.id.optVoiceMale).setOnClickListener {
+            NuiTts.setVoiceGender(context, NuiTts.VOICE_MALE)
+            NuiTts(context).switchVoice(NuiTts.VOICE_MALE)
+            renderVoice()
+        }
+        renderVoice()
         tvDockIconValue.text = "${(UiTheme.dockIconScale(context) * 100).toInt()}%"
         seekDockIcon.apply {
             progress = ((UiTheme.dockIconScale(context) - 0.6f) / 0.8f * 80).toInt()
@@ -188,8 +214,8 @@ class SettingsDialog(context: Context) : Dialog(context) {
     private fun selectTab(index: Int, dark: Boolean) {
         currentTab = index
         val p = UiTheme.settingsPalette(dark)
-        val tabs = listOf(tabMusic, tabSteering, tabAppearance)
-        val panels = listOf(panelMusic, panelSteering, panelAppearance)
+        val tabs = listOf(tabMusic, tabSteering, tabAppearance, tabVoice)
+        val panels = listOf(panelMusic, panelSteering, panelAppearance, panelVoice)
         tabs.forEachIndexed { i, tab ->
             val isSel = i == index
             tab.isSelected = isSel
@@ -228,6 +254,12 @@ class SettingsDialog(context: Context) : Dialog(context) {
         tvAppIconTitle.setTextColor(p.label)
         findViewById<TextView>(R.id.groupTitleDock).setTextColor(p.value)
         findViewById<View>(R.id.dividerDock).setBackgroundColor(p.divider)
+        findViewById<TextView>(R.id.groupTitleVoice).setTextColor(p.value)
+        findViewById<View>(R.id.dividerVoice).setBackgroundColor(p.divider)
+        tvOptVoiceFemale.setTextColor(p.label)
+        tvOptVoiceMale.setTextColor(p.label)
+        checkVoiceFemale.setTextColor(p.accent)
+        checkVoiceMale.setTextColor(p.accent)
         checkSystem.setTextColor(p.accent)
         checkDark.setTextColor(p.accent)
         checkLight.setTextColor(p.accent)
@@ -255,6 +287,12 @@ class SettingsDialog(context: Context) : Dialog(context) {
         val ds = UiTheme.dockStyle(context)
         checkDockEdge.visibility = if (ds == UiTheme.DockStyle.EDGE) View.VISIBLE else View.GONE
         checkDockFloat.visibility = if (ds == UiTheme.DockStyle.FLOAT) View.VISIBLE else View.GONE
+    }
+
+    private fun renderVoice() {
+        val g = NuiTts.voiceGender(context)
+        checkVoiceFemale.visibility = if (g == NuiTts.VOICE_FEMALE) View.VISIBLE else View.GONE
+        checkVoiceMale.visibility = if (g == NuiTts.VOICE_MALE) View.VISIBLE else View.GONE
     }
 
     private fun render() = render(UiTheme.isDark(context))
