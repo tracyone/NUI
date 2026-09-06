@@ -178,6 +178,12 @@ class SettingsDialog(context: Context) : Dialog(context) {
             applySettingsTheme()
             (context as? com.nui.launcher.MainActivity)?.refreshForThemeChange()
         }
+        findViewById<View>(R.id.optFollowMap).setOnClickListener {
+            UiTheme.setMode(context, UiTheme.Mode.FOLLOW_MAP)
+            renderAppearance()
+            applySettingsTheme()
+            (context as? com.nui.launcher.MainActivity)?.refreshForThemeChange()
+        }
         findViewById<View>(R.id.optDockEdge).setOnClickListener {
             UiTheme.setDockStyle(context, UiTheme.DockStyle.EDGE)
             renderAppearance()
@@ -405,6 +411,7 @@ class SettingsDialog(context: Context) : Dialog(context) {
         checkSystem.visibility = if (m == UiTheme.Mode.SYSTEM) View.VISIBLE else View.GONE
         checkDark.visibility = if (m == UiTheme.Mode.DARK) View.VISIBLE else View.GONE
         checkLight.visibility = if (m == UiTheme.Mode.LIGHT) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.checkFollowMap).visibility = if (m == UiTheme.Mode.FOLLOW_MAP) View.VISIBLE else View.GONE
         val ds = UiTheme.dockStyle(context)
         checkDockEdge.visibility = if (ds == UiTheme.DockStyle.EDGE) View.VISIBLE else View.GONE
         checkDockFloat.visibility = if (ds == UiTheme.DockStyle.FLOAT) View.VISIBLE else View.GONE

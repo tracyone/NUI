@@ -3,15 +3,16 @@ package com.nui.launcher
 import android.content.Context
 import android.content.res.Configuration
 
-/** 桌面深浅模式：跟随系统 / 深色 / 浅色，默认跟随系统 */
+/** 桌面深浅模式：跟随系统 / 深色 / 浅色 / 跟随地图，默认跟随系统 */
 object UiTheme {
-    enum class Mode { SYSTEM, DARK, LIGHT }
+    enum class Mode { SYSTEM, DARK, LIGHT, FOLLOW_MAP }
 
     /** Dock 栏形态：贴边矩形（CarPlay 风格） / 圆角悬浮 */
     enum class DockStyle { EDGE, FLOAT }
 
     private const val PREFS = "nui_ui"
     private const val KEY_MODE = "theme_mode"
+    private const val KEY_MAP_DARK = "map_dark_state"
     private const val KEY_DOCK_STYLE = "dock_style"
     private const val KEY_DOCK_ICON_SCALE = "dock_icon_scale"
     private const val KEY_APP_ICON_SCALE = "app_icon_scale"
@@ -96,11 +97,12 @@ object UiTheme {
             .edit().putFloat(KEY_APP_ICON_SCALE, scale.coerceIn(0.6f, 1.4f)).apply()
     }
 
-    /** 当前是否深色：手动指定优先，否则跟随系统 DayNight */
+    /** 当前是否深色：手动指定优先，否则跟随系统或地图 */
     fun isDark(ctx: Context): Boolean = when (mode(ctx)) {
         Mode.DARK -> true
         Mode.LIGHT -> false
         Mode.SYSTEM -> isSystemDark(ctx)
+        Mode.FOLLOW_MAP -> mapDark(ctx)
     }
 
     fun mode(ctx: Context): Mode = when (
@@ -108,6 +110,7 @@ object UiTheme {
     ) {
         1 -> Mode.DARK
         2 -> Mode.LIGHT
+        3 -> Mode.FOLLOW_MAP
         else -> Mode.SYSTEM
     }
 
@@ -117,7 +120,17 @@ object UiTheme {
                 Mode.SYSTEM -> 0
                 Mode.DARK -> 1
                 Mode.LIGHT -> 2
+                Mode.FOLLOW_MAP -> 3
             }).apply()
+    }
+
+    /** 从高德地图昼夜模式广播获取的深色状态（FOLLOW_MAP 模式下使用），默认 false（浅色） */
+    fun mapDark(ctx: Context): Boolean =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_MAP_DARK, false)
+
+    fun setMapDark(ctx: Context, dark: Boolean) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_MAP_DARK, dark).apply()
     }
 
     /** 系统当前是否为深色模式 */
@@ -127,11 +140,12 @@ object UiTheme {
     fun isSystemDark(config: Configuration): Boolean =
         (config.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
 
-    /** 最终是否深色：手动指定优先，否则跟随系统（用 config 判断系统，适用于配置变化回调） */
+    /** 最终是否深色：手动指定优先，否则跟随系统或地图（用 config 判断系统，适用于配置变化回调） */
     fun isDark(ctx: Context, config: Configuration): Boolean = when (mode(ctx)) {
         Mode.DARK -> true
         Mode.LIGHT -> false
         Mode.SYSTEM -> isSystemDark(config)
+        Mode.FOLLOW_MAP -> mapDark(ctx)
     }
 
     /** 配色集 */

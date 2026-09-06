@@ -57,6 +57,24 @@ class MainActivity : AppCompatActivity() {
     private val weatherLayerShowMs = 20_000L
     private val mapSources by lazy { MapSources.build(this) }
 
+    // 高德地图昼夜模式广播接收器（FOLLOW_MAP 模式下同步桌面深浅外观）
+    private val amapDayNightReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            val keyType = intent?.getIntExtra("KEY_TYPE", -1) ?: return
+            if (keyType != 10019) return
+            val state = intent.getIntExtra("EXTRA_STATE", -1)
+            // 兼容不同版本高德的昼夜模式值：文档 37=白天/38=夜晚，实测部分版本 38=白天/40=夜晚
+            // 统一判断：偶数为夜晚，奇数为白天（37/39 奇=白天，38/40 偶=夜晚）
+            val isDark = state % 2 == 0
+            if (UiTheme.mode(this@MainActivity) == UiTheme.Mode.FOLLOW_MAP &&
+                UiTheme.mapDark(this@MainActivity) != isDark
+            ) {
+                UiTheme.setMapDark(this@MainActivity, isDark)
+                refreshForThemeChange()
+            }
+        }
+    }
+
     // Page0 (desktop) 里的 view 引用
     private var desktopMapPanel: MaterialCardView? = null
     private var desktopMapContainer: android.widget.FrameLayout? = null
@@ -133,6 +151,9 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         applySystemDock()
+
+        // 临时测试：监听高德昼夜模式广播
+        registerReceiver(amapDayNightReceiver, android.content.IntentFilter("AUTONAVI_STANDARD_BROADCAST_SEND"))
 
         binding.viewPager.adapter = PagerAdapter()
         binding.viewPager.isUserInputEnabled = true
@@ -363,12 +384,14 @@ class MainActivity : AppCompatActivity() {
     /** 系统深浅模式切换（跟随系统模式）时同步重刷桌面配色 */
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        if (UiTheme.mode(this) == UiTheme.Mode.SYSTEM) {
+        val mode = UiTheme.mode(this)
+        if (mode == UiTheme.Mode.SYSTEM) {
             // resources 可能尚未同步，用 newConfig 判断深浅
             applyTheme(UiTheme.isSystemDark(newConfig))
             if (::wallpaper.isInitialized) wallpaper.applyForAppearance(UiTheme.isSystemDark(newConfig))
             if (::musicHost.isInitialized) musicHost.refresh()
         }
+        // FOLLOW_MAP 模式下不响应系统深浅变化，只响应高德昼夜模式广播
     }
 
     override fun onPause() {
@@ -384,6 +407,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        unregisterReceiver(amapDayNightReceiver)
         if (::weatherVoice.isInitialized) weatherVoice.shutdown()
         if (::weatherLayer.isInitialized) weatherLayer.removeCallbacks(weatherLayerFadeRunnable)
         if (::mapHost.isInitialized) mapHost.onDestroy()
@@ -430,7 +454,7 @@ class MainActivity : AppCompatActivity() {
         val density = resources.displayMetrics.density
 
         // Dock 栏：半透明背景 + 时钟/图标色（圆角随 Dock 形态：贴边矩形 / 悬浮圆角）
-        applyDockVisual()
+        applyDockVisual(dark)
         binding.dockClock.setTextColor(p.textPrimary)
         // dockApps 用现代N标彩色图标，不做 tint 染色
         val itemBg = RippleDrawable(
@@ -471,8 +495,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Dock 栏背景：颜色随深浅，圆角随形态（贴边矩形 / 悬浮圆角） */
-    private fun applyDockVisual() {
-        val p = UiTheme.palette(this)
+    private fun applyDockVisual(dark: Boolean = UiTheme.isDark(this)) {
+        val p = UiTheme.palette(dark)
         val dp = resources.displayMetrics.density
         val edge = UiTheme.dockStyle(this) == UiTheme.DockStyle.EDGE
         binding.dockBar.background = GradientDrawable().apply {

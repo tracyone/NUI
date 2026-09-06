@@ -169,6 +169,11 @@ class SettingsActivity : AppCompatActivity() {
             renderAppearance()
             applySettingsTheme()
         }
+        findViewById<View>(R.id.optFollowMap).setOnClickListener {
+            UiTheme.setMode(this, UiTheme.Mode.FOLLOW_MAP)
+            renderAppearance()
+            applySettingsTheme()
+        }
         // Dock 形态：贴边（矩形）/ 悬浮（圆角）
         findViewById<View>(R.id.optDockEdge).setOnClickListener {
             UiTheme.setDockStyle(this, UiTheme.DockStyle.EDGE)
@@ -394,6 +399,7 @@ class SettingsActivity : AppCompatActivity() {
         checkSystem.visibility = if (m == UiTheme.Mode.SYSTEM) View.VISIBLE else View.GONE
         checkDark.visibility = if (m == UiTheme.Mode.DARK) View.VISIBLE else View.GONE
         checkLight.visibility = if (m == UiTheme.Mode.LIGHT) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.checkFollowMap).visibility = if (m == UiTheme.Mode.FOLLOW_MAP) View.VISIBLE else View.GONE
         val ds = UiTheme.dockStyle(this)
         checkDockEdge.visibility = if (ds == UiTheme.DockStyle.EDGE) View.VISIBLE else View.GONE
         checkDockFloat.visibility = if (ds == UiTheme.DockStyle.FLOAT) View.VISIBLE else View.GONE

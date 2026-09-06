@@ -28,6 +28,7 @@
     <string name="theme_system">跟随系统</string>
     <string name="theme_dark">深色模式</string>
     <string name="theme_light">浅色模式</string>
+    <string name="theme_follow_map">跟随地图</string>
     <string name="dock_style">Dock 形态</string>
     <string name="dock_style_edge">贴边（矩形）</string>
     <string name="dock_style_float">悬浮（圆角）</string>
