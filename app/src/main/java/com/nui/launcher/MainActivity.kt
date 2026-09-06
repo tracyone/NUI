@@ -65,6 +65,7 @@ class MainActivity : AppCompatActivity() {
     private var desktopMusicContainer: android.widget.FrameLayout? = null
     private var desktopBtnNavHome: View? = null
     private var desktopBtnNavCompany: View? = null
+    private var desktopBtnNavFavorite: View? = null
     private var page0Ready = false
     private var appGridLoaded = false
     private var appGridView: androidx.recyclerview.widget.RecyclerView? = null
@@ -109,6 +110,7 @@ class MainActivity : AppCompatActivity() {
         desktopMusicContainer = v.findViewById(R.id.musicContainer)
         desktopBtnNavHome = v.findViewById(R.id.btnNavHome)
         desktopBtnNavCompany = v.findViewById(R.id.btnNavCompany)
+        desktopBtnNavFavorite = v.findViewById(R.id.btnNavFavorite)
         weatherText = v.findViewById(R.id.weatherText)
         weatherText?.setOnClickListener { startActivity(Intent(this, WeatherActivity::class.java)) }
         if (!page0Ready) {
@@ -707,6 +709,19 @@ class MainActivity : AppCompatActivity() {
         navHost.onHideFloat = { mapHost.closeFloat() }
         navHost.onShowFloat = { mapHost.showFloat() }
         navHost.start()
+        // 收藏夹按钮：打开高德地图收藏夹
+        desktopBtnNavFavorite?.setOnClickListener {
+            try {
+                val intent = android.content.Intent(
+                    android.content.Intent.ACTION_VIEW,
+                    android.net.Uri.parse("androidauto://openFavorite?sourceApplication=nui")
+                )
+                intent.setPackage("com.autonavi.amapauto")
+                startActivity(intent)
+            } catch (e: Exception) {
+                NuiToast.show(this, "未找到高德地图", android.widget.Toast.LENGTH_SHORT)
+            }
+        }
     }
 
     private fun setupMusic() {
