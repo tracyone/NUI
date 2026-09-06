@@ -74,6 +74,13 @@ class MainActivity : AppCompatActivity() {
     /** 启动外部 app 前所在的 page */
     private var pageBeforeLaunch = 0
 
+    companion object {
+        /** 天气全屏动画是否已展示过（进程级静态变量，Activity 重建不重置） */
+        private var weatherLayerShown = false
+        /** 上次天气预警 key 集合（用于检测新出现的重大天气变化） */
+        private var lastAlertKeys = emptySet<String>()
+    }
+
     private inner class PagerAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
         override fun getItemCount() = 2
         override fun getItemViewType(position: Int) = position
@@ -153,7 +160,21 @@ class MainActivity : AppCompatActivity() {
             if (::weatherLayer.isInitialized) {
                 weatherLayer.effect = WeatherSurfaceView.effectFor(info.weatherCode)
                 weatherLayer.isDay = info.isDay == 1
-                showWeatherLayerBriefly()
+                // 显示全屏动画的条件：首次获取天气 或 有新出现的重大天气预警
+                val currentAlertKeys = info.alerts.map { it.key }.toSet()
+                val hasNewAlert = currentAlertKeys.any { it !in lastAlertKeys }
+                if (!weatherLayerShown || hasNewAlert) {
+                    weatherLayerShown = true
+                    lastAlertKeys = currentAlertKeys
+                    if (hasNewAlert) {
+                        android.util.Log.d("NUI.Weather", "新重大天气预警 ${currentAlertKeys}，显示全屏动画")
+                    } else {
+                        android.util.Log.d("NUI.Weather", "首次获取天气，显示全屏动画")
+                    }
+                    showWeatherLayerBriefly()
+                } else {
+                    android.util.Log.d("NUI.Weather", "无新预警，跳过全屏动画")
+                }
             }
             if (::weatherVoice.isInitialized) deliverFirstWeather(info)
         }

@@ -71,7 +71,7 @@
             android:label="@string/weather_app_name"
             android:configChanges="orientation|screenSize|keyboardHidden|navigation|smallestScreenSize|screenLayout|uiMode"
             android:screenOrientation="landscape"
-            android:theme="@style/Theme.NUI">
+            android:theme="@style/Theme.NUI.Transparent">
         </activity>
 
         <service

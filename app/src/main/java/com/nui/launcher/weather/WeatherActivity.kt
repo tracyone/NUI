@@ -10,6 +10,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
@@ -63,11 +64,16 @@ class WeatherActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.addFlags(
-            WindowManager.LayoutParams.FLAG_FULLSCREEN
-                    or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-                    or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-        )
+        // 窗口属性：右侧面板，宽度占除 dock 栏（96dp）外的区域，背景透明，dock 栏始终可见
+        window.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+            addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            setGravity(Gravity.END or Gravity.BOTTOM)
+            val dm = resources.displayMetrics
+            val dockWidth = (96 * dm.density).toInt()
+            setLayout(dm.widthPixels - dockWidth, ViewGroup.LayoutParams.MATCH_PARENT)
+        }
         setContentView(buildUi())
 
         voice = WeatherVoice(this)
@@ -84,8 +90,10 @@ class WeatherActivity : AppCompatActivity() {
     // ===================== UI 构建 =====================
 
     private fun buildUi(): View {
-        val root = FrameLayout(this)
-        root.setBackgroundColor(Color.BLACK)
+        // 根布局：FrameLayout，天气内容占满窗口（窗口本身已设为右侧、宽度=屏幕-96dp）
+        val root = FrameLayout(this).apply {
+            setBackgroundColor(Color.BLACK)
+        }
 
         // 全屏特效背景
         surface = WeatherSurfaceView(this)
