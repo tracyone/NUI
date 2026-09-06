@@ -329,6 +329,7 @@ class SettingsActivity : AppCompatActivity() {
         tvOptSystem.setTextColor(p.label)
         tvOptDark.setTextColor(p.label)
         tvOptLight.setTextColor(p.label)
+        findViewById<TextView>(R.id.tvOptFollowMap).setTextColor(p.label)
         tvOptDockEdge.setTextColor(p.label)
         tvOptDockFloat.setTextColor(p.label)
         tvOptStatusBar.setTextColor(p.label)
