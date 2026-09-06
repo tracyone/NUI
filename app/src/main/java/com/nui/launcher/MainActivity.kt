@@ -538,11 +538,8 @@ class MainActivity : AppCompatActivity() {
         val slotCount = DockSlots.FIXED_COUNT + DockConfig.SLOT_COUNT
         val dark = UiTheme.isDark(this)
         val p = UiTheme.palette(this)
-        val itemBg = RippleDrawable(
-            ColorStateList.valueOf(if (dark) 0x33FFFFFF.toInt() else 0x33000000.toInt()),
-            null,
-            GradientDrawable().apply { setColor(Color.WHITE); cornerRadius = 16 * dp },
-        )
+        // 注意：每个按钮必须使用独立的 RippleDrawable 实例，共享同一实例会导致点击动画跑到错误的按钮上
+        val rippleColor = if (dark) 0x33FFFFFF.toInt() else 0x33000000.toInt()
         val addIcon = androidx.core.content.ContextCompat.getDrawable(this, R.drawable.ic_dock_add)
         // 绑定的地图/音乐包名（从 prefs 直接读取，首次渲染即可用，不需要等应用启动）
         val mapPkg = com.nui.launcher.map.MapHost.currentMapPackage(this)
@@ -551,6 +548,12 @@ class MainActivity : AppCompatActivity() {
         for (i in 0 until slotCount) {
             val app = apps.getOrNull(i)
             val isFixed = i < DockSlots.FIXED_COUNT
+            // 每个按钮独立的 RippleDrawable 实例（共享会导致点击动画错位）
+            val itemBg = RippleDrawable(
+                ColorStateList.valueOf(rippleColor),
+                null,
+                GradientDrawable().apply { setColor(Color.WHITE); cornerRadius = 16 * dp },
+            )
             val btn = android.widget.ImageButton(this).apply {
                 scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
                 background = itemBg

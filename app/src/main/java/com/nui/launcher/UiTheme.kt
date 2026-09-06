@@ -43,9 +43,9 @@ object UiTheme {
             .edit().putBoolean(KEY_SHOW_STATUS_BAR, show).apply()
     }
 
-    /** 桌面启动后第几秒自动启动外部地图（高德）；0 = 立即启动。默认 10 秒（给悬浮窗授权页留操作时间） */
+    /** 桌面启动后第几秒自动启动外部地图（高德）；0 = 立即启动。默认 5 秒 */
     fun mapLaunchDelaySec(ctx: Context): Int =
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_MAP_LAUNCH_DELAY_SEC, 10)
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_MAP_LAUNCH_DELAY_SEC, 5)
 
     fun setMapLaunchDelaySec(ctx: Context, sec: Int) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -53,9 +53,9 @@ object UiTheme {
     }
 
     /** 桌面启动后第几秒返回桌面（绝对时间，非"启动后等几秒"）。
-     *  实际高德运行时长 = 返回时刻 - 启动时刻。默认 15 秒（配合启动延迟 10 秒，高德运行 5 秒）。 */
+     *  实际高德运行时长 = 返回时刻 - 启动时刻。默认 10 秒（配合启动延迟 5 秒，高德运行 5 秒）。 */
     fun mapReturnDelaySec(ctx: Context): Int =
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_MAP_RETURN_DELAY_SEC, 15)
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_MAP_RETURN_DELAY_SEC, 10)
 
     fun setMapReturnDelaySec(ctx: Context, sec: Int) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
