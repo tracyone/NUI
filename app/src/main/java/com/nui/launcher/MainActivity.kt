@@ -75,6 +75,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // 红绿灯倒计时监控（测试版）：红灯倒计时 <=3 秒时语音提醒
+    private lateinit var trafficLightMonitor: com.nui.launcher.nav.TrafficLightMonitor
+
     // Page0 (desktop) 里的 view 引用
     private var desktopMapPanel: MaterialCardView? = null
     private var desktopMapContainer: android.widget.FrameLayout? = null
@@ -154,6 +157,10 @@ class MainActivity : AppCompatActivity() {
 
         // 临时测试：监听高德昼夜模式广播
         registerReceiver(amapDayNightReceiver, android.content.IntentFilter("AUTONAVI_STANDARD_BROADCAST_SEND"))
+
+        // 红绿灯倒计时监控（测试版）
+        trafficLightMonitor = com.nui.launcher.nav.TrafficLightMonitor(this)
+        trafficLightMonitor.start()
 
         binding.viewPager.adapter = PagerAdapter()
         binding.viewPager.isUserInputEnabled = true
@@ -408,6 +415,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         unregisterReceiver(amapDayNightReceiver)
+        if (::trafficLightMonitor.isInitialized) trafficLightMonitor.stop()
         if (::weatherVoice.isInitialized) weatherVoice.shutdown()
         if (::weatherLayer.isInitialized) weatherLayer.removeCallbacks(weatherLayerFadeRunnable)
         if (::mapHost.isInitialized) mapHost.onDestroy()
