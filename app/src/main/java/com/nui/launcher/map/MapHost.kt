@@ -78,6 +78,8 @@ class MapHost(
     private var resizeMode = ResizeMode.NONE
     /** 地图右缘上限（px）：由外部 syncRightPanel 按右侧音乐栏位置设定，0=不限制 */
     private var rightLimit = 0
+    /** 几何是否已加载完成（loadGeometry 执行完毕），用于防止 syncRightPanel 在默认位置生效前扩展地图 */
+    var geometryLoaded = false
 
     /** 设置地图右缘上限；若当前地图超出则立即缩回 */
     fun setRightLimit(px: Int) {
@@ -620,28 +622,55 @@ class MapHost(
 
     private fun loadGeometry() {
         // 一次性重置旧版地图几何（dock 变窄后旧位置离 dock 太远）
-        if (!prefs.getBoolean(KEY_GEOM_V2, false)) {
+        val geomV2 = prefs.getBoolean(KEY_GEOM_V2, false)
+        Log.d(TAG, "loadGeometry: KEY_GEOM_V2=$geomV2, KEY_GEOMETRY=${prefs.getString(KEY_GEOMETRY, null)}")
+        if (!geomV2) {
             prefs.edit { remove(KEY_GEOMETRY); putBoolean(KEY_GEOM_V2, true) }
+            Log.d(TAG, "loadGeometry: 首次启动/版本升级，已清除旧几何数据")
         }
         val g = prefs.getString(KEY_GEOMETRY, null)
         if (g != null) {
             val p = g.split(',').mapNotNull { it.toIntOrNull() }
             if (p.size == 4) {
                 val c = clampSizeFixed(p[0], p[1], p[2], p[3])
+                Log.d(TAG, "loadGeometry: 从 SharedPreferences 读取几何 x=${c[0]} y=${c[1]} w=${c[2]} h=${c[3]}")
                 applyGeometry(c[0], c[1], c[2], c[3])
                 normalizeVerticalMargins()
+                geometryLoaded = true
                 return
             }
         }
-        // 默认位置：左边贴 dock 栏右侧（dock 96dp+20margin+12gap≈128dp），上边 8dp
-        val x = dp(128)
+        // 默认位置：根据屏幕分辨率精确计算，确保悬浮地图和音乐栏都能看到
+        // 布局公式（与 MainActivity.syncRightPanel 保持一致）：
+        //   屏幕宽度 = 左边距 + 地图宽度 + 间距 + 音乐栏宽度 + 右边距
+        //   音乐栏默认 240dp（大于最小 180dp，保证舒适可见）
+        val dockWidth = dp(96)       // dock 栏宽度
+        val leftGap = dp(24)         // dock 与地图之间的安全间距
+        val x = dockWidth + leftGap  // = 120dp，不遮盖 dock 栏
         val y = dp(8)
         val sw = context.resources.displayMetrics.widthPixels
         val sh = context.resources.displayMetrics.heightPixels
-        val defaultW = (sw - x - dp(240)).coerceAtLeast(MIN_SIZE) // 留右侧信息栏
+        val density = context.resources.displayMetrics.density
+        val musicPanelW = dp(240)   // 音乐栏默认宽度（>180dp 最小阈值，保证可见）
+        val gap = dp(12)             // 地图与音乐栏之间的间距
+        val rightMargin = dp(16)     // 屏幕右边距
+        // 地图宽度 = 屏幕宽度 - 左边距 - 间距 - 音乐栏宽度 - 右边距
+        val defaultW = (sw - x - gap - musicPanelW - rightMargin).coerceAtLeast(MIN_SIZE)
         val defaultH = (sh - y - dp(16)).coerceAtLeast(MIN_SIZE)   // 上下各 8dp
+        Log.d(TAG, "loadGeometry: 使用默认几何 sw=$sw sh=$sh density=$density x=$x y=$y defaultW=$defaultW defaultH=$defaultH (音乐栏应=$musicPanelW)")
         val c = clampSizeFixed(x, y, defaultW, defaultH)
         applyGeometry(c[0], c[1], c[2], c[3])
+        geometryLoaded = true
+        // 布局完成后再次确认宽度生效（防止 syncRightPanel 在布局测量前覆盖）
+        mapPanel.post {
+            val lp = mapPanel.layoutParams as FrameLayout.LayoutParams
+            if (lp.width != c[2]) {
+                Log.d(TAG, "loadGeometry: post 修正宽度 ${lp.width} -> ${c[2]}")
+                lp.width = c[2]
+                mapPanel.layoutParams = lp
+                onGeometryChanged?.invoke()
+            }
+        }
     }
 
     /** 强制地图上下边距为 8dp（保留左右位置和宽度），避免上下留空过大 */

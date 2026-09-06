@@ -847,8 +847,12 @@ class MainActivity : AppCompatActivity() {
         val mlp = mp.layoutParams as FrameLayout.LayoutParams
         val mapRight = mlp.leftMargin + mp.width
         val panelW = availableRight - gap - mapRight
-        if (panelW < minPanel) {
+        Log.d("NUI.SyncRight", "sw=$sw density=$density mapLeft=${mlp.leftMargin} mapW=${mp.width} mapRight=$mapRight availableRight=$availableRight gap=$gap panelW=$panelW minPanel=$minPanel geometryLoaded=${if (::mapHost.isInitialized) mapHost.geometryLoaded else false}")
+        // 地图几何尚未加载完成时，不隐藏音乐栏、不扩展地图，避免首次启动把默认位置冲掉
+        val geoReady = !::mapHost.isInitialized || mapHost.geometryLoaded
+        if (panelW < minPanel && geoReady) {
             // 音乐栏太窄：隐藏，地图自动扩展到右缘（不留空）
+            Log.d("NUI.SyncRight", "音乐栏宽度 $panelW < 最小 $minPanel，隐藏音乐栏，地图扩展到右缘")
             rp.visibility = android.view.View.GONE
             val targetW = availableRight - mlp.leftMargin
             if (mlp.width < targetW - 2) {
@@ -859,6 +863,7 @@ class MainActivity : AppCompatActivity() {
             // （否则浮窗比卡片窄，右边缘露出卡片深色背景）
             mp.post { mapHost?.refreshFloat() }
         } else {
+            Log.d("NUI.SyncRight", "音乐栏可见，宽度=$panelW")
             rp.visibility = android.view.View.VISIBLE
             val lp = rp.layoutParams
             if (lp.width != panelW) {

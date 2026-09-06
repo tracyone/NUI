@@ -57,15 +57,18 @@ rem  Triple wipe to guarantee clean data:
 rem   1) force-stop to kill any running process
 rem   2) pm clear to force-clear SharedPreferences/databases
 rem   3) uninstall (even if it fails, data is already cleared)
-rem  Check package presence first so we never uninstall the wrong app.
-adb %ADB_TARGET% shell "pm list packages %PKG_NAME%" | findstr /i "%PKG_NAME%" >nul
+rem  Use EXACT match (/x) so com.nui.launcher never matches com.nui.launcher.debug
+adb %ADB_TARGET% shell "pm list packages" | findstr /x /c:"package:%PKG_NAME%" >nul
 if errorlevel 1 (
     echo       [INFO] %PKG_NAME% not installed on device - skip wipe.
 ) else (
     echo       [WARN] Removing existing package: %PKG_NAME%
+    rem  First pm clear (guarantees data wiped even if uninstall later fails)
+    adb %ADB_TARGET% shell pm clear %PKG_NAME% >nul 2>&1
+    rem  Then uninstall
     adb %ADB_TARGET% uninstall %PKG_NAME%
     if errorlevel 1 (
-        echo       [WARN] uninstall returned error, but data already cleared.
+        echo       [WARN] uninstall returned error, but pm clear already wiped data.
     )
 )
 echo.
@@ -89,6 +92,10 @@ if errorlevel 1 (
     exit /b 1
 )
 echo Install done.
+rem  FORCE pm clear after install — double insurance to guarantee default config
+rem  This wipes any leftover data regardless of whether uninstall succeeded earlier
+adb %ADB_TARGET% shell pm clear %PKG_NAME% >nul 2>&1
+echo       [OK] Data force-cleared after install (fresh install guaranteed).
 echo.
 
 echo [4/8] Clear logcat buffer + remove old log file ...
