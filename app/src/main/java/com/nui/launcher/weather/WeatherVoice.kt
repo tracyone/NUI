@@ -19,6 +19,11 @@ class WeatherVoice(context: Context) {
 
     private val tts = NuiTts(context)
 
+    init {
+        // 后台预热语音引擎：首次天气播报/手动播报时避免等待模型加载
+        tts.warmUp()
+    }
+
     /** 播报策略状态锁：天气回调线程与主线程（手动重播）可能并发触发 */
     private val lock = Any()
     private var firstSpoken = false
@@ -43,6 +48,7 @@ class WeatherVoice(context: Context) {
             }
         }
         tasks.forEach { tts.speak(it) }
+        if (tasks.isNotEmpty()) android.util.Log.d("WeatherVoice", "onWeather 播报 ${tasks.size} 条: ${tasks.first().take(30)}...")
     }
 
     /** 手动重播天气摘要 */
@@ -59,12 +65,12 @@ class WeatherVoice(context: Context) {
         val c = Calendar.getInstance()
         val hour = c.get(Calendar.HOUR_OF_DAY)
         val greeting = when (hour) {
-            in 5..8 -> "早上好"
-            in 9..11 -> "上午好"
-            12 -> "中午好"
-            in 13..17 -> "下午好"
-            in 18..22 -> "晚上好"
-            else -> "夜深了"
+            in 5..8 -> "主人早上好"
+            in 9..11 -> "主人上午好"
+            12 -> "主人中午好"
+            in 13..17 -> "主人下午好"
+            in 18..22 -> "主人晚上好"
+            else -> "主人夜深了"
         }
         val week = arrayOf("周日", "周一", "周二", "周三", "周四", "周五", "周六")[c.get(Calendar.DAY_OF_WEEK) - 1]
         val sb = StringBuilder()

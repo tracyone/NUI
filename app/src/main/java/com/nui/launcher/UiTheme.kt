@@ -15,6 +15,52 @@ object UiTheme {
     private const val KEY_DOCK_STYLE = "dock_style"
     private const val KEY_DOCK_ICON_SCALE = "dock_icon_scale"
     private const val KEY_APP_ICON_SCALE = "app_icon_scale"
+    private const val KEY_SHOW_SYSTEM_DOCK = "show_system_dock"
+    private const val KEY_SHOW_STATUS_BAR = "show_status_bar"
+    private const val KEY_MAP_LAUNCH_DELAY_SEC = "map_launch_delay_sec"
+    private const val KEY_MAP_RETURN_DELAY_SEC = "map_return_delay_sec"
+
+    /**
+     * 是否显示系统 Dock（底部导航栏，即"原桌面"的系统级 Dock 栏）。
+     * 车机 ROM 常把空调等快捷控制做成底部导航栏/Dock 形态；
+     * 与 [showStatusBar] 相互独立。若车机 Dock 属于原 Launcher 私有视图，则该设置不生效
+     * （受单前台 Activity 渲染限制）。
+     */
+    fun showSystemDock(ctx: Context): Boolean =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_SHOW_SYSTEM_DOCK, false)
+
+    fun setShowSystemDock(ctx: Context, show: Boolean) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_SHOW_SYSTEM_DOCK, show).apply()
+    }
+
+    /** 是否显示顶部状态栏（与底部系统 Dock 独立控制；默认隐藏，沉浸式桌面） */
+    fun showStatusBar(ctx: Context): Boolean =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_SHOW_STATUS_BAR, false)
+
+    fun setShowStatusBar(ctx: Context, show: Boolean) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_SHOW_STATUS_BAR, show).apply()
+    }
+
+    /** 桌面启动后第几秒自动启动外部地图（高德）；0 = 立即启动。默认 10 秒（给悬浮窗授权页留操作时间） */
+    fun mapLaunchDelaySec(ctx: Context): Int =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_MAP_LAUNCH_DELAY_SEC, 10)
+
+    fun setMapLaunchDelaySec(ctx: Context, sec: Int) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putInt(KEY_MAP_LAUNCH_DELAY_SEC, sec.coerceIn(0, 60)).apply()
+    }
+
+    /** 桌面启动后第几秒返回桌面（绝对时间，非"启动后等几秒"）。
+     *  实际高德运行时长 = 返回时刻 - 启动时刻。默认 15 秒（配合启动延迟 10 秒，高德运行 5 秒）。 */
+    fun mapReturnDelaySec(ctx: Context): Int =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_MAP_RETURN_DELAY_SEC, 15)
+
+    fun setMapReturnDelaySec(ctx: Context, sec: Int) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putInt(KEY_MAP_RETURN_DELAY_SEC, sec.coerceIn(1, 60)).apply()
+    }
 
     /** 默认 Dock 图标大小（dp），renderDock 按 [dockIconScale] 缩放 */
     const val DEFAULT_DOCK_ICON_DP = 64

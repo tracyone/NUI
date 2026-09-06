@@ -92,6 +92,32 @@
             android:textColor="@color/settings_label"
             android:textSize="18sp" />
 
+        <TextView
+            android:id="@+id/tabMap"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_settings_tab"
+            android:gravity="center_vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:text="@string/map"
+            android:textColor="@color/settings_label"
+            android:textSize="18sp" />
+
+        <TextView
+            android:id="@+id/tabAbout"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_settings_tab"
+            android:gravity="center_vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:text="@string/about"
+            android:textColor="@color/settings_label"
+            android:textSize="18sp" />
+
         <View
             android:layout_width="match_parent"
             android:layout_height="0dp"
@@ -456,6 +482,85 @@
                         android:layout_height="1dp"
                         android:background="@color/settings_divider" />
 
+                    <!-- 显示状态栏（独立开关） -->
+                    <LinearLayout
+                        android:id="@+id/optStatusBar"
+                        android:layout_width="match_parent"
+                        android:layout_height="56dp"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:background="@drawable/bg_settings_row_ripple"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp">
+
+                        <TextView
+                            android:id="@+id/tvOptStatusBar"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/status_bar_title"
+                            android:textColor="@color/settings_label"
+                            android:textSize="17sp" />
+
+                        <TextView
+                            android:id="@+id/checkStatusBar"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="✓"
+                            android:textColor="@color/settings_btn_text"
+                            android:textSize="20sp"
+                            android:visibility="gone" />
+                    </LinearLayout>
+
+                    <!-- 显示系统 Dock（原桌面底部导航栏） -->
+                    <LinearLayout
+                        android:id="@+id/optSystemDock"
+                        android:layout_width="match_parent"
+                        android:layout_height="56dp"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:background="@drawable/bg_settings_row_ripple"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp">
+
+                        <TextView
+                            android:id="@+id/tvOptSystemDock"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/system_dock_title"
+                            android:textColor="@color/settings_label"
+                            android:textSize="17sp" />
+
+                        <TextView
+                            android:id="@+id/checkSystemDock"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="✓"
+                            android:textColor="@color/settings_btn_text"
+                            android:textSize="20sp"
+                            android:visibility="gone" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="@color/settings_divider" />
+
+                    <TextView
+                        android:id="@+id/tvSystemDockHint"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:layout_marginBottom="8dp"
+                        android:text="@string/system_dock_hint"
+                        android:textColor="@color/settings_value"
+                        android:textSize="13sp" />
+
                     <!-- Dock 图标大小 -->
                     <TextView
                         android:id="@+id/tvDockIconTitle"
@@ -735,6 +840,193 @@
                     android:textColor="@color/settings_btn_text"
                     android:textSize="20sp"
                     android:visibility="gone" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 地图 -->
+        <LinearLayout
+            android:id="@+id/panelMap"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/groupTitleMap"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/map"
+                android:textColor="@color/settings_group_title"
+                android:textSize="14sp" />
+
+            <View
+                android:id="@+id/dividerMap"
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="12dp"
+                android:layout_marginBottom="20dp"
+                android:background="@color/settings_divider" />
+
+            <!-- 桌面启动后第几秒启动高德 -->
+            <LinearLayout
+                android:id="@+id/optMapLaunch"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
+
+                <TextView
+                    android:id="@+id/tvMapLaunch"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/map_launch_delay_title"
+                    android:textColor="@color/settings_label"
+                    android:textSize="17sp" />
+
+                <EditText
+                    android:id="@+id/edMapLaunch"
+                    android:layout_width="72dp"
+                    android:layout_height="40dp"
+                    android:background="@drawable/bg_settings_edit"
+                    android:gravity="center"
+                    android:importantForAutofill="no"
+                    android:inputType="number"
+                    android:maxLength="2"
+                    android:textColor="@color/settings_label"
+                    android:textSize="16sp" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/settings_divider" />
+
+            <!-- 启动高德后等几秒返回桌面 -->
+            <LinearLayout
+                android:id="@+id/optMapReturn"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
+
+                <TextView
+                    android:id="@+id/tvMapReturn"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/map_return_delay_title"
+                    android:textColor="@color/settings_label"
+                    android:textSize="17sp" />
+
+                <EditText
+                    android:id="@+id/edMapReturn"
+                    android:layout_width="72dp"
+                    android:layout_height="40dp"
+                    android:background="@drawable/bg_settings_edit"
+                    android:gravity="center"
+                    android:importantForAutofill="no"
+                    android:inputType="number"
+                    android:maxLength="2"
+                    android:textColor="@color/settings_label"
+                    android:textSize="16sp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tvMapHint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:text="@string/map_launch_delay_hint"
+                android:textColor="@color/settings_value"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <!-- 关于 -->
+        <LinearLayout
+            android:id="@+id/panelAbout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/groupTitleAbout"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/about"
+                android:textColor="@color/settings_group_title"
+                android:textSize="14sp" />
+
+            <View
+                android:id="@+id/dividerAbout"
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="12dp"
+                android:layout_marginBottom="20dp"
+                android:background="@color/settings_divider" />
+
+            <!-- 作者 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/about_author"
+                    android:textColor="@color/settings_label"
+                    android:textSize="17sp" />
+
+                <TextView
+                    android:id="@+id/tvAboutAuthor"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="tracyone"
+                    android:textColor="@color/settings_value"
+                    android:textSize="17sp" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/settings_divider" />
+
+            <!-- 版本 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/about_version"
+                    android:textColor="@color/settings_label"
+                    android:textSize="17sp" />
+
+                <TextView
+                    android:id="@+id/tvAboutVersion"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="0.0.1"
+                    android:textColor="@color/settings_value"
+                    android:textSize="17sp" />
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>

@@ -37,6 +37,9 @@ class NuiTts(context: Context) {
     /** 合成并播放一段文本（后台线程，自动顶掉当前播报） */
     fun speak(text: String) = core.speak(text)
 
+    /** 后台预热引擎：提前加载语音模型，避免首次播报/点击时长时间等待 */
+    fun warmUp() = core.warmUp()
+
     /** 切换音色：立即停止当前播放，加载新音色并播报自我介绍 */
     fun switchVoice(gender: String) = core.switchVoice(gender)
 
@@ -103,6 +106,13 @@ private object NuiTtsCore {
         }
     }
 
+    /** 后台预热引擎：立即在 worker 线程初始化，后续 speak 无需再等待 */
+    fun warmUp() {
+        handler.post {
+            if (tts == null) initEngine()
+        }
+    }
+
     fun stop() {
         handler.removeCallbacksAndMessages(null)
         runCatching { currentTrack?.pause() }
@@ -121,7 +131,7 @@ private object NuiTtsCore {
             }
             if (tts == null && !initEngine()) return@post
             Log.i(TAG, "音色已切换：${target.dir}")
-            speakNow("你好，我是${target.selfName}")
+            speakNow("主人${target.selfName}好")
         }
     }
 

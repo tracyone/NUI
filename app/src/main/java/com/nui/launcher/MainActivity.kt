@@ -123,7 +123,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
-        applyImmersive()
+        applySystemDock()
 
         binding.viewPager.adapter = PagerAdapter()
         binding.viewPager.isUserInputEnabled = true
@@ -155,10 +155,36 @@ class MainActivity : AppCompatActivity() {
                 weatherLayer.isDay = info.isDay == 1
                 showWeatherLayerBriefly()
             }
-            if (::weatherVoice.isInitialized) weatherVoice.onWeather(info)
+            if (::weatherVoice.isInitialized) deliverFirstWeather(info)
         }
         // 尝试获取当前位置，获取到后更新天气查询位置
         tryLoadLocation()
+    }
+
+    /** 首次启动的高德自动启动返回完成前，先暂存天气播报，返回桌面后再播（避免与高德前台重叠） */
+    private var pendingFirstWeather: WeatherFetcher.WeatherInfo? = null
+
+    /** 天气首次播报入口：高德自动返回未完成则暂存，否则立即播报 */
+    private fun deliverFirstWeather(info: WeatherFetcher.WeatherInfo) {
+        if (::mapHost.isInitialized && mapHost.isAutoReturnPending) {
+            android.util.Log.d("WeatherVoice", "高德返回中，暂存天气播报 ${info.city}")
+            pendingFirstWeather = info
+        } else {
+            android.util.Log.d("WeatherVoice", "直接播报天气 ${info.city}")
+            weatherVoice.onWeather(info)
+        }
+    }
+
+    /** 高德自动返回桌面完成：播报暂存的天气 */
+    private fun flushPendingWeatherVoice() {
+        android.util.Log.d("WeatherVoice", "高德已返回桌面，flush 暂存天气")
+        pendingFirstWeather?.let {
+            pendingFirstWeather = null
+            if (::weatherVoice.isInitialized) {
+                android.util.Log.d("WeatherVoice", "开始播报暂存天气 ${it.city}")
+                weatherVoice.onWeather(it)
+            }
+        }
     }
 
     /** 桌面天气动画层：透明叠加在最上层，触摸穿透不挡操作；默认隐藏，仅在天气刷新时短暂展示后淡出 */
@@ -262,25 +288,35 @@ class MainActivity : AppCompatActivity() {
         if (intent?.component?.packageName != packageName) {
             launchedExternalApp = true
             pageBeforeLaunch = binding.viewPager.currentItem
+            android.util.Log.d("NUI.Main", "startActivity external: ${intent?.component?.packageName} page=$pageBeforeLaunch")
         }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        // 地图（高德）自动返回：只保持当前 page，不切 page0/page1，也不做外部返回恢复
+        if (intent.getBooleanExtra(com.nui.launcher.map.MapHost.EXTRA_AUTO_BACK, false)) {
+            launchedExternalApp = false
+            android.util.Log.d("NUI.Main", "onNewIntent: EXTRA_AUTO_BACK, keep page ${binding.viewPager.currentItem}")
+            return
+        }
         if (launchedExternalApp) {
             // 从外部 app 按 home 回来：恢复到启动前的 page
             binding.viewPager.currentItem = pageBeforeLaunch
             launchedExternalApp = false
+            android.util.Log.d("NUI.Main", "onNewIntent: back from external -> page $pageBeforeLaunch")
         } else {
             // 在桌面内按 home：在 page0（桌面）和 page1（应用列表）之间切换
             if (binding.viewPager.currentItem == 0) binding.viewPager.currentItem = 1
             else binding.viewPager.currentItem = 0
+            android.util.Log.d("NUI.Main", "onNewIntent: home-in-desktop -> page ${binding.viewPager.currentItem}")
         }
     }
 
     override fun onResume() {
         super.onResume()
+        android.util.Log.d("NUI.Main", "onResume page=${binding.viewPager.currentItem} launchedExternal=$launchedExternalApp")
         if (::weatherFetcher.isInitialized) weatherFetcher.start()
         applyTheme()
         // 设置页可能改了 Dock 形态/图标比例，返回时刷新
@@ -289,7 +325,7 @@ class MainActivity : AppCompatActivity() {
         if (::mapHost.isInitialized) {
             mapHost.onResume()
             // 根据当前 page 决定悬浮地图显示状态
-            if (binding.viewPager.currentItem == 0) mapHost.showFloat()
+            if (binding.viewPager.currentItem == 0) mapHost.resumeFloat()
             else mapHost.closeFloat()
         }
         if (::musicHost.isInitialized) {
@@ -313,9 +349,13 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        android.util.Log.d("NUI.Main", "onPause")
         if (::weatherFetcher.isInitialized) weatherFetcher.stop()
         if (::weatherVoice.isInitialized) weatherVoice.stop()
-        if (::mapHost.isInitialized) mapHost.onPause()
+        if (::mapHost.isInitialized) {
+            mapHost.onPause()
+            mapHost.cancelPendingShow()
+        }
         if (::musicHost.isInitialized) musicHost.setFloatAreaVisible(false)
     }
 
@@ -353,6 +393,7 @@ class MainActivity : AppCompatActivity() {
 
     /** 设置面板切换外观时调用：立即刷新桌面主题/dock/音乐栏 */
     fun refreshForThemeChange() {
+        applySystemDock()
         applyTheme()
         applyDockStyle()
         renderDock()
@@ -594,6 +635,7 @@ class MainActivity : AppCompatActivity() {
         mapHost = MapHost(this, mapContainer, mapPanel)
         mapHost.onGeometryChanged = { binding.root.post { syncRightPanel() } }
         mapHost.onFloatShown = { if (::musicHost.isInitialized) musicHost.bringLyricFloatToFront() }
+        mapHost.onAutoReturnDone = { flushPendingWeatherVoice() }
         mapHost.onPickMap = {
             mapHost.closeFloat()
             MapPickerDialog.show(
@@ -744,7 +786,61 @@ class MainActivity : AppCompatActivity() {
         if (::mapHost.isInitialized) mapHost.setRightLimit(availableRight)
     }
 
-    private fun applyImmersive() {
-        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+    /**
+     * 系统栏显隐：顶部状态栏与底部系统 Dock（导航栏）两个独立开关组合生效。
+     * - 状态栏开：显示顶部状态栏，内容顶部自动让位；关：隐藏，内容延伸铺满顶部。
+     * - 系统 Dock 开：显示底部导航栏/Dock（如车机空调快捷控制），内容底部自动让位；关：隐藏，内容延伸铺满底部。
+     * - 两者默认均关闭 = 沉浸全屏。
+     */
+    private fun applySystemDock() {
+        val showStatus = UiTheme.showStatusBar(this)
+        val showDock = UiTheme.showSystemDock(this)
+
+        if (showStatus) {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        } else {
+            window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        }
+        // 仅两者都隐藏（沉浸）时让窗口铺满整个屏幕；任一系统栏显示时取消，由系统 insets 自动让位
+        if (!showStatus && !showDock) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+        }
+
+        var vis = 0
+        if (!showStatus) {
+            vis = vis or View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+        }
+        if (!showDock) {
+            vis = vis or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+        }
+        window.decorView.systemUiVisibility = vis
+
+        // 系统栏显示时显式让位：按状态栏/导航栏 inset 给根布局加 padding，
+        // 使左侧 dock、页面、天气层等各窗口动态缩小上移，不遮挡系统 Dock。
+        binding.root.setOnApplyWindowInsetsListener { v, insets ->
+            val top = if (UiTheme.showStatusBar(this)) insets.getSystemWindowInsetTop() else 0
+            val bottom = if (UiTheme.showSystemDock(this)) insets.getSystemWindowInsetBottom() else 0
+            v.setPadding(0, top, 0, bottom)
+            insets
+        }
+        binding.root.requestApplyInsets()
+    }
+
+    /** 重新获得焦点时重设系统栏标志（部分设备焦点变化后会恢复系统栏） */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && !UiTheme.showStatusBar(this) && !UiTheme.showSystemDock(this)) {
+            window.decorView.systemUiVisibility =
+                View.SYSTEM_UI_FLAG_FULLSCREEN or
+                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                    View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                    View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+        }
+        if (hasFocus) binding.root.requestApplyInsets()
     }
 }

@@ -15,6 +15,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.SeekBar
@@ -36,10 +37,16 @@ class SettingsDialog(context: Context) : Dialog(context) {
     private lateinit var tabSteering: TextView
     private lateinit var tabAppearance: TextView
     private lateinit var tabVoice: TextView
+    private lateinit var tabMap: TextView
+    private lateinit var tabAbout: TextView
     private lateinit var panelMusic: View
     private lateinit var panelSteering: View
     private lateinit var panelAppearance: View
     private lateinit var panelVoice: View
+    private lateinit var panelMap: View
+    private lateinit var panelAbout: View
+    private lateinit var edMapLaunch: EditText
+    private lateinit var edMapReturn: EditText
     private lateinit var checkSystem: TextView
     private lateinit var checkDark: TextView
     private lateinit var checkLight: TextView
@@ -50,6 +57,13 @@ class SettingsDialog(context: Context) : Dialog(context) {
     private lateinit var checkDockFloat: TextView
     private lateinit var tvOptDockEdge: TextView
     private lateinit var tvOptDockFloat: TextView
+    private lateinit var optStatusBar: View
+    private lateinit var tvOptStatusBar: TextView
+    private lateinit var checkStatusBar: TextView
+    private lateinit var optSystemDock: View
+    private lateinit var tvOptSystemDock: TextView
+    private lateinit var checkSystemDock: TextView
+    private lateinit var tvSystemDockHint: TextView
     private lateinit var tvDockIconTitle: TextView
     private lateinit var seekDockIcon: SeekBar
     private lateinit var tvDockIconValue: TextView
@@ -88,10 +102,16 @@ class SettingsDialog(context: Context) : Dialog(context) {
         tabSteering = findViewById(R.id.tabSteering)
         tabAppearance = findViewById(R.id.tabAppearance)
         tabVoice = findViewById(R.id.tabVoice)
+        tabMap = findViewById(R.id.tabMap)
+        tabAbout = findViewById(R.id.tabAbout)
         panelMusic = findViewById(R.id.panelMusic)
         panelSteering = findViewById(R.id.panelSteering)
         panelAppearance = findViewById(R.id.panelAppearance)
         panelVoice = findViewById(R.id.panelVoice)
+        panelMap = findViewById(R.id.panelMap)
+        panelAbout = findViewById(R.id.panelAbout)
+        edMapLaunch = findViewById(R.id.edMapLaunch)
+        edMapReturn = findViewById(R.id.edMapReturn)
         checkSystem = findViewById(R.id.checkSystem)
         checkDark = findViewById(R.id.checkDark)
         checkLight = findViewById(R.id.checkLight)
@@ -102,6 +122,13 @@ class SettingsDialog(context: Context) : Dialog(context) {
         checkDockFloat = findViewById(R.id.checkDockFloat)
         tvOptDockEdge = findViewById(R.id.tvOptDockEdge)
         tvOptDockFloat = findViewById(R.id.tvOptDockFloat)
+        optStatusBar = findViewById(R.id.optStatusBar)
+        tvOptStatusBar = findViewById(R.id.tvOptStatusBar)
+        checkStatusBar = findViewById(R.id.checkStatusBar)
+        optSystemDock = findViewById(R.id.optSystemDock)
+        tvOptSystemDock = findViewById(R.id.tvOptSystemDock)
+        checkSystemDock = findViewById(R.id.checkSystemDock)
+        tvSystemDockHint = findViewById(R.id.tvSystemDockHint)
         tvDockIconTitle = findViewById(R.id.tvDockIconTitle)
         seekDockIcon = findViewById(R.id.seekDockIcon)
         tvDockIconValue = findViewById(R.id.tvDockIconValue)
@@ -123,7 +150,15 @@ class SettingsDialog(context: Context) : Dialog(context) {
         tabSteering.setOnClickListener { selectTab(1) }
         tabAppearance.setOnClickListener { selectTab(2) }
         tabVoice.setOnClickListener { selectTab(3) }
+        tabMap.setOnClickListener { selectTab(4) }
+        tabAbout.setOnClickListener { selectTab(5) }
         selectTab(0)
+
+        // 地图：两个延迟配置，输入即时保存
+        edMapLaunch.setOnEditorActionListener { _, _, _ -> saveMapConfig(); true }
+        edMapLaunch.setOnFocusChangeListener { _, hasFocus -> if (!hasFocus) saveMapConfig() }
+        edMapReturn.setOnEditorActionListener { _, _, _ -> saveMapConfig(); true }
+        edMapReturn.setOnFocusChangeListener { _, hasFocus -> if (!hasFocus) saveMapConfig() }
 
         findViewById<View>(R.id.optSystem).setOnClickListener {
             UiTheme.setMode(context, UiTheme.Mode.SYSTEM)
@@ -151,6 +186,20 @@ class SettingsDialog(context: Context) : Dialog(context) {
             UiTheme.setDockStyle(context, UiTheme.DockStyle.FLOAT)
             renderAppearance()
         }
+        // 显示顶部状态栏（独立开关）：切换后立即生效
+        optStatusBar.setOnClickListener {
+            UiTheme.setShowStatusBar(context, !UiTheme.showStatusBar(context))
+            renderAppearance()
+            applySettingsTheme()
+            (context as? com.nui.launcher.MainActivity)?.refreshForThemeChange()
+        }
+        // 显示系统 Dock（底部导航栏，独立开关）：切换后立即让 NUI 退出/进入沉浸
+        optSystemDock.setOnClickListener {
+            UiTheme.setShowSystemDock(context, !UiTheme.showSystemDock(context))
+            renderAppearance()
+            applySettingsTheme()
+            (context as? com.nui.launcher.MainActivity)?.refreshForThemeChange()
+        }
         // 语音：女声 / 男声（通用离线语音服务，零下载）
         findViewById<View>(R.id.optVoiceFemale).setOnClickListener {
             NuiTts.setVoiceGender(context, NuiTts.VOICE_FEMALE)
@@ -163,6 +212,8 @@ class SettingsDialog(context: Context) : Dialog(context) {
             renderVoice()
         }
         renderVoice()
+        renderMap()
+        renderAbout()
         // 外观 → 壁纸：白天 / 晚上（点击弹菜单，由宿主接管选图）
         optWallpaperDay.setOnClickListener { onWallpaperPick?.invoke(com.nui.launcher.WallpaperController.Slot.DAY) }
         optWallpaperNight.setOnClickListener { onWallpaperPick?.invoke(com.nui.launcher.WallpaperController.Slot.NIGHT) }
@@ -236,14 +287,36 @@ class SettingsDialog(context: Context) : Dialog(context) {
     private fun selectTab(index: Int, dark: Boolean) {
         currentTab = index
         val p = UiTheme.settingsPalette(dark)
-        val tabs = listOf(tabMusic, tabSteering, tabAppearance, tabVoice)
-        val panels = listOf(panelMusic, panelSteering, panelAppearance, panelVoice)
+        val tabs = listOf(tabMusic, tabSteering, tabAppearance, tabVoice, tabMap, tabAbout)
+        val panels = listOf(panelMusic, panelSteering, panelAppearance, panelVoice, panelMap, panelAbout)
         tabs.forEachIndexed { i, tab ->
             val isSel = i == index
             tab.isSelected = isSel
             tab.setTextColor(if (isSel) Color.WHITE else p.label)
             panels[i].visibility = if (isSel) View.VISIBLE else View.GONE
         }
+    }
+
+    /** 关于：版本号取实际安装版本，与 versionName 保持一致 */
+    private fun renderAbout() {
+        val ver = runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull() ?: ""
+        findViewById<TextView>(R.id.tvAboutVersion).text = ver
+    }
+
+    /** 读取地图延迟配置填充输入框 */
+    private fun renderMap() {
+        edMapLaunch.setText(UiTheme.mapLaunchDelaySec(context).toString())
+        edMapReturn.setText(UiTheme.mapReturnDelaySec(context).toString())
+    }
+
+    /** 保存输入框中的地图延迟配置 */
+    private fun saveMapConfig() {
+        val launch = edMapLaunch.text.toString().toIntOrNull()
+        val ret = edMapReturn.text.toString().toIntOrNull()
+        if (launch != null) UiTheme.setMapLaunchDelaySec(context, launch)
+        if (ret != null) UiTheme.setMapReturnDelaySec(context, ret)
     }
 
     private fun applySettingsTheme() = applySettingsTheme(UiTheme.isDark(context))
@@ -272,6 +345,11 @@ class SettingsDialog(context: Context) : Dialog(context) {
         tvOptLight.setTextColor(p.label)
         tvOptDockEdge.setTextColor(p.label)
         tvOptDockFloat.setTextColor(p.label)
+        tvOptStatusBar.setTextColor(p.label)
+        checkStatusBar.setTextColor(p.accent)
+        tvOptSystemDock.setTextColor(p.label)
+        checkSystemDock.setTextColor(p.accent)
+        tvSystemDockHint.setTextColor(p.value)
         tvDockIconTitle.setTextColor(p.label)
         tvAppIconTitle.setTextColor(p.label)
         findViewById<TextView>(R.id.groupTitleDock).setTextColor(p.value)
@@ -279,6 +357,19 @@ class SettingsDialog(context: Context) : Dialog(context) {
         findViewById<TextView>(R.id.groupTitleVoice).setTextColor(p.value)
         findViewById<View>(R.id.dividerVoice).setBackgroundColor(p.divider)
         tvOptVoiceFemale.setTextColor(p.label)
+        // 地图
+        findViewById<TextView>(R.id.groupTitleMap).setTextColor(p.value)
+        findViewById<View>(R.id.dividerMap).setBackgroundColor(p.divider)
+        findViewById<TextView>(R.id.tvMapLaunch).setTextColor(p.label)
+        findViewById<TextView>(R.id.tvMapReturn).setTextColor(p.label)
+        findViewById<TextView>(R.id.tvMapHint).setTextColor(p.value)
+        edMapLaunch.setTextColor(p.label)
+        edMapReturn.setTextColor(p.label)
+        // 关于
+        findViewById<TextView>(R.id.groupTitleAbout).setTextColor(p.value)
+        findViewById<View>(R.id.dividerAbout).setBackgroundColor(p.divider)
+        findViewById<TextView>(R.id.tvAboutAuthor).setTextColor(p.value)
+        findViewById<TextView>(R.id.tvAboutVersion).setTextColor(p.value)
         tvOptVoiceMale.setTextColor(p.label)
         // 外观 → 壁纸
         findViewById<TextView>(R.id.groupTitleWallpaper).setTextColor(p.value)
@@ -317,6 +408,8 @@ class SettingsDialog(context: Context) : Dialog(context) {
         val ds = UiTheme.dockStyle(context)
         checkDockEdge.visibility = if (ds == UiTheme.DockStyle.EDGE) View.VISIBLE else View.GONE
         checkDockFloat.visibility = if (ds == UiTheme.DockStyle.FLOAT) View.VISIBLE else View.GONE
+        checkStatusBar.visibility = if (UiTheme.showStatusBar(context)) View.VISIBLE else View.GONE
+        checkSystemDock.visibility = if (UiTheme.showSystemDock(context)) View.VISIBLE else View.GONE
     }
 
     private fun renderVoice() {

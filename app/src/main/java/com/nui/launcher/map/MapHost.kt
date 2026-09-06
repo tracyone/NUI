@@ -21,6 +21,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.content.edit
+import com.nui.launcher.UiTheme
 import com.google.android.material.card.MaterialCardView
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
@@ -47,8 +48,13 @@ class MapHost(
     /** 高德浮窗广播发出、窗口出现后回调（用于歌词窗置顶） */
     var onFloatShown: (() -> Unit)? = null,
     /** 调整模式下点击"选择地图"按钮回调。 */
-    var onPickMap: (() -> Unit)? = null
+    var onPickMap: (() -> Unit)? = null,
+    /** 自动启动外部地图（高德）并首次返回桌面完成后回调（用于延迟天气首次播报等） */
+    var onAutoReturnDone: (() -> Unit)? = null
 ) {
+    /** 是否处于"自动启动外部地图并等待首次返回"流程中（高德正在前台） */
+    val isAutoReturnPending: Boolean get() = autoReturnPending
+    private var autoReturnPending = false
     private var mapView: MapView? = null
     private var current: MapSource? = null
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -132,7 +138,7 @@ class MapHost(
             render(it)
             // 首次启动 NUI 时自动启动外部地图（高德），Activity 重建不重复执行
             if (autoLaunch && !autoLaunched) {
-                launchAndReturnHome()
+                scheduleLaunchAndReturnHome()
                 autoLaunched = true
             }
         }
@@ -141,40 +147,77 @@ class MapHost(
     fun select(source: MapSource, autoLaunch: Boolean = false) {
         prefs.edit { putString(KEY_SOURCE, source.id) }
         render(source)
-        if (autoLaunch && !autoLaunched) {
-            launchAndReturnHome()
+        // 用户主动切换/选择地图：每次都尝试启动外部地图（如高德），不受首次自动启动标记限制
+        if (autoLaunch) {
+            autoReturnPending = true
+            scheduleLaunchAndReturnHome()
+            // 同步置位，避免随后 Activity 重建时的 start() 再次自动启动造成重复
             autoLaunched = true
         }
     }
 
+    /** 按配置的启动延迟启动外部地图（桌面启动后第 N 秒），随后按返回延迟回桌面 */
+    private fun scheduleLaunchAndReturnHome() {
+        autoReturnPending = true
+        val launchDelayMs = UiTheme.mapLaunchDelaySec(context) * 1000L
+        val task = Runnable { launchAndReturnHome() }
+        if (launchDelayMs > 0) container.postDelayed(task, launchDelayMs) else task.run()
+    }
+
     /**
      * 启动外部地图应用，延迟 [delayMs] 毫秒后返回桌面（HOME）。
+     * 默认 delayMs = 返回时刻 - 启动时刻（如第10秒启动、第15秒回桌面，则等5秒）。
      * 回桌面后再恢复浮窗（高德浮窗需地图进程在运行才生效）。
      * 内置 OSM 无需启动外部应用，直接返回。
      * @return 是否成功发起启动
      */
-    fun launchAndReturnHome(delayMs: Long = 3000L): Boolean {
+    fun launchAndReturnHome(
+        delayMs: Long = (UiTheme.mapReturnDelaySec(context) - UiTheme.mapLaunchDelaySec(context))
+            .coerceAtLeast(1) * 1000L
+    ): Boolean {
         val src = current ?: return false
         if (src.type == MapSource.Type.EMBEDDED_OSM) return false
         val launch = src.launchIntent ?: return false
         val started = runCatching { context.startActivity(launch) }.isSuccess
         if (!started) {
             Log.e(TAG, "launch external map failed: ${src.packageName}")
+            // 启动失败：不再等待返回，结束"自动返回中"流程，避免天气首次播报被永久暂存
+            if (autoReturnPending) {
+                autoReturnPending = false
+                onAutoReturnDone?.invoke()
+            }
             return false
         }
-        container.postDelayed({
-            // 回桌面：发送 HOME 广播，系统启动默认 Launcher（NUI）
-            // 不用显式 startActivity(MainActivity)，避免 singleTask 实例重建导致重复 setupMap
-            val home = Intent(Intent.ACTION_MAIN)
-                .addCategory(Intent.CATEGORY_HOME)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            runCatching { context.startActivity(home) }
+        // 高德启动耗时不定：慢设备（如 32 位模拟器）上地图绘制完成可能晚于返回时刻，
+        // 其绘制/初始化完成后会抢回前台。故首次返回后若被抢回，再补发一次夺回桌面。
+        container.postDelayed({ goBackToNui(src, restoreFloat = true) }, delayMs)
+        container.postDelayed({ goBackToNui(src, restoreFloat = false) }, delayMs + 2500L)
+        return true
+    }
+
+    /** 回桌面：复用已有 MainActivity（singleTask + SINGLE_TOP，走 onNewIntent）。
+     *  不要发 CATEGORY_HOME 广播——NUI 是默认桌面时，HOME 意图会在新 task 重建实例，
+     *  导致重复初始化（天气/语音二次播报、重复 setupMap）。
+     *  Intent 带 [EXTRA_AUTO_BACK] 标记，让 MainActivity.onNewIntent 识别为"地图自动返回"，
+     *  只保持当前 page，不触发桌面内 HOME 的 page0/page1 切换逻辑。 */
+    private fun goBackToNui(src: MapSource, restoreFloat: Boolean) {
+        Log.d(TAG, "goBackToNui restoreFloat=$restoreFloat")
+        val back = Intent(context, com.nui.launcher.MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            putExtra(EXTRA_AUTO_BACK, true)
+        }
+        runCatching { context.startActivity(back) }
+        // 首次回 NUI：自动启动流程完成，通知外部（用于延迟天气首次播报等）
+        if (restoreFloat) {
+            if (autoReturnPending) {
+                autoReturnPending = false
+                onAutoReturnDone?.invoke()
+            }
             // 回 NUI 后再恢复浮窗
             if (src.type == MapSource.Type.EXTERNAL_FLOAT) {
                 container.postDelayed({ showFloat() }, 500L)
             }
-        }, delayMs)
-        return true
+        }
     }
 
     private fun render(source: MapSource) {
@@ -319,15 +362,26 @@ class MapHost(
 
     fun onResume() {
         mapView?.onResume()
-        // 悬浮地图显示/关闭由 MainActivity 根据当前 page 统一控制，避免与 closeFloat 竞争
+    }
+
+    /** 离开桌面：无 pending 逻辑（保留空实现兼容调用方） */
+    fun cancelPendingShow() {
+        // no-op
+    }
+
+    /** 回到桌面：恢复高德悬浮窗（保留简单实现，兼容调用方） */
+    fun resumeFloat() {
+        showFloat()
     }
 
     fun onPause() {
+        Log.d(TAG, "onPause: close float")
         mapView?.onPause()
         closeFloat()
     }
 
     fun onDestroy() {
+        Log.d(TAG, "onDestroy")
         destroyMap()
     }
 
@@ -585,5 +639,8 @@ class MapHost(
         private val MIN_SIZE = 240 // px，缩放下限
         /** autoLaunch 是否已执行过——静态变量，防止 Activity 重建导致重复启动外部地图 */
         private var autoLaunched = false
+
+        /** MainActivity.onNewIntent 识别地图自动返回的 Intent 标记 */
+        const val EXTRA_AUTO_BACK = "nui_auto_back"
     }
 }

@@ -13,18 +13,39 @@ android {
         minSdk = 21
         targetSdk = 34
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "0.0.1"
+        // ABI 由 productFlavors 拆分（arm32 / arm64），见下
+    }
 
-        // 1. 64位优先：当前只打 arm64-v8a
-        // 2. 后期支持32位：在 abiFilters 中追加 "armeabi-v7a" 即可
-        ndk {
-            abiFilters += "arm64-v8a"
+    // 按架构拆包：
+    //   arm32 : armeabi-v7a（ARM 32 位车机）+ x86（32 位 x86 模拟器/BlueStacks）——debug 用
+    //   arm64 : arm64-v8a（64 位车机/模拟器）+ x86_64（64 位 x86 模拟器）
+    // release 变体通过 buildTypes.release 的 packaging 排除模拟器 x86 库，只保留真机 ARM 库以减小体积
+    flavorDimensions += "arch"
+    productFlavors {
+        create("arm32") {
+            dimension = "arch"
+            ndk { abiFilters += listOf("armeabi-v7a", "x86") }
+        }
+        create("arm64") {
+            dimension = "arch"
+            ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
         }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // 压缩：代码混淆 + 资源收缩 + 原生库压缩存储
+            isMinifyEnabled = true
+            isShrinkResources = true
+            // 临时用 debug 签名，保证 release 包可直接安装测试；正式发布时换成正式签名即可
+            signingConfig = signingConfigs.getByName("debug")
+            // release 只留真机 ARM 库，去掉模拟器 x86/x86_64 库（debug 包保留，供模拟器测试）
+            packaging {
+                jniLibs {
+                    excludes += listOf("lib/x86/**", "lib/x86_64/**")
+                }
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

@@ -17,6 +17,14 @@
     <string name="steering_wheel">方向盘</string>
     <string name="appearance">外观</string>
     <string name="sound">声音</string>
+    <string name="map">地图</string>
+    <string name="map_launch_delay_title">启动高德延迟（秒）</string>
+    <string name="map_return_delay_title">返回桌面延迟（秒）</string>
+    <string name="map_launch_delay_hint">桌面启动后第 N 秒自动启动高德，0 = 立即</string>
+    <string name="map_return_delay_hint">启动高德后等 N 秒再返回桌面</string>
+    <string name="about">关于</string>
+    <string name="about_author">作者</string>
+    <string name="about_version">版本</string>
     <string name="theme_system">跟随系统</string>
     <string name="theme_dark">深色模式</string>
     <string name="theme_light">浅色模式</string>
@@ -25,10 +33,12 @@
     <string name="dock_style_float">悬浮（圆角）</string>
     <string name="dock_icon_scale">Dock 图标大小</string>
     <string name="dock_icon_scale_hint">数值越大图标越大（默认 100%）</string>
+    <string name="status_bar_title">显示状态栏</string>
+    <string name="system_dock_title">显示系统 Dock（底部导航栏）</string>
+    <string name="system_dock_hint">顶部状态栏与底部系统 Dock 独立控制；开启后显示原桌面系统 Dock（如空调等快捷控制），NUI 各窗口自动让位；若原桌面 Dock 为应用私有视图则此开关不生效</string>
     <string name="app_icon_scale">应用列表图标大小</string>
     <string name="app_icon_scale_hint">数值越大图标越大（默认 100%）</string>
-    <string name="wallpaper_group">壁纸</string>
-    <string name="wallpaper_day">白天壁纸</string>
+    <string name="wallpaper_group">壁纸</string>    <string name="wallpaper_day">白天壁纸</string>
     <string name="wallpaper_night">晚上壁纸</string>
     <string name="wallpaper_set">已设置</string>
     <string name="wallpaper_default">默认</string>
