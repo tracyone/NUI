@@ -463,8 +463,8 @@ class MainActivity : AppCompatActivity() {
     private fun applyDockStyle() {
         val dp = resources.displayMetrics.density
         val edge = UiTheme.dockStyle(this) == UiTheme.DockStyle.EDGE
-        // Dock 宽度跟随图标比例：图标 + 两侧 12dp padding + 4dp 余量
-        val dockW = UiTheme.DEFAULT_DOCK_ICON_DP * UiTheme.dockIconScale(this) + 28
+        // Dock 宽度固定为 96dp，不随图标比例变化；图标大小调整时只改变图标尺寸，在栏内居中显示
+        val dockW = 96f
         val barLp = binding.dockBar.layoutParams as FrameLayout.LayoutParams
         barLp.width = (dockW * dp).toInt()
         if (edge) {
@@ -498,9 +498,9 @@ class MainActivity : AppCompatActivity() {
                 mp.post { mapHost?.refreshFloat() }
             }
         }
-        // 应用网格：dock 贴边时压缩左侧 padding
+        // 应用网格：dock 贴边时压缩左侧 padding，悬浮时留出更多间距避免与圆角重叠
         appGridView?.let { g ->
-            val leftPad = if (edge) dockW + 8 else 20 + dockW + 8
+            val leftPad = if (edge) dockW + 8 else 28 + dockW + 8
             g.setPadding((leftPad * dp.toFloat()).toInt(), g.paddingTop, g.paddingEnd, g.paddingBottom)
         }
     }

@@ -63,7 +63,7 @@ object UiTheme {
     }
 
     /** 默认 Dock 图标大小（dp），renderDock 按 [dockIconScale] 缩放 */
-    const val DEFAULT_DOCK_ICON_DP = 64
+    const val DEFAULT_DOCK_ICON_DP = 72
     /** 默认应用列表图标大小（dp），AppListAdapter 按 [appIconScale] 缩放 */
     const val DEFAULT_APP_ICON_DP = 72
 
