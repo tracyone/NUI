@@ -487,10 +487,10 @@ class MainActivity : AppCompatActivity() {
         binding.dockBar.layoutParams = barLp
         applyDockVisual()
 
-        // 地图卡片：dock 贴边时左移贴近 dock（dock宽+16dp），悬浮时再让出 8dp
+        // 地图卡片：dock 右侧留出 12dp 统一间距（参考氢桌面比例）
         desktopMapPanel?.let { mp ->
             val lp = mp.layoutParams as FrameLayout.LayoutParams
-            val left = if (edge) dockW + 16 else 8 + dockW + 16
+            val left = if (edge) dockW + 12 else 8 + dockW + 12
             if (lp.leftMargin != (left * dp).toInt()) {
                 lp.leftMargin = (left * dp).toInt()
                 mp.layoutParams = lp
@@ -498,30 +498,23 @@ class MainActivity : AppCompatActivity() {
                 mp.post { mapHost?.refreshFloat() }
             }
         }
-        // 应用网格：dock 贴边时压缩左侧 padding，悬浮时留出更多间距避免与圆角重叠
+        // 应用网格：dock 右侧留出 12dp 统一间距（参考氢桌面比例）
         appGridView?.let { g ->
-            val leftPad = if (edge) dockW + 8 else 28 + dockW + 8
+            val leftPad = if (edge) dockW + 12 else 8 + dockW + 12
             g.setPadding((leftPad * dp.toFloat()).toInt(), g.paddingTop, g.paddingEnd, g.paddingBottom)
         }
     }
 
-    /** 渲染 dock 槽位：空槽显示加号，已填显示应用图标（图标大小随 [UiTheme.dockIconScale]）。
-     *  数量自适应：按 dockItems 可用高度计算能完整显示多少个，显示不下的直接去掉（不滚动）。 */
+    /** 渲染 dock 槽位：固定 4 个槽位（3 固定 + 1 可自定义），在 dockItems 内垂直居中。
+     *  空槽显示加号，已填显示应用图标（图标大小随 [UiTheme.dockIconScale]）。 */
     private fun renderDock() {
         binding.dockItems.removeAllViews()
         val dp = resources.displayMetrics.density
         val scale = UiTheme.dockIconScale(this)
         val size = (UiTheme.DEFAULT_DOCK_ICON_DP * dp * scale).toInt()
-        val gap = (4 * dp).toInt()   // 紧凑：图标间距 4dp
-        // 自适应数量：可用高度 / (图标大小+间距)，向下取整，确保每个都完整显示（不滚动）
-        val availableH = binding.dockItems.height
-        if (availableH <= 0) {
-            binding.dockItems.post { renderDock() }
-            return
-        }
-        val maxVisible = (availableH / (size + gap)).coerceAtLeast(1)
-        // 前 3 个固定槽位（地图/音乐/最近）+ 用户配置的 DockConfig.SLOT_COUNT 个
-        val slotCount = minOf(DockConfig.SLOT_COUNT + DockSlots.FIXED_COUNT, maxVisible)
+        val gap = (2 * dp).toInt()   // 图标间距 2dp
+        // 固定 4 个槽位：前 3 个固定（地图/音乐/最近）+ 1 个用户可自定义
+        val slotCount = DockSlots.FIXED_COUNT + DockConfig.SLOT_COUNT
         val dark = UiTheme.isDark(this)
         val p = UiTheme.palette(this)
         val itemBg = RippleDrawable(
@@ -575,15 +568,16 @@ class MainActivity : AppCompatActivity() {
             }
             binding.dockItems.addView(
                 btn,
-                LinearLayout.LayoutParams(size, size).apply { topMargin = gap },
+                LinearLayout.LayoutParams(size, size).apply { topMargin = if (i == 0) 0 else gap },
             )
         }
-        // dockApps 底部按钮大小跟随图标比例
-        val asize = (UiTheme.DEFAULT_DOCK_ICON_DP * dp * scale).toInt()
+        // dockApps 底部按钮固定大小 80x48dp（不跟随图标比例，给 dockItems 腾出更多空间）
         val appsLp = binding.dockApps.layoutParams
-        if (appsLp.width != asize) {
-            appsLp.width = asize
-            appsLp.height = asize
+        val appBtnW = (80 * dp).toInt()
+        val appBtnH = (48 * dp).toInt()
+        if (appsLp.width != appBtnW || appsLp.height != appBtnH) {
+            appsLp.width = appBtnW
+            appsLp.height = appBtnH
             binding.dockApps.layoutParams = appsLp
         }
     }

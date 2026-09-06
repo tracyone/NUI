@@ -9,7 +9,7 @@
         android:id="@+id/mapPanel"
         android:layout_width="600dp"
         android:layout_height="400dp"
-        android:layout_marginStart="132dp"
+        android:layout_marginStart="116dp"
         android:layout_marginTop="8dp"
         app:cardCornerRadius="24dp"
         app:cardElevation="10dp"
@@ -59,29 +59,32 @@
             <LinearLayout
                 android:id="@+id/btnNavHome"
                 android:layout_width="0dp"
-                android:layout_height="80dp"
+                android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:layout_marginEnd="6dp"
                 android:orientation="vertical"
                 android:gravity="center"
                 android:clickable="true"
                 android:focusable="true"
-                android:background="@drawable/bg_dock_item"
-                android:paddingTop="10dp"
-                android:paddingBottom="8dp">
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp">
 
                 <ImageView
                     android:id="@+id/navIconHome"
-                    android:layout_width="30dp"
-                    android:layout_height="30dp"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
                     android:scaleType="centerInside"
+                    android:background="@drawable/bg_nav_home_circle"
+                    android:tint="#FFFFFF"
+                    android:padding="10dp"
                     android:src="@drawable/ic_nav_home" />
 
                 <TextView
                     android:id="@+id/navLabelHome"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
+                    android:layout_marginTop="6dp"
                     android:text="回家"
                     android:textSize="12sp"
                     android:textColor="@color/text_primary"
@@ -92,29 +95,32 @@
             <LinearLayout
                 android:id="@+id/btnNavCompany"
                 android:layout_width="0dp"
-                android:layout_height="80dp"
+                android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:layout_marginStart="6dp"
                 android:orientation="vertical"
                 android:gravity="center"
                 android:clickable="true"
                 android:focusable="true"
-                android:background="@drawable/bg_dock_item"
-                android:paddingTop="10dp"
-                android:paddingBottom="8dp">
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp">
 
                 <ImageView
                     android:id="@+id/navIconCompany"
-                    android:layout_width="30dp"
-                    android:layout_height="30dp"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
                     android:scaleType="centerInside"
+                    android:background="@drawable/bg_nav_company_circle"
+                    android:tint="#FFFFFF"
+                    android:padding="10dp"
                     android:src="@drawable/ic_nav_company" />
 
                 <TextView
                     android:id="@+id/navLabelCompany"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
+                    android:layout_marginTop="6dp"
                     android:text="公司"
                     android:textSize="12sp"
                     android:textColor="@color/text_primary"

@@ -20,10 +20,10 @@
         android:layout_gravity="start"
         android:orientation="vertical"
         android:gravity="center_horizontal"
-        android:paddingTop="16dp"
-        android:paddingBottom="16dp"
-        android:paddingStart="12dp"
-        android:paddingEnd="12dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        android:paddingStart="3dp"
+        android:paddingEnd="3dp"
         android:background="@drawable/bg_dock">
 
         <TextClock
@@ -43,12 +43,12 @@
             android:layout_height="0dp"
             android:layout_weight="1"
             android:orientation="vertical"
-            android:gravity="center_horizontal" />
+            android:gravity="center" />
 
         <ImageButton
             android:id="@+id/dockApps"
-            android:layout_width="88dp"
-            android:layout_height="56dp"
+            android:layout_width="80dp"
+            android:layout_height="48dp"
             android:layout_marginTop="8dp"
             android:background="@drawable/bg_dock_item"
             android:contentDescription="@string/dock_apps"
