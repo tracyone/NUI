@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.text.TextUtils
+import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -388,8 +389,16 @@ class MusicHost(
         // 整个唱碟区域可点击播放/暂停
         discWrap.setOnClickListener {
             safe {
-                if (isPlaying(controller.playbackState)) controller.transportControls.pause()
-                else controller.transportControls.play()
+                if (isPlaying(controller.playbackState)) {
+                    controller.transportControls.pause()
+                } else {
+                    // 首次播放该应用：先预热（启动进程确保 metadata/歌词可用），返回后自动播放
+                    if (primedPackage != controller.packageName) {
+                        primeAndPlay(controller)
+                    } else {
+                        controller.transportControls.play()
+                    }
+                }
             }
         }
         // container 大小变化时同步调整唱碟大小（避免第一次测量不准）
@@ -528,6 +537,40 @@ class MusicHost(
      *  浮窗顺序管理（防止酷我的 mini player 跟地图悬浮区视觉叠在一起）：
      *    启动音乐前先 onHideFloat（关掉外部高德浮窗）
      *    返回 NUI 后，再稍等约 900ms 让酷我自身的 overlay 收掉，然后 onShowFloat 恢复地图浮窗 */
+    /** 首次播放前预热：启动音乐应用确保进程在运行（metadata/歌词可用），延迟返回后自动播放。
+     *  解决 QQ 音乐等应用：MediaSession 存在但进程未运行时，transportControls.play() 能播但拿不到歌词。 */
+    private fun primeAndPlay(controller: MediaController) {
+        val pkg = controller.packageName
+        Log.d(TAG, "primeAndPlay: pkg=$pkg primedPackage=$primedPackage")
+        val i = context.packageManager.getLaunchIntentForPackage(pkg)
+        if (i == null) {
+            // 拿不到启动 Intent，直接播放
+            Log.d(TAG, "primeAndPlay: no launch intent, play directly")
+            controller.transportControls.play()
+            primedPackage = pkg
+            return
+        }
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        onHideFloat?.invoke()
+        runCatching { context.startActivity(i) }
+        Log.d(TAG, "primeAndPlay: launched $pkg, will return in 3s")
+        // 延迟返回 NUI，返回后自动播放 + 恢复地图浮窗
+        handler.postDelayed({
+            val back = Intent().apply {
+                setClassName(context, "com.nui.launcher.MainActivity")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+            }
+            runCatching { context.startActivity(back) }
+            primedPackage = pkg
+            Log.d(TAG, "primeAndPlay: returned to NUI, will play in 900ms")
+            handler.postDelayed({
+                controller.transportControls.play()
+                onShowFloat?.invoke()
+                Log.d(TAG, "primeAndPlay: auto play triggered")
+            }, 900L)
+        }, 3000L)
+    }
+
     private fun launchPreferredApp() {
         val pkg = prefs.getString(KEY_APP, null)
         if (pkg != null) {
@@ -543,6 +586,7 @@ class MusicHost(
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
                     }
                     runCatching { context.startActivity(back) }
+                    primedPackage = pkg
                     // 回 NUI 后再恢复地图浮窗（错开酷我自有关闭窗口的动画窗口）
                     handler.postDelayed({ onShowFloat?.invoke() }, 900L)
                 }, 3000L)
@@ -855,9 +899,12 @@ class MusicHost(
         (v * context.resources.displayMetrics.density).toInt()
 
     companion object {
+        private const val TAG = "MusicHost"
         private const val PREFS = "nui_music"
         private const val KEY_APP = "music_app"
         private const val KEY_LYRIC_BG_ALPHA = "lyric_bg_alpha"
+        /** 已预热过的音乐应用包名（首次播放前启动一次，确保进程在运行、metadata/歌词可用） */
+        private var primedPackage: String? = null
         const val DEFAULT_LYRIC_BG_ALPHA = 20
 
         /** 读取悬浮歌词背景不透明度（0-100，默认 80） */

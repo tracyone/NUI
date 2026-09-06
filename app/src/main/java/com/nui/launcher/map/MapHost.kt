@@ -65,6 +65,12 @@ class MapHost(
     /** 调整模式：起点（按下时的屏幕坐标+overlay尺寸）*/
     private var dragStartX = 0f
     private var dragStartY = 0f
+    /** 上一次 MOVE 事件的 x 坐标，用于判断拖动方向 */
+    private var lastMoveX = 0f
+    /** 是否已吸附到最右端（音乐栏消失状态），用于滞回控制避免跳动 */
+    private var snappedToRight = false
+    /** 退出吸附的阈值（dp）：已吸附后需向左拖超过此值才退出，避免手指抖动 */
+    private val snapExitThreshold: Int get() = dp(30)
     private var startLeft = 0   // 固定左边界（不允许移动）
     private var startTop = 0    // 固定顶边界（不允许移动）
     private var startWidth = 0
@@ -401,6 +407,9 @@ class MapHost(
     /** 长按非悬浮区触发。进入：关闭高德浮窗 + 显示带边缘条的 overlay；已在调整则退出。 */
     fun isAdjustMode() = adjustMode
 
+    /** 当前绑定的外部地图应用包名（内置 OSM 时返回 null），用于 dock 固定槽位 */
+    fun currentMapPackage(): String? = current?.packageName
+
     fun toggleAdjust() {
         if (adjustMode) { exitAdjust(); return }
         if (!Settings.canDrawOverlays(context)) {
@@ -509,6 +518,8 @@ class MapHost(
             MotionEvent.ACTION_DOWN -> {
                 dragStartX = e.rawX
                 dragStartY = e.rawY
+                lastMoveX = e.rawX
+                snappedToRight = false
                 // startWidth/startHeight 已在 enterAdjust 记录为地图区域大小
                 // 根据按下位置决定是调右 / 调下 / 同时调右下（相对地图区域）
                 val relX = e.rawX - startLeft
@@ -530,6 +541,33 @@ class MapHost(
                     var nh = startHeight
                     if (resizeMode == ResizeMode.RIGHT || resizeMode == ResizeMode.BOTH) nw += dx
                     if (resizeMode == ResizeMode.BOTTOM || resizeMode == ResizeMode.BOTH) nh += dy
+
+                    val effectiveRight = if (rightLimit > 0) rightLimit
+                        else context.resources.displayMetrics.widthPixels - dp(8)
+                    val snapWidth = effectiveRight - startLeft
+
+                    if (snappedToRight) {
+                        // 已吸附到最右端：保持宽度，直到向左拖超过阈值才退出（滞回，防手指抖动跳动）
+                        if (dragStartX - e.rawX > snapExitThreshold) {
+                            snappedToRight = false
+                        } else {
+                            nw = snapWidth
+                        }
+                    } else {
+                        // 未吸附：仅向右拖动时检测吸附阈值
+                        if (e.rawX > lastMoveX) {
+                            val remainingRight = effectiveRight - (startLeft + nw)
+                            if (remainingRight < dp(MUSIC_PANEL_MIN_WIDTH_DP + MUSIC_GAP_DP)) {
+                                snappedToRight = true
+                                nw = snapWidth
+                                // 更新基准：使退出吸附后从当前吸附宽度继续计算，避免跳变
+                                startWidth = snapWidth
+                                dragStartX = e.rawX
+                            }
+                        }
+                    }
+                    lastMoveX = e.rawX
+
                     val c = clampSizeFixed(startLeft, startTop, nw, nh)
                     lp.width = c[2]
                     lp.height = c[3]
@@ -639,8 +677,21 @@ class MapHost(
         private val MIN_SIZE = 240 // px，缩放下限
         /** autoLaunch 是否已执行过——静态变量，防止 Activity 重建导致重复启动外部地图 */
         private var autoLaunched = false
+        /** 右侧音乐栏最小宽度（dp）：低于此值音乐栏整体消失，地图吸附到最右端 */
+        private const val MUSIC_PANEL_MIN_WIDTH_DP = 180
+        /** 地图与音乐栏之间的间距（dp），与 MainActivity.syncRightPanel 保持一致 */
+        private const val MUSIC_GAP_DP = 12
 
         /** MainActivity.onNewIntent 识别地图自动返回的 Intent 标记 */
         const val EXTRA_AUTO_BACK = "nui_auto_back"
+
+        /** 从 prefs 直接读取当前绑定的外部地图应用包名（不需要 MapHost 实例初始化，首次渲染即可用） */
+        fun currentMapPackage(context: Context): String? {
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val id = prefs.getString(KEY_SOURCE, null) ?: return null
+            if (id == "builtin_osm") return null
+            // 外部地图应用的 id 就是包名，验证是否已安装
+            return if (context.packageManager.getLaunchIntentForPackage(id) != null) id else null
+        }
     }
 }

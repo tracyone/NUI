@@ -288,6 +288,7 @@ class MainActivity : AppCompatActivity() {
         if (intent?.component?.packageName != packageName) {
             launchedExternalApp = true
             pageBeforeLaunch = binding.viewPager.currentItem
+            intent?.component?.packageName?.let { RecentApps.noteLaunch(this, it) }
             android.util.Log.d("NUI.Main", "startActivity external: ${intent?.component?.packageName} page=$pageBeforeLaunch")
         }
     }
@@ -517,7 +518,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
         val maxVisible = (availableH / (size + gap)).coerceAtLeast(1)
-        val slotCount = minOf(DockConfig.SLOT_COUNT, maxVisible)
+        // 前 3 个固定槽位（地图/音乐/最近）+ 用户配置的 DockConfig.SLOT_COUNT 个
+        val slotCount = minOf(DockConfig.SLOT_COUNT + DockSlots.FIXED_COUNT, maxVisible)
         val dark = UiTheme.isDark(this)
         val p = UiTheme.palette(this)
         val itemBg = RippleDrawable(
@@ -526,9 +528,13 @@ class MainActivity : AppCompatActivity() {
             GradientDrawable().apply { setColor(Color.WHITE); cornerRadius = 16 * dp },
         )
         val addIcon = androidx.core.content.ContextCompat.getDrawable(this, R.drawable.ic_dock_add)
-        val apps = DockConfig.loadApps(this)
+        // 绑定的地图/音乐包名（从 prefs 直接读取，首次渲染即可用，不需要等应用启动）
+        val mapPkg = com.nui.launcher.map.MapHost.currentMapPackage(this)
+        val musicPkg = getSharedPreferences("nui_music", MODE_PRIVATE).getString("music_app", null)
+        val apps = DockSlots.load(this, mapPkg, musicPkg)
         for (i in 0 until slotCount) {
             val app = apps.getOrNull(i)
+            val isFixed = i < DockSlots.FIXED_COUNT
             val btn = android.widget.ImageButton(this).apply {
                 scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
                 background = itemBg
@@ -539,6 +545,7 @@ class MainActivity : AppCompatActivity() {
                         imageTintList = ColorStateList.valueOf(p.dockIconTint)
                     }
                     setOnClickListener {
+                        RecentApps.noteLaunch(this@MainActivity, app.packageName)
                         if (app.packageName == StockHome.PKG_STOCK_HOME) {
                             val ok = StockHome.launch(this@MainActivity)
                             if (!ok) NuiToast.show(this@MainActivity, "未找到其他桌面", Toast.LENGTH_SHORT)
@@ -546,13 +553,22 @@ class MainActivity : AppCompatActivity() {
                             runCatching { startActivity(app.launchIntent) }
                         }
                     }
-                    setOnLongClickListener { confirmRemove(i, app); true }
+                    // 固定槽位不可移除；用户配置槽位长按移除
+                    if (!isFixed) {
+                        setOnLongClickListener { confirmRemove(i - DockSlots.FIXED_COUNT, app); true }
+                    }
                 } else {
-                    setImageDrawable(addIcon)
-                    // 加号颜色跟随深浅模式：深色下浅色 +，浅色下深色 +
-                    imageTintList = ColorStateList.valueOf(p.dockIconTint)
-                    tag = "add"
-                    setOnClickListener { openPicker(i) }
+                    if (isFixed) {
+                        // 固定槽位无应用时显示空（不显示加号，因为不可用户添加）
+                        imageTintList = null
+                        setImageDrawable(null)
+                    } else {
+                        setImageDrawable(addIcon)
+                        // 加号颜色跟随深浅模式：深色下浅色 +，浅色下深色 +
+                        imageTintList = ColorStateList.valueOf(p.dockIconTint)
+                        tag = "add"
+                        setOnClickListener { openPicker(i - DockSlots.FIXED_COUNT) }
+                    }
                 }
             }
             binding.dockItems.addView(
@@ -722,12 +738,13 @@ class MainActivity : AppCompatActivity() {
                     val dlg = com.nui.launcher.settings.SettingsDialog(this)
                     dlg.wallpaperHasCustom = { slot -> wallpaper.hasCustom(slot) }
                     dlg.onWallpaperPick = { slot -> wallpaper.showMenu(slot) }
-                    // 设置面板关闭时刷新桌面主题/dock/音乐栏（Dialog 关闭不触发 onResume）
+                    // 设置面板关闭时刷新桌面主题/dock/音乐栏/应用列表（Dialog 关闭不触发 onResume）
                     dlg.setOnDismissListener {
                         settingsDialog = null
                         applyTheme()
                         applyDockStyle()
                         renderDock()
+                        appListAdapter?.notifyDataSetChanged()
                         if (::musicHost.isInitialized) musicHost.refresh()
                     }
                     settingsDialog = dlg
