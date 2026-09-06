@@ -63,9 +63,13 @@ class MainActivity : AppCompatActivity() {
             val keyType = intent?.getIntExtra("KEY_TYPE", -1) ?: return
             if (keyType != 10019) return
             val state = intent.getIntExtra("EXTRA_STATE", -1)
-            // 兼容不同版本高德的昼夜模式值：文档 37=白天/38=夜晚，实测部分版本 38=白天/40=夜晚
-            // 统一判断：偶数为夜晚，奇数为白天（37/39 奇=白天，38/40 偶=夜晚）
-            val isDark = state % 2 == 0
+            // 只处理文档标准昼夜模式值：37=白天，38=夜晚
+            // 10019 广播还携带其他类型信息（state=0/3/15/20/40/49/50/2001/3025 等），全部忽略保持不动
+            val isDark = when (state) {
+                37 -> false   // 白天
+                38 -> true    // 夜晚
+                else -> return
+            }
             if (UiTheme.mode(this@MainActivity) == UiTheme.Mode.FOLLOW_MAP &&
                 UiTheme.mapDark(this@MainActivity) != isDark
             ) {
@@ -493,8 +497,10 @@ class MainActivity : AppCompatActivity() {
             }
             rp.findViewById<ImageView>(R.id.navIconHome)?.setColorFilter(p.dockIconTint)
             rp.findViewById<ImageView>(R.id.navIconCompany)?.setColorFilter(p.dockIconTint)
+            rp.findViewById<ImageView>(R.id.navIconFavorite)?.setColorFilter(p.dockIconTint)
             rp.findViewById<TextView>(R.id.navLabelHome)?.setTextColor(p.textPrimary)
             rp.findViewById<TextView>(R.id.navLabelCompany)?.setTextColor(p.textPrimary)
+            rp.findViewById<TextView>(R.id.navLabelFavorite)?.setTextColor(p.textPrimary)
             rp.findViewById<TextView>(R.id.clockTime)?.setTextColor(p.textPrimary)
             rp.findViewById<TextView>(R.id.clockDate)?.setTextColor(p.textSecondary)
             rp.findViewById<TextView>(R.id.weatherText)?.setTextColor(p.textSecondary)
