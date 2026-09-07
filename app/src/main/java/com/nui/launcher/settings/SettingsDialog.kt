@@ -416,10 +416,10 @@ class SettingsDialog(context: Context) : Dialog(context) {
                         )
                     }
                     .setNegativeButton(R.string.back, null)
-                    .show()
+                    .let { showDialog(it) }
             }
             .setNegativeButton(R.string.back, null)
-            .show()
+            .let { showDialog(it) }
     }
 
     /** 关于：版本号取实际安装版本，与 versionName 保持一致 */
@@ -651,7 +651,7 @@ class SettingsDialog(context: Context) : Dialog(context) {
                     action = ids[which]
                     refreshTexts()
                 }
-                .show()
+                .let { showDialog(it) }
         }
         root.addView(tvKey)
         root.addView(tvAction, LinearLayout.LayoutParams(
@@ -668,7 +668,7 @@ class SettingsDialog(context: Context) : Dialog(context) {
                 }
             }
             .setNegativeButton(R.string.back, null)
-            .show()
+            .let { showDialog(it) }
     }
 
     private fun dialogBuilder(): AlertDialog.Builder = AlertDialog.Builder(
@@ -703,12 +703,29 @@ class SettingsDialog(context: Context) : Dialog(context) {
                 et.text.toString().trim().toIntOrNull()?.let(onKey)
             }
             .setNegativeButton(R.string.back, null)
-            .show()
+            .let { showDialog(it) }
         et.requestFocus()
     }
 
+    /** 统一弹窗显示：显式设置按钮/标题文字颜色（浅色=深字、深色=浅字），
+     *  避免车机 ROM / Force Dark 覆盖系统主题导致浅色模式下按钮文字发浅看不清。 */
+    private fun showDialog(builder: android.app.AlertDialog.Builder) {
+        val dlg = builder.show()
+        val dark = UiTheme.isDark(context)
+        val btnColor = if (dark) 0xFFF2F2F7.toInt() else 0xFF1C1C1E.toInt()
+        dlg.getButton(android.app.AlertDialog.BUTTON_POSITIVE)?.setTextColor(btnColor)
+        dlg.getButton(android.app.AlertDialog.BUTTON_NEGATIVE)?.setTextColor(btnColor)
+        dlg.getButton(android.app.AlertDialog.BUTTON_NEUTRAL)?.setTextColor(btnColor)
+    }
+
     private fun listenKey(onKey: (Int) -> Unit) {
-        val dlg = object : Dialog(context) {
+        val p = UiTheme.settingsPalette(context)
+        // 主题必须跟随 NUI 深浅色（车机系统 UI 常为深色，用系统默认主题会深底深字看不清）
+        val dlg = object : Dialog(
+            context,
+            if (UiTheme.isDark(context)) android.R.style.Theme_Material_Dialog
+            else android.R.style.Theme_Material_Light_Dialog,
+        ) {
             override fun dispatchKeyEvent(event: KeyEvent): Boolean {
                 if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
                     dismiss()
@@ -722,7 +739,7 @@ class SettingsDialog(context: Context) : Dialog(context) {
             text = context.getString(R.string.listening_key)
             textSize = 22f
             gravity = Gravity.CENTER
-            setTextColor(ContextCompat.getColor(context, R.color.settings_label))
+            setTextColor(p.label)
             setPadding(dp(32), dp(32), dp(32), dp(32))
         }
         dlg.setContentView(tv)

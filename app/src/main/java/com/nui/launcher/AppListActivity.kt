@@ -2,6 +2,7 @@ package com.nui.launcher
 
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.net.Uri
 import android.os.Bundle
 import android.view.GestureDetector
@@ -133,6 +134,15 @@ class AppListActivity : AppCompatActivity() {
     }
 
     private fun confirmUninstall(app: AppModel) {
+        // 系统应用不可卸载，直接提示
+        val isSystem = runCatching {
+            packageManager.getApplicationInfo(app.packageName, 0).flags and
+                ApplicationInfo.FLAG_SYSTEM != 0
+        }.getOrDefault(false)
+        if (isSystem) {
+            NuiToast.show(this, getString(R.string.cannot_uninstall_system_app), Toast.LENGTH_SHORT)
+            return
+        }
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.uninstall_confirm_title, app.label))
             .setMessage(R.string.uninstall_confirm_msg)

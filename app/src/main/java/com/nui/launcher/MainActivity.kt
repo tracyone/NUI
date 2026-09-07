@@ -93,6 +93,8 @@ class MainActivity : AppCompatActivity() {
     private var desktopBtnNavFavorite: View? = null
     private var page0Ready = false
     private var appGridLoaded = false
+    /** 从系统卸载页返回后需重载应用网格 */
+    private var pendingReloadOnResume = false
     private var appGridView: androidx.recyclerview.widget.RecyclerView? = null
     private var appListAdapter: AppListAdapter? = null
     /** 是否从桌面启动了外部 app——按 home 回来时恢复到启动前的 page */
@@ -390,6 +392,17 @@ class MainActivity : AppCompatActivity() {
         }
         // 设置页可能改了应用列表图标比例，返回时刷新
         appListAdapter?.notifyDataSetChanged()
+        // 从系统卸载页返回：重载应用网格（被卸载的应用消失）
+        if (pendingReloadOnResume) {
+            pendingReloadOnResume = false
+            appGridLoaded = false
+            val grid = appGridView
+            if (grid != null) {
+                grid.adapter = null
+                appListAdapter = null
+                loadAppGrid(grid)
+            }
+        }
     }
 
     /** 系统深浅模式切换（跟随系统模式）时同步重刷桌面配色 */
@@ -867,6 +880,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun confirmUninstall(app: AppModel) {
+        // 系统应用不可卸载，直接提示，避免 ACTION_DELETE 无反应造成"卸载无效"
+        val isSystem = runCatching {
+            packageManager.getApplicationInfo(app.packageName, 0).flags and
+                android.content.pm.ApplicationInfo.FLAG_SYSTEM != 0
+        }.getOrDefault(false)
+        if (isSystem) {
+            NuiToast.show(this, getString(R.string.cannot_uninstall_system_app), Toast.LENGTH_SHORT)
+            return
+        }
         android.app.AlertDialog.Builder(this)
             .setTitle(getString(R.string.uninstall_confirm_title, app.label))
             .setMessage(R.string.uninstall_confirm_msg)
@@ -874,6 +896,8 @@ class MainActivity : AppCompatActivity() {
                 val uri = android.net.Uri.parse("package:${app.packageName}")
                 val i = Intent(Intent.ACTION_DELETE, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 runCatching { startActivity(i) }
+                // 从系统卸载页返回后 onResume 重载网格，卸载掉的应用从列表消失
+                pendingReloadOnResume = true
             }
             .setNegativeButton(R.string.back, null)
             .show()

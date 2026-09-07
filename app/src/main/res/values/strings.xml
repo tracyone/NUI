@@ -74,4 +74,5 @@
     <string name="hide_done">已隐藏 %1$s</string>
     <string name="restore_confirm_title">恢复 %1$s？</string>
     <string name="restore_done">已恢复 %1$s</string>
+    <string name="cannot_uninstall_system_app">系统应用无法卸载</string>
 </resources>
