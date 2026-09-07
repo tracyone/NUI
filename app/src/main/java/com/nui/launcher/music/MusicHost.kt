@@ -828,14 +828,24 @@ class MusicHost(
     private fun pickPreferredApp(onPickedLaunch: Boolean = false) {
         val pm = context.packageManager
         val apps = mutableListOf<Triple<String, String, android.graphics.drawable.Drawable>>()
-        // 列出已安装的常用音乐 App
+        val seen = mutableSetOf<String>()
+        // 1) 白名单精确检测（有桌面启动入口或已安装都算——车机版音乐 App 常无 LAUNCHER activity）
         for (pkg in MUSIC_PACKAGES) {
-            val launch = pm.getLaunchIntentForPackage(pkg) ?: continue
-            val label = runCatching {
-                pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
-            }.getOrDefault(pkg)
-            val icon = runCatching { pm.getApplicationIcon(pkg) }.getOrDefault(pm.defaultActivityIcon)
-            apps.add(Triple(pkg, label, icon))
+            val installed = pm.getLaunchIntentForPackage(pkg) != null ||
+                runCatching { pm.getPackageInfo(pkg, 0) }.isSuccess
+            if (!installed) continue
+            seen.add(pkg)
+            apps.add(Triple(pkg, appLabel(pm, pkg), appIcon(pm, pkg)))
+        }
+        // 2) 关键字动态扫描：包名未知的版本（如车厂定制 QQ 音乐）也能检测到，放宽匹配
+        runCatching {
+            for (ai in pm.getInstalledApplications(0)) {
+                val pkg = ai.packageName
+                if (pkg in seen || pkg == context.packageName) continue
+                if (!isMusicLike(pm, ai)) continue
+                seen.add(pkg)
+                apps.add(Triple(pkg, appLabel(pm, pkg), appIcon(pm, pkg)))
+            }
         }
         if (apps.isEmpty()) {
             NuiToast.show(context, "未检测到常用音乐 App，可从应用列表打开", Toast.LENGTH_LONG)
@@ -856,6 +866,34 @@ class MusicHost(
             }.create()
         d.setOnDismissListener { onShowFloat?.invoke() }
         d.show()
+    }
+
+    private fun appLabel(pm: android.content.pm.PackageManager, pkg: String): String =
+        runCatching { pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString() }
+            .getOrDefault(pkg)
+
+    private fun appIcon(pm: android.content.pm.PackageManager, pkg: String): android.graphics.drawable.Drawable =
+        runCatching { pm.getApplicationIcon(pkg) }.getOrDefault(pm.defaultActivityIcon)
+
+    /** 音乐应用关键字识别（放宽匹配）：包名或应用名命中任一关键词即认为音乐应用。
+     *  覆盖 QQ 音乐全系列（手机版/车机版/TV版/平板版/爱趣听及车厂定制改名版）、酷我、酷狗、网易云等。 */
+    private fun isMusicLike(pm: android.content.pm.PackageManager, ai: android.content.pm.ApplicationInfo): Boolean {
+        val pkg = ai.packageName.lowercase()
+        // 包名关键词（腾讯系：qqmusic 全家桶 + aiqiting 爱趣听；酷我/酷狗/网易云/Spotify；通用 music）
+        val pkgKeywords = listOf(
+            "qqmusic", "qqmusictv", "qqmusicpad", "aiqiting",
+            "kuwo", "kwmusic", "kugou",
+            "netease", "cloudmusic", "spotify",
+            "music",
+        )
+        if (pkgKeywords.any { pkg.contains(it) }) return true
+        // 应用名关键词
+        val label = runCatching { pm.getApplicationLabel(ai).toString() }.getOrDefault("")
+        val labelKeywords = listOf(
+            "音乐", "QQ音乐", "Q音", "酷我", "酷狗", "网易云", "爱趣听", "Spotify", "虾米", "咪咕", "汽水音乐",
+        )
+        if (labelKeywords.any { label.contains(it) }) return true
+        return false
     }
 
     /** LRC 元数据行关键字（作词/作曲/编曲等），解析时过滤掉，避免当前句高亮到这些行。 */
@@ -930,12 +968,16 @@ class MusicHost(
                 .edit().putInt(KEY_LYRIC_BG_ALPHA, percent.coerceIn(0, 100)).apply()
         }
 
-        // 常见音乐 App 包名（用于启动卡选择列表，含车机版）
+        // 常见音乐 App 包名（用于启动卡选择列表，含车机版。QQ 音乐系列覆盖手机版/车机版/TV版/平板版/爱趣听）
         val MUSIC_PACKAGES = setOf(
             "com.netease.cloudmusic",
             "com.tencent.qqmusic",
             "com.tencent.qqmusiccar",
+            "com.tencent.qqmusictv",
+            "com.tencent.qqmusicpad",
+            "com.tencent.aiqiting",
             "com.kugou.android",
+            "com.kugou.android.lite",
             "cn.kuwo.player",
             "cn.kuwo.kwmusiccar",
             "com.android.mediacenter",

@@ -218,18 +218,29 @@ class MainActivity : AppCompatActivity() {
         tryLoadLocation()
     }
 
+    /** 首次启动天气播报延迟（ms）：等高德自动启动返回桌面（约10s）并留出操作时间，30 秒后再播 */
+    private val FIRST_WEATHER_VOICE_DELAY_MS = 30_000L
+
     /** 首次启动的高德自动启动返回完成前，先暂存天气播报，返回桌面后再播（避免与高德前台重叠） */
     private var pendingFirstWeather: WeatherFetcher.WeatherInfo? = null
 
-    /** 天气首次播报入口：高德自动返回未完成则暂存，否则立即播报 */
+    /** 首次启动天气播报只调度一次（WeatherVoice 内部也有 firstSpoken 去重，双保险） */
+    private var firstWeatherScheduled = false
+
+    /** 天气首次播报入口：统一延迟 30 秒后播报（覆盖高德自动启动返回 + 留操作时间）。
+     *  期间高德返回中则暂存，返回完成后 flush 播放（正常 10s 内返回，30s 后基本直接播）。 */
     private fun deliverFirstWeather(info: WeatherFetcher.WeatherInfo) {
-        if (::mapHost.isInitialized && mapHost.isAutoReturnPending) {
-            android.util.Log.d("WeatherVoice", "高德返回中，暂存天气播报 ${info.city}")
-            pendingFirstWeather = info
-        } else {
-            android.util.Log.d("WeatherVoice", "直接播报天气 ${info.city}")
-            weatherVoice.onWeather(info)
-        }
+        if (firstWeatherScheduled) return
+        firstWeatherScheduled = true
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (::mapHost.isInitialized && mapHost.isAutoReturnPending) {
+                android.util.Log.d("WeatherVoice", "高德返回中，暂存天气播报 ${info.city}")
+                pendingFirstWeather = info
+            } else {
+                android.util.Log.d("WeatherVoice", "延迟${FIRST_WEATHER_VOICE_DELAY_MS / 1000}s播报天气 ${info.city}")
+                weatherVoice.onWeather(info)
+            }
+        }, FIRST_WEATHER_VOICE_DELAY_MS)
     }
 
     /** 高德自动返回桌面完成：播报暂存的天气 */

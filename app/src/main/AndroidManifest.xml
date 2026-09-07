@@ -18,7 +18,11 @@
         <package android:name="com.netease.cloudmusic" />
         <package android:name="com.tencent.qqmusic" />
         <package android:name="com.tencent.qqmusiccar" />
+        <package android:name="com.tencent.qqmusictv" />
+        <package android:name="com.tencent.qqmusicpad" />
+        <package android:name="com.tencent.aiqiting" />
         <package android:name="com.kugou.android" />
+        <package android:name="com.kugou.android.lite" />
         <package android:name="com.spotify.music" />
         <package android:name="com.android.mediacenter" />
     </queries>
