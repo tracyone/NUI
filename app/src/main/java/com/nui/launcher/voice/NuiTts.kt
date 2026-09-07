@@ -119,11 +119,22 @@ private object NuiTtsCore {
         runCatching { currentTrack?.flush() }
     }
 
-    /** 切换音色：立即停止、释放旧引擎、加载新引擎并用新音色自我介绍 */
+    /** 切换音色：立即停止、释放旧引擎、加载新引擎并用新音色自我介绍。
+     *  为减少车机低性能下加载模型的等待感知，切换瞬间先用当前引擎出声
+     *  （"正在切换语音"），新引擎就绪后再播报"主人xx好"。 */
     fun switchVoice(gender: String) {
         handler.post {
-            stopPlayback()
             val target = specFor(gender)
+            // 已是目标音色：直接播报，无需重载
+            if (loadedSpec?.dir == target.dir && tts != null) {
+                speakNow("主人${target.selfName}好")
+                return@post
+            }
+            // 切换瞬间立即出声反馈（当前引擎），避免长时间静默
+            if (tts != null) {
+                runCatching { speakNow("正在切换语音") }
+            }
+            stopPlayback()
             if (loadedSpec != null && loadedSpec!!.dir != target.dir) {
                 runCatching { tts?.release() }
                 tts = null

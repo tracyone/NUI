@@ -78,6 +78,9 @@ class MapHost(
     private var resizeMode = ResizeMode.NONE
     /** 地图右缘上限（px）：由外部 syncRightPanel 按右侧音乐栏位置设定，0=不限制 */
     private var rightLimit = 0
+    /** 地图底部上限（px）：系统底部 Dock（导航栏）显示时由外部传入（屏幕高-导航栏高-8dp），
+     *  保证悬浮地图不进入系统 Dock 区域；0=不限制（可拖到屏幕最底部）。 */
+    private var bottomLimit = 0
     /** 几何是否已加载完成（loadGeometry 执行完毕），用于防止 syncRightPanel 在默认位置生效前扩展地图 */
     var geometryLoaded = false
 
@@ -91,6 +94,25 @@ class MapHost(
             lp.width = maxW
             mapPanel.layoutParams = lp
             onGeometryChanged?.invoke()
+        }
+    }
+
+    /** 设置地图底部上限（px，屏幕坐标系）；系统 Dock 显示时调用，0=不限制 */
+    fun setBottomLimit(px: Int) {
+        bottomLimit = px
+        if (px <= 0) return
+        val lp = mapPanel.layoutParams as FrameLayout.LayoutParams
+        val loc = IntArray(2)
+        mapPanel.getLocationOnScreen(loc)
+        val bottomY = loc[1] + lp.height
+        if (bottomY > px) {
+            val newH = (px - loc[1]).coerceAtLeast(MIN_SIZE)
+            if (lp.height != newH) {
+                lp.height = newH
+                mapPanel.layoutParams = lp
+                onGeometryChanged?.invoke()
+                refreshFloat()
+            }
         }
     }
 
@@ -602,7 +624,8 @@ class MapHost(
         val sh = context.resources.displayMetrics.heightPixels
         // 右侧面板固定贴边后：地图右缘不超过 rightLimit（有值用值，无值用 屏幕宽-8dp）
         val maxRight = if (rightLimit > 0) rightLimit else sw - dp(8)
-        val maxBottom = sh - dp(8)     // 不碰到底边，与 normalizeVerticalMargins 的 8dp 一致
+        // 底部：系统 Dock 显示时不超过 bottomLimit（避开导航栏），否则不碰到底边 8dp
+        val maxBottom = if (bottomLimit > 0) bottomLimit else sh - dp(8)
         var nw = w.coerceAtLeast(MIN_SIZE)
         var nh = h.coerceAtLeast(MIN_SIZE)
         if (x + nw > maxRight) nw = (maxRight - x).coerceAtLeast(MIN_SIZE)

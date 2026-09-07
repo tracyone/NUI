@@ -106,6 +106,19 @@
             android:textSize="18sp" />
 
         <TextView
+            android:id="@+id/tabApps"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_settings_tab"
+            android:gravity="center_vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:text="@string/apps"
+            android:textColor="@color/settings_label"
+            android:textSize="18sp" />
+
+        <TextView
             android:id="@+id/tabAbout"
             android:layout_width="match_parent"
             android:layout_height="52dp"
@@ -983,6 +996,74 @@
                 android:text="@string/map_launch_delay_hint"
                 android:textColor="@color/settings_value"
                 android:textSize="13sp" />
+        </LinearLayout>
+
+        <!-- 应用 -->
+        <LinearLayout
+            android:id="@+id/panelApps"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/groupTitleApps"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/apps"
+                android:textColor="@color/settings_group_title"
+                android:textSize="14sp" />
+
+            <View
+                android:id="@+id/dividerApps"
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="12dp"
+                android:layout_marginBottom="20dp"
+                android:background="@color/settings_divider" />
+
+            <!-- 管理隐藏应用 -->
+            <LinearLayout
+                android:id="@+id/optHiddenApps"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="?android:attr/selectableItemBackground">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/tvOptHiddenApps"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/manage_hidden_apps"
+                        android:textColor="@color/settings_label"
+                        android:textSize="17sp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/manage_hidden_apps_hint"
+                        android:textColor="@color/settings_value"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="›"
+                    android:textColor="@color/settings_value"
+                    android:textSize="22sp" />
+            </LinearLayout>
         </LinearLayout>
 
         <!-- 关于 -->

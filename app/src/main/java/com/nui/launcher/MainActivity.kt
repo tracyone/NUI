@@ -791,8 +791,10 @@ class MainActivity : AppCompatActivity() {
             val main = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
             val resolved = pm.queryIntentActivities(main, 0)
             val fallbackIcon = pm.defaultActivityIcon
-            val apps = resolved.map { ri ->
+            val hidden = HiddenApps.hiddenSet(this)
+            val apps = resolved.mapNotNull { ri ->
                 val pkg = ri.activityInfo.packageName
+                if (pkg in hidden) return@mapNotNull null
                 AppModel(
                     label = ri.loadLabel(pm).toString(),
                     packageName = pkg,
@@ -817,7 +819,15 @@ class MainActivity : AppCompatActivity() {
                         applyTheme()
                         applyDockStyle()
                         renderDock()
-                        appListAdapter?.notifyDataSetChanged()
+                        // 隐藏/恢复应用可能已变化：重载应用网格（而非仅 notifyDataSetChanged，
+                        // 否则恢复的应用不会重新出现）
+                        appGridLoaded = false
+                        val grid = appGridView
+                        if (grid != null) {
+                            grid.adapter = null
+                            appListAdapter = null
+                            loadAppGrid(grid)
+                        }
                         if (::musicHost.isInitialized) musicHost.refresh()
                     }
                     settingsDialog = dlg
@@ -832,10 +842,61 @@ class MainActivity : AppCompatActivity() {
                         if (app.onClick != null) app.onClick.invoke()
                         else startActivity(app.launchIntent)
                     },
+                    onLongClick = { app -> if (app.onClick == null) showAppMenu(app) },
                 )
                 grid.adapter = appListAdapter
             }
         }.start()
+    }
+
+    /** 长按应用网格中的应用：卸载 / 隐藏（需确认）；设置入口本身不响应长按 */
+    private fun showAppMenu(app: AppModel) {
+        val items = arrayOf(
+            getString(R.string.uninstall),
+            getString(R.string.hide_app),
+        )
+        android.app.AlertDialog.Builder(this)
+            .setTitle(app.label)
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> confirmUninstall(app)
+                    1 -> confirmHide(app)
+                }
+            }
+            .show()
+    }
+
+    private fun confirmUninstall(app: AppModel) {
+        android.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.uninstall_confirm_title, app.label))
+            .setMessage(R.string.uninstall_confirm_msg)
+            .setPositiveButton(R.string.uninstall) { _, _ ->
+                val uri = android.net.Uri.parse("package:${app.packageName}")
+                val i = Intent(Intent.ACTION_DELETE, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                runCatching { startActivity(i) }
+            }
+            .setNegativeButton(R.string.back, null)
+            .show()
+    }
+
+    private fun confirmHide(app: AppModel) {
+        android.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.hide_confirm_title, app.label))
+            .setMessage(R.string.hide_confirm_msg)
+            .setPositiveButton(R.string.hide_app) { _, _ ->
+                HiddenApps.hide(this, app.packageName)
+                NuiToast.show(this, getString(R.string.hide_done, app.label), Toast.LENGTH_SHORT)
+                // 重新加载应用网格（隐藏项消失），保留"桌面设置"入口
+                appGridLoaded = false
+                val grid = appGridView
+                if (grid != null) {
+                    grid.adapter = null
+                    appListAdapter = null
+                    loadAppGrid(grid)
+                }
+            }
+            .setNegativeButton(R.string.back, null)
+            .show()
     }
 
     /** 右侧面板（音乐栏）宽度随地图右缘动态变化：地图右移 → 音乐栏变窄，太窄则整个消失。
@@ -920,9 +981,23 @@ class MainActivity : AppCompatActivity() {
             val top = if (UiTheme.showStatusBar(this)) insets.getSystemWindowInsetTop() else 0
             val bottom = if (UiTheme.showSystemDock(this)) insets.getSystemWindowInsetBottom() else 0
             v.setPadding(0, top, 0, bottom)
+            // 悬浮地图（高德浮窗）同步避让底部系统 Dock：上限=屏幕高-导航栏高-8dp；
+            // Dock 隐藏时解除限制（可拖到屏幕最底部）
+            if (::mapHost.isInitialized) {
+                if (UiTheme.showSystemDock(this) && bottom > 0) {
+                    val sh = resources.displayMetrics.heightPixels
+                    mapHost.setBottomLimit(sh - bottom - (8 * resources.displayMetrics.density).toInt())
+                } else {
+                    mapHost.setBottomLimit(0)
+                }
+            }
             insets
         }
         binding.root.requestApplyInsets()
+        // 系统 Dock 显隐变化后刷新高德浮窗几何（位置/边界可能已变）
+        if (::mapHost.isInitialized) {
+            mapHost.refreshFloat()
+        }
     }
 
     /** 重新获得焦点时重设系统栏标志（部分设备焦点变化后会恢复系统栏） */

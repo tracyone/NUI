@@ -12,12 +12,14 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
+import android.view.WindowManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.nui.launcher.R
 import com.nui.launcher.UiTheme
@@ -37,12 +39,14 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var tabAppearance: TextView
     private lateinit var tabVoice: TextView
     private lateinit var tabMap: TextView
+    private lateinit var tabApps: TextView
     private lateinit var tabAbout: TextView
     private lateinit var panelMusic: View
     private lateinit var panelSteering: View
     private lateinit var panelAppearance: View
     private lateinit var panelVoice: View
     private lateinit var panelMap: View
+    private lateinit var panelApps: View
     private lateinit var panelAbout: View
     private lateinit var edMapLaunch: EditText
     private lateinit var edMapReturn: EditText
@@ -84,6 +88,7 @@ class SettingsActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
+        applySystemDock()
 
         findViewById<View>(R.id.btnBack).setOnClickListener { finish() }
         findViewById<View>(R.id.btnAdd).setOnClickListener { startEdit(null) }
@@ -96,12 +101,14 @@ class SettingsActivity : AppCompatActivity() {
         tabAppearance = findViewById(R.id.tabAppearance)
         tabVoice = findViewById(R.id.tabVoice)
         tabMap = findViewById(R.id.tabMap)
+        tabApps = findViewById(R.id.tabApps)
         tabAbout = findViewById(R.id.tabAbout)
         panelMusic = findViewById(R.id.panelMusic)
         panelSteering = findViewById(R.id.panelSteering)
         panelAppearance = findViewById(R.id.panelAppearance)
         panelVoice = findViewById(R.id.panelVoice)
         panelMap = findViewById(R.id.panelMap)
+        panelApps = findViewById(R.id.panelApps)
         panelAbout = findViewById(R.id.panelAbout)
         edMapLaunch = findViewById(R.id.edMapLaunch)
         edMapReturn = findViewById(R.id.edMapReturn)
@@ -144,7 +151,8 @@ class SettingsActivity : AppCompatActivity() {
         tabAppearance.setOnClickListener { selectTab(2) }
         tabVoice.setOnClickListener { selectTab(3) }
         tabMap.setOnClickListener { selectTab(4) }
-        tabAbout.setOnClickListener { selectTab(5) }
+        tabApps.setOnClickListener { selectTab(5) }
+        tabAbout.setOnClickListener { selectTab(6) }
         selectTab(0)
 
         // 地图：两个延迟配置，输入即时保存
@@ -213,6 +221,8 @@ class SettingsActivity : AppCompatActivity() {
         optWallpaperDay.setOnClickListener { wallpaper.showMenu(com.nui.launcher.WallpaperController.Slot.DAY) }
         optWallpaperNight.setOnClickListener { wallpaper.showMenu(com.nui.launcher.WallpaperController.Slot.NIGHT) }
         refreshWallpaper()
+        // 应用 → 管理隐藏应用：点击弹出隐藏列表，可恢复显示
+        findViewById<View>(R.id.optHiddenApps).setOnClickListener { showHiddenAppsDialog() }
         // Dock 图标大小：0.6~1.4，默认 1.0（100%），拖动实时保存
         tvDockIconValue.text = "${(UiTheme.dockIconScale(this) * 100).toInt()}%"
         seekDockIcon.apply {
@@ -247,7 +257,6 @@ class SettingsActivity : AppCompatActivity() {
         }
         renderAppearance()
         applySettingsTheme()
-
         // 悬浮歌词背景不透明度（0-100，默认 20，拖动实时保存）
         tvLyricAlphaValue.text = "${MusicHost.lyricBgAlpha(this)}%"
         seekLyricAlpha.apply {
@@ -272,14 +281,62 @@ class SettingsActivity : AppCompatActivity() {
     private fun selectTab(index: Int, dark: Boolean) {
         currentTab = index
         val p = UiTheme.settingsPalette(dark)
-        val tabs = listOf(tabMusic, tabSteering, tabAppearance, tabVoice, tabMap, tabAbout)
-        val panels = listOf(panelMusic, panelSteering, panelAppearance, panelVoice, panelMap, panelAbout)
+        val tabs = listOf(tabMusic, tabSteering, tabAppearance, tabVoice, tabMap, tabApps, tabAbout)
+        val panels = listOf(panelMusic, panelSteering, panelAppearance, panelVoice, panelMap, panelApps, panelAbout)
         tabs.forEachIndexed { i, tab ->
             val isSel = i == index
             tab.isSelected = isSel
             tab.setTextColor(if (isSel) Color.WHITE else p.label)
             panels[i].visibility = if (isSel) View.VISIBLE else View.GONE
         }
+        if (index == 5) renderApps()
+    }
+
+    /** 应用管理：列出已隐藏的应用，点击恢复显示 */
+    private fun renderApps() {
+        val hidden = com.nui.launcher.HiddenApps.hiddenSet(this)
+        findViewById<View>(R.id.optHiddenApps).visibility = View.VISIBLE
+        if (hidden.isEmpty()) {
+            com.nui.launcher.NuiToast.show(this, getString(R.string.no_hidden_apps), Toast.LENGTH_SHORT)
+        }
+    }
+
+    /** 弹出已隐藏应用列表，点击恢复 */
+    private fun showHiddenAppsDialog() {
+        val hidden = com.nui.launcher.HiddenApps.hiddenSet(this).toMutableList()
+        if (hidden.isEmpty()) {
+            com.nui.launcher.NuiToast.show(this, getString(R.string.no_hidden_apps), Toast.LENGTH_SHORT)
+            return
+        }
+        val pm = packageManager
+        val items = hidden.mapNotNull { pkg ->
+            runCatching {
+                val label = pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+                label to pkg
+            }.getOrNull()
+        }
+        if (items.isEmpty()) {
+            com.nui.launcher.NuiToast.show(this, getString(R.string.no_hidden_apps), Toast.LENGTH_SHORT)
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.manage_hidden_apps)
+            .setItems(items.map { it.first }.toTypedArray()) { _, which ->
+                val pkg = items[which].second
+                AlertDialog.Builder(this)
+                    .setTitle(getString(R.string.restore_confirm_title, items[which].first))
+                    .setMessage(R.string.restore)
+                    .setPositiveButton(R.string.restore) { _, _ ->
+                        com.nui.launcher.HiddenApps.unhide(this, pkg)
+                        com.nui.launcher.NuiToast.show(
+                            this, getString(R.string.restore_done, items[which].first), Toast.LENGTH_SHORT
+                        )
+                    }
+                    .setNegativeButton(R.string.back, null)
+                    .show()
+            }
+            .setNegativeButton(R.string.back, null)
+            .show()
     }
 
     /** 关于：版本号取实际安装版本，与 versionName 保持一致 */
@@ -358,6 +415,10 @@ class SettingsActivity : AppCompatActivity() {
         findViewById<View>(R.id.dividerAbout).setBackgroundColor(p.divider)
         findViewById<TextView>(R.id.tvAboutAuthor).setTextColor(p.value)
         findViewById<TextView>(R.id.tvAboutVersion).setTextColor(p.value)
+        // 应用
+        findViewById<TextView>(R.id.groupTitleApps).setTextColor(p.value)
+        findViewById<View>(R.id.dividerApps).setBackgroundColor(p.divider)
+        findViewById<TextView>(R.id.tvOptHiddenApps).setTextColor(p.label)
         // 外观 → 壁纸
         findViewById<TextView>(R.id.groupTitleWallpaper).setTextColor(p.value)
         findViewById<View>(R.id.dividerWallpaper).setBackgroundColor(p.divider)
@@ -615,4 +676,51 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+
+    /**
+     * 与主桌面一致的系统栏显隐：跟随"显示状态栏 / 显示系统 Dock"两个开关，
+     * 否则独立 Activity 打开时系统导航栏（车机底部 docker 栏）会强制显示。
+     * 状态栏/Dock 显示时通过 insets 让位，内容不被遮挡。
+     */
+    private fun applySystemDock() {
+        val showStatus = UiTheme.showStatusBar(this)
+        val showDock = UiTheme.showSystemDock(this)
+        if (showStatus) window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        else window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        if (!showStatus && !showDock) window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+        else window.clearFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+
+        var vis = 0
+        if (!showStatus) {
+            vis = vis or View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+        }
+        if (!showDock) {
+            vis = vis or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+        }
+        window.decorView.systemUiVisibility = vis
+
+        // 系统栏显示时让位：顶部/底部加 inset padding（叠加布局本身的 24dp padding）
+        findViewById<View>(R.id.settingsRoot)?.setOnApplyWindowInsetsListener { v, insets ->
+            val base = dp(24)
+            val top = if (UiTheme.showStatusBar(this)) insets.getSystemWindowInsetTop() else 0
+            val bottom = if (UiTheme.showSystemDock(this)) insets.getSystemWindowInsetBottom() else 0
+            v.setPadding(base, base + top, base, base + bottom)
+            insets
+        }
+        findViewById<View>(R.id.settingsRoot)?.requestApplyInsets()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && !UiTheme.showStatusBar(this) && !UiTheme.showSystemDock(this)) {
+            window.decorView.systemUiVisibility =
+                View.SYSTEM_UI_FLAG_FULLSCREEN or
+                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                    View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                    View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+        }
+    }
 }

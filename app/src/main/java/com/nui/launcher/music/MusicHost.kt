@@ -542,8 +542,13 @@ class MusicHost(
     private fun primeAndPlay(controller: MediaController) {
         val pkg = controller.packageName
         Log.d(TAG, "primeAndPlay: pkg=$pkg primedPackage=$primedPackage")
+        // 车机版音乐 App（如酷我）可能无 LAUNCHER activity，ACTION_MAIN 兜底
         val i = context.packageManager.getLaunchIntentForPackage(pkg)
-        if (i == null) {
+            ?: Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_LAUNCHER)
+                setPackage(pkg)
+            }
+        if (i.resolveActivity(context.packageManager) == null) {
             // 拿不到启动 Intent，直接播放
             Log.d(TAG, "primeAndPlay: no launch intent, play directly")
             controller.transportControls.play()
@@ -574,8 +579,14 @@ class MusicHost(
     private fun launchPreferredApp() {
         val pkg = prefs.getString(KEY_APP, null)
         if (pkg != null) {
+            // 车机版音乐 App（如酷我车机版）可能没有 LAUNCHER activity，getLaunchIntentForPackage 返回 null，
+            // 用 ACTION_MAIN + CATEGORY_LAUNCHER + setPackage 兜底显式启动
             val i = context.packageManager.getLaunchIntentForPackage(pkg)
-            if (i != null) {
+                ?: Intent(Intent.ACTION_MAIN).apply {
+                    addCategory(Intent.CATEGORY_LAUNCHER)
+                    setPackage(pkg)
+                }
+            if (i.resolveActivity(context.packageManager) != null) {
                 i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 onHideFloat?.invoke()
                 runCatching { context.startActivity(i) }
@@ -592,6 +603,7 @@ class MusicHost(
                 }, 3000L)
                 return
             }
+            NuiToast.show(context, "无法启动已绑定的音乐 App（$pkg）", Toast.LENGTH_SHORT)
         }
         pickPreferredApp()
     }

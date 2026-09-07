@@ -1,10 +1,13 @@
 package com.nui.launcher
 
+import android.app.AlertDialog
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.GridLayoutManager
 import com.nui.launcher.databinding.ActivityAppListBinding
@@ -13,11 +16,11 @@ import kotlin.math.abs
 /**
  * 应用列表页：全屏透明，只显示壁纸+应用图标。
  * 返回方式：左边缘向右滑 / 从上往下滑 / 系统返回键。
+ * 长按应用：弹出菜单（卸载 / 隐藏），卸载/隐藏前需确认；隐藏的应用可在 桌面设置 → 应用 中恢复。
  */
 class AppListActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityAppListBinding
-    private lateinit var gestureDetector: GestureDetector
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -83,8 +86,10 @@ class AppListActivity : AppCompatActivity() {
             val main = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
             val resolved = pm.queryIntentActivities(main, 0)
             val fallbackIcon = pm.defaultActivityIcon
-            val apps = resolved.map { ri ->
+            val hidden = HiddenApps.hiddenSet(this)
+            val apps = resolved.mapNotNull { ri ->
                 val pkg = ri.activityInfo.packageName
+                if (pkg in hidden) return@mapNotNull null
                 AppModel(
                     label = ri.loadLabel(pm).toString(),
                     packageName = pkg,
@@ -103,9 +108,54 @@ class AppListActivity : AppCompatActivity() {
                         startActivity(app.launchIntent)
                         finish()
                     },
+                    onLongClick = { app -> showAppMenu(app) },
                 )
             }
         }.start()
+    }
+
+    /** 长按应用：卸载 / 隐藏（均需确认）；卸载走系统卸载页，隐藏立即生效 */
+    private fun showAppMenu(app: AppModel) {
+        val pkg = app.packageName
+        val items = arrayOf(
+            getString(R.string.uninstall),
+            getString(R.string.hide_app),
+        )
+        AlertDialog.Builder(this)
+            .setTitle(app.label)
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> confirmUninstall(app)
+                    1 -> confirmHide(app)
+                }
+            }
+            .show()
+    }
+
+    private fun confirmUninstall(app: AppModel) {
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.uninstall_confirm_title, app.label))
+            .setMessage(R.string.uninstall_confirm_msg)
+            .setPositiveButton(R.string.uninstall) { _, _ ->
+                val uri = Uri.parse("package:${app.packageName}")
+                val i = Intent(Intent.ACTION_DELETE, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                runCatching { startActivity(i) }
+            }
+            .setNegativeButton(R.string.back, null)
+            .show()
+    }
+
+    private fun confirmHide(app: AppModel) {
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.hide_confirm_title, app.label))
+            .setMessage(R.string.hide_confirm_msg)
+            .setPositiveButton(R.string.hide_app) { _, _ ->
+                HiddenApps.hide(this, app.packageName)
+                NuiToast.show(this, getString(R.string.hide_done, app.label), Toast.LENGTH_SHORT)
+                loadAppsAsync()   // 重新加载，隐藏项消失
+            }
+            .setNegativeButton(R.string.back, null)
+            .show()
     }
 
     private fun applyImmersive() {

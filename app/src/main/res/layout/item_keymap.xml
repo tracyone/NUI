@@ -4,8 +4,8 @@
     android:layout_height="wrap_content"
     android:orientation="horizontal"
     android:gravity="center_vertical"
-    android:paddingTop="10dp"
-    android:paddingBottom="10dp">
+    android:paddingTop="8dp"
+    android:paddingBottom="8dp">
 
     <TextView
         android:id="@+id/tvKeyCode"
@@ -13,8 +13,10 @@
         android:layout_height="wrap_content"
         android:layout_weight="1"
         android:textColor="@color/settings_label"
-        android:textSize="17sp"
-        android:textStyle="bold" />
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:singleLine="true"
+        android:ellipsize="end" />
 
     <TextView
         android:id="@+id/tvAction"
@@ -23,28 +25,32 @@
         android:layout_weight="1"
         android:gravity="center"
         android:textColor="@color/settings_btn_text"
-        android:textSize="17sp" />
+        android:textSize="15sp"
+        android:singleLine="true"
+        android:ellipsize="end" />
 
     <Button
         android:id="@+id/btnEdit"
         android:layout_width="wrap_content"
-        android:layout_height="44dp"
+        android:layout_height="36dp"
         android:background="@drawable/bg_settings_btn"
-        android:paddingStart="20dp"
-        android:paddingEnd="20dp"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:minWidth="0dp"
         android:text="@string/edit"
         android:textColor="@color/settings_btn_text"
-        android:textSize="15sp" />
+        android:textSize="13sp" />
 
     <Button
         android:id="@+id/btnDelete"
         android:layout_width="wrap_content"
-        android:layout_height="44dp"
-        android:layout_marginStart="12dp"
+        android:layout_height="36dp"
+        android:layout_marginStart="8dp"
         android:background="@drawable/bg_settings_btn"
-        android:paddingStart="20dp"
-        android:paddingEnd="20dp"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:minWidth="0dp"
         android:text="@string/delete"
         android:textColor="@color/settings_danger"
-        android:textSize="15sp" />
+        android:textSize="13sp" />
 </LinearLayout>

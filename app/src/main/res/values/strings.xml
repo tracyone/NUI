@@ -58,4 +58,20 @@
     <string name="action_to_run">执行操作（点击选择）</string>
     <string name="save">保存</string>
     <string name="select_action">选择操作</string>
+
+    <!-- 应用管理 -->
+    <string name="apps">应用</string>
+    <string name="manage_hidden_apps">管理隐藏应用</string>
+    <string name="manage_hidden_apps_hint">长按应用列表中的应用可选择隐藏；此处可恢复已隐藏的应用</string>
+    <string name="no_hidden_apps">没有已隐藏的应用</string>
+    <string name="uninstall">卸载</string>
+    <string name="hide_app">隐藏</string>
+    <string name="restore">恢复</string>
+    <string name="uninstall_confirm_title">卸载 %1$s？</string>
+    <string name="uninstall_confirm_msg">卸载后该应用将从系统中移除，此操作不可撤销。</string>
+    <string name="hide_confirm_title">隐藏 %1$s？</string>
+    <string name="hide_confirm_msg">隐藏后该应用将不在应用列表和桌面网格中显示，可在 桌面设置 → 应用 中恢复。</string>
+    <string name="hide_done">已隐藏 %1$s</string>
+    <string name="restore_confirm_title">恢复 %1$s？</string>
+    <string name="restore_done">已恢复 %1$s</string>
 </resources>
