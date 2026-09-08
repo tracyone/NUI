@@ -143,6 +143,12 @@ class MusicHost(
     private var lastArtist: String = ""
     private var lastCover: android.graphics.Bitmap? = null
     private var lastLyricRaw: String? = null
+    /**
+     * 封面缓冲期：切歌瞬间 MediaSession metadata 常先带 title、后带封面（甚至滞后几百 ms），
+     * 若立即按"无封面"切紧凑布局，封面到达后又切回大布局，上下首之间会来回跳。
+     * 切歌后 [COVER_GRACE_MS] 内即使没有封面也维持大布局（黑胶无封面图），等封面或缓冲结束。
+     */
+    private var lastCoverSetAt = 0L
     /** 当前歌词列表：(timeMs, lyricText) 按时间升序 */
     private var lyrics: List<Pair<Long, String>> = emptyList()
     /** 当前高亮行的 index */
@@ -237,6 +243,10 @@ class MusicHost(
         currentController = controller
         lastRenderState = controller.playbackState?.state ?: PlaybackState.STATE_NONE
 
+        // 布局重建淡入淡出：大布局/紧凑布局切换（封面有无变化）不生硬跳动
+        android.transition.TransitionManager.beginDelayedTransition(
+            container, android.transition.AutoTransition().setDuration(220)
+        )
         container.removeAllViews()
         val md = controller.metadata
         val newTitle = md?.getString(MediaMetadata.METADATA_KEY_TITLE)
@@ -250,6 +260,7 @@ class MusicHost(
             lastTitle = newTitle
             newArtist?.let { lastArtist = it }
             lastCover = newArt   // 切歌时重置封面：新歌没提供就设 null，让通知兜底获取
+            lastCoverSetAt = android.os.SystemClock.elapsedRealtime()   // 记录切歌时刻，进入封面缓冲期
             lastLyricRaw = newLyricRaw   // null 也接受 —— 新歌词没拿到时先清空，杜绝跨歌复用
         } else {
             // 同首歌：只更新有值的字段（不覆盖已有封面）
@@ -276,14 +287,19 @@ class MusicHost(
         } else {
             container.background = null
         }
+        // 无封面且已过封面缓冲期（切歌后 metadata 封面可能滞后到达，缓冲期内维持大布局避免上下首之间来回跳）：
+        // 缩小播放界面，只显示歌名 + 歌手 + 播放/上一首/下一首按钮
+        val inCoverGrace = android.os.SystemClock.elapsedRealtime() - lastCoverSetAt < COVER_GRACE_MS
+        if (art == null && !inCoverGrace) {
+            renderCompactNoCover(title, artist, controller, playing = isPlaying(controller.playbackState), p)
+            return
+        }
         val col = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding(dp(12), dp(14), dp(12), dp(14))
             // 有封面时加半透明遮罩保证文字清晰，无封面时用默认背景色
-            if (art != null) {
-                setBackgroundColor(0x99000000.toInt())
-            }
+            setBackgroundColor(0x99000000.toInt())
         }
         // 有封面背景时文字用白色，无封面时用主题色
         val titleColor = if (art != null) 0xFFFFFFFF.toInt() else p.textPrimary
@@ -453,6 +469,78 @@ class MusicHost(
             handler.post(lyricTick)
         }
         // 重建后立即同步一次当前歌词行（不等下一次 tick，避免先闪 ♪/暂无歌词）
+        refreshLyric()
+    }
+
+    /** 无封面时的紧凑播放界面：只显示歌名 + 歌手 + 播放/上一首/下一首按钮（不显示唱碟/歌词） */
+    private fun renderCompactNoCover(
+        title: String, artist: String, controller: MediaController, playing: Boolean,
+        p: UiTheme.Palette,
+    ) {
+        val col = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(12), dp(18), dp(12), dp(18))
+        }
+        // 歌名
+        col.addView(TextView(context).apply {
+            text = title; setTextColor(p.textPrimary); textSize = 15f
+            maxLines = 1; ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER
+        })
+        // 歌手
+        col.addView(TextView(context).apply {
+            text = artist; setTextColor(p.textSecondary); textSize = 12f
+            maxLines = 1; ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER
+        }, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = dp(2) })
+
+        // 控制行：上一首 / 播放暂停 / 下一首
+        val row = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        row.addView(ctrlBtn(android.R.drawable.ic_media_previous, p.textPrimary) {
+            safe { controller.transportControls.skipToPrevious() }
+        }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        row.addView(ctrlBtn(
+            if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
+            p.textPrimary,
+        ) {
+            safe {
+                if (isPlaying(controller.playbackState)) {
+                    controller.transportControls.pause()
+                } else if (primedPackage != controller.packageName) {
+                    primeAndPlay(controller)   // 首次播放该应用：先预热（与唱碟点击一致）
+                } else {
+                    controller.transportControls.play()
+                }
+            }
+        }, LinearLayout.LayoutParams(dp(48), dp(48)))
+        row.addView(ctrlBtn(android.R.drawable.ic_media_next, p.textPrimary) {
+            safe { controller.transportControls.skipToNext() }
+        }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        col.addView(row, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = dp(6) })
+
+        container.addView(col)
+        // 单击：启动当前绑定的音乐 App；长按：弹"选择音乐 App"对话框（与大布局一致）
+        col.setOnClickListener { launchPreferredApp() }
+        col.setOnLongClickListener {
+            pickPreferredApp(onPickedLaunch = true)
+            true
+        }
+
+        // 公共尾部：歌词悬浮 tag + 持久歌词循环（悬浮歌词独立于本 view 工作）
+        val lyricLines = arrayOfNulls<TextView>(2)
+        val lyricView = TextView(context)
+        container.setTag(R.id.tag_lyric_view, lyricView)
+        container.setTag(R.id.tag_lyric_lines, lyricLines)
+        if (!lyricTickRunning) {
+            lyricTickRunning = true
+            handler.post(lyricTick)
+        }
         refreshLyric()
     }
 
@@ -953,6 +1041,8 @@ class MusicHost(
         private const val PREFS = "nui_music"
         private const val KEY_APP = "music_app"
         private const val KEY_LYRIC_BG_ALPHA = "lyric_bg_alpha"
+        /** 切歌后封面缓冲期：metadata 封面滞后到达时，缓冲期内维持大布局避免上下首之间来回跳 */
+        private const val COVER_GRACE_MS = 2500L
         /** 已预热过的音乐应用包名（首次播放前启动一次，确保进程在运行、metadata/歌词可用） */
         private var primedPackage: String? = null
         const val DEFAULT_LYRIC_BG_ALPHA = 20
