@@ -163,6 +163,107 @@
                     android:maxLines="1"
                     android:ellipsize="end" />
             </LinearLayout>
+
+            <!-- 导航信息覆盖层：高德导航中替换"回家/公司/收藏"三按钮，
+                 参照 CarPlay 右上角转向卡：转向图标 + 大字距离 + 道路名 + 小字时间/速度 -->
+            <LinearLayout
+                android:id="@+id/navInfoOverlay"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:visibility="gone">
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center">
+
+                    <ImageView
+                        android:id="@+id/navInfoTurn"
+                        android:layout_width="44dp"
+                        android:layout_height="44dp"
+                        android:scaleType="centerInside"
+                        android:contentDescription="转向" />
+
+                    <TextView
+                        android:id="@+id/navInfoDist"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="6dp"
+                        android:text="2.1公里"
+                        android:textSize="22sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/text_primary"
+                        android:maxLines="1"
+                        android:ellipsize="end" />
+                </LinearLayout>
+
+                <!-- 车道线：13012 广播 drive_way_info 动态渲染 -->
+                <LinearLayout
+                    android:id="@+id/navInfoLanes"
+                    android:layout_width="wrap_content"
+                    android:layout_height="44dp"
+                    android:orientation="horizontal"
+                    android:gravity="center"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/navInfoTime"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="进入宝石路"
+                    android:textSize="14sp"
+                    android:textColor="@color/text_primary"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+
+                <TextView
+                    android:id="@+id/navInfoSpeed"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="1dp"
+                    android:text="37分钟 · 65km/h · 限速80"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_secondary"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+
+                <!-- 服务区：仅高速公路（ROAD_TYPE=0）显示；深绿指示牌风格（参考高德，无配套图标） -->
+                <TextView
+                    android:id="@+id/navInfoSapa"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:background="@drawable/bg_sapa_board"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="14dp"
+                    android:paddingTop="5dp"
+                    android:paddingBottom="5dp"
+                    android:text="原阳服务区 · 8公里"
+                    android:textSize="15sp"
+                    android:textStyle="bold"
+                    android:textColor="#FFFFFF"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:visibility="gone" />
+
+                <!-- 服务区小行：前方服务区个数（协议无第二个服务区名称/距离，用 SAPA_NUM 提示） -->
+                <TextView
+                    android:id="@+id/navInfoSapaMore"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="前方共 2 个服务区"
+                    android:textSize="11sp"
+                    android:textColor="@color/text_secondary"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:visibility="gone" />
+            </LinearLayout>
         </LinearLayout>
 
         <!-- 时钟 -->

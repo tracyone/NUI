@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 高速服务区指示牌：深绿牌面（参考高德车机服务区预告牌） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <solid android:color="#0B7A3B" />
+    <corners android:radius="4dp" />
+</shape>

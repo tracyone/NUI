@@ -119,6 +119,15 @@ class SettingsActivity : AppCompatActivity() {
         panelAbout = findViewById(R.id.panelAbout)
         edMapLaunch = findViewById(R.id.edMapLaunch)
         edMapReturn = findViewById(R.id.edMapReturn)
+        findViewById<View>(R.id.optRestart).setOnClickListener { restartDesktop() }
+        // 左侧菜单可滚动时底部渐隐提示（DPI 大时"应用/关于"在屏外，提示用户下滑）
+        findViewById<android.widget.ScrollView>(R.id.leftMenuScroll).setOnScrollChangeListener { _, _, _, _, _ ->
+            updateLeftMenuFade()
+        }
+        // 右侧面板可滚动时底部渐隐提示（外观/方向盘等设置多时超出可视区）
+        findViewById<android.widget.ScrollView>(R.id.rightPanelScroll).setOnScrollChangeListener { _, _, _, _, _ ->
+            updateRightPanelFade()
+        }
         checkSystem = findViewById(R.id.checkSystem)
         checkDark = findViewById(R.id.checkDark)
         checkLight = findViewById(R.id.checkLight)
@@ -380,6 +389,42 @@ class SettingsActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.tvAboutVersion).text = ver
     }
 
+    /** 左侧菜单底部渐隐：内容超出可视区（可向下滚动）时显示，提示还有更多分类 */
+    private fun updateLeftMenuFade() {
+        val scroll = findViewById<android.widget.ScrollView>(R.id.leftMenuScroll) ?: return
+        val fade = findViewById<View>(R.id.leftMenuFade) ?: return
+        val p = UiTheme.settingsPalette(UiTheme.isDark(this))
+        fade.background = GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0x00000000, p.bg)
+        )
+        findViewById<TextView>(R.id.leftMenuFadeArrow)?.setTextColor(p.label)
+        scroll.post {
+            fade.visibility = if (scroll.canScrollVertically(1)) View.VISIBLE else View.GONE
+        }
+    }
+
+    /** 右侧面板底部渐隐+箭头：内容超出可视区（可向下滚动）时显示 */
+    private fun updateRightPanelFade() {
+        val scroll = findViewById<android.widget.ScrollView>(R.id.rightPanelScroll) ?: return
+        val fade = findViewById<View>(R.id.rightPanelFade) ?: return
+        val p = UiTheme.settingsPalette(UiTheme.isDark(this))
+        fade.background = GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0x00000000, p.bg)
+        )
+        findViewById<TextView>(R.id.rightPanelFadeArrow)?.setTextColor(p.label)
+        scroll.post {
+            fade.visibility = if (scroll.canScrollVertically(1)) View.VISIBLE else View.GONE
+        }
+    }
+
+    /** 重启 NUI 桌面：清任务栈重新拉起进程 */
+    private fun restartDesktop() {
+        val i = packageManager.getLaunchIntentForPackage(packageName)
+        i?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        if (i != null) startActivity(i)
+        android.os.Process.killProcess(android.os.Process.myPid())
+    }
+
     /** 读取地图延迟配置填充输入框 */
     private fun renderMap() {
         edMapLaunch.setText(UiTheme.mapLaunchDelaySec(this).toString())
@@ -443,11 +488,20 @@ class SettingsActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.tvMapHint).setTextColor(p.value)
         edMapLaunch.setTextColor(p.label)
         edMapReturn.setTextColor(p.label)
+        // 输入框背景跟随深浅色（浅色=浅灰底深字，深色=深灰底白字，否则深色下看不清）
+        val editBg = GradientDrawable().apply {
+            setColor(p.btnBg); cornerRadius = 8 * dp
+        }
+        edMapLaunch.background = editBg
+        edMapReturn.background = editBg
         // 关于
         findViewById<TextView>(R.id.groupTitleAbout).setTextColor(p.value)
         findViewById<View>(R.id.dividerAbout).setBackgroundColor(p.divider)
         findViewById<TextView>(R.id.tvAboutAuthor).setTextColor(p.value)
         findViewById<TextView>(R.id.tvAboutVersion).setTextColor(p.value)
+        findViewById<TextView>(R.id.tvOptRestart).setTextColor(p.label)
+        updateLeftMenuFade()
+        updateRightPanelFade()
         // 应用
         findViewById<TextView>(R.id.groupTitleApps).setTextColor(p.value)
         findViewById<View>(R.id.dividerApps).setBackgroundColor(p.divider)

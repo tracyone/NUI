@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 推荐车道高亮边框：13012 广播 trafficLaneAdvised=true 时给该车道图标描边 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <corners android:radius="6dp" />
+    <stroke
+        android:width="2dp"
+        android:color="#FFFFFFFF" />
+</shape>

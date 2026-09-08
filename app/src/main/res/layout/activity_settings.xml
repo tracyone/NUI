@@ -7,17 +7,22 @@
     android:background="@color/settings_bg"
     android:padding="24dp">
 
-    <!-- 左侧：设置分类（包 ScrollView，低密度/矮屏车机上可滚动，避免底部"应用/关于"入口被截断） -->
-    <ScrollView
+    <!-- 左侧：设置分类（包 ScrollView，低密度/矮屏车机上可滚动；内容超出时底部渐隐提示"还有更多"） -->
+    <FrameLayout
         android:layout_width="240dp"
-        android:layout_height="match_parent"
-        android:scrollbars="none"
-        android:fillViewport="true">
+        android:layout_height="match_parent">
 
-        <LinearLayout
+        <ScrollView
+            android:id="@+id/leftMenuScroll"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical">
+            android:layout_height="match_parent"
+            android:scrollbars="none"
+            android:fillViewport="true">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -142,18 +147,50 @@
             android:layout_height="0dp"
             android:layout_weight="1" />
         </LinearLayout>
-    </ScrollView>
+        </ScrollView>
 
-    <!-- 右侧：详细设置 -->
-    <LinearLayout
-        android:id="@+id/contentCard"
+        <!-- 底部渐隐+箭头：左侧菜单还有更多分类可滚动时显示，提示用户下滑 -->
+        <LinearLayout
+            android:id="@+id/leftMenuFade"
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:layout_gravity="bottom"
+            android:orientation="vertical"
+            android:gravity="bottom|center_horizontal"
+            android:paddingBottom="4dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/leftMenuFadeArrow"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="▼"
+                android:textSize="14sp"
+                android:alpha="0.85" />
+        </LinearLayout>
+    </FrameLayout>
+
+    <!-- 右侧：详细设置（包 ScrollView，内容超出可滚动，底部渐隐+箭头提示） -->
+    <FrameLayout
         android:layout_width="0dp"
         android:layout_height="match_parent"
         android:layout_weight="1"
-        android:layout_marginStart="24dp"
-        android:orientation="vertical"
-        android:background="@drawable/bg_settings_card"
-        android:padding="24dp">
+        android:layout_marginStart="24dp">
+
+        <ScrollView
+            android:id="@+id/rightPanelScroll"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scrollbars="none"
+            android:fillViewport="true">
+
+            <LinearLayout
+                android:id="@+id/contentCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@drawable/bg_settings_card"
+                android:padding="24dp">
 
         <!-- 音乐详情 -->
         <LinearLayout
@@ -1140,6 +1177,38 @@
                 android:layout_marginBottom="20dp"
                 android:background="@color/settings_divider" />
 
+            <!-- 重启桌面（放最前，DPI 大时打开关于面板第一眼可见） -->
+            <LinearLayout
+                android:id="@+id/optRestart"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
+
+                <TextView
+                    android:id="@+id/tvOptRestart"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/restart_desktop"
+                    android:textColor="@color/settings_label"
+                    android:textSize="17sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/restart_desktop_hint"
+                    android:textColor="@color/settings_value"
+                    android:textSize="14sp" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/settings_divider" />
+
             <!-- 作者 -->
             <LinearLayout
                 android:layout_width="match_parent"
@@ -1196,6 +1265,28 @@
                     android:textColor="@color/settings_value"
                     android:textSize="17sp" />
             </LinearLayout>
+            </LinearLayout>
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- 底部渐隐+箭头：右侧面板还有更多内容可滚动时显示 -->
+        <LinearLayout
+            android:id="@+id/rightPanelFade"
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:layout_gravity="bottom"
+            android:orientation="vertical"
+            android:gravity="bottom|center_horizontal"
+            android:paddingBottom="4dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/rightPanelFadeArrow"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="▼"
+                android:textSize="14sp"
+                android:alpha="0.85" />
         </LinearLayout>
-    </LinearLayout>
+    </FrameLayout>
 </LinearLayout>

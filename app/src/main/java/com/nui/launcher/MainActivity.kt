@@ -96,6 +96,8 @@ class MainActivity : AppCompatActivity() {
     private var desktopBtnNavHome: View? = null
     private var desktopBtnNavCompany: View? = null
     private var desktopBtnNavFavorite: View? = null
+    private var desktopNavInfoOverlay: View? = null
+    private var navInfoHost: com.nui.launcher.nav.NavInfoHost? = null
     private var page0Ready = false
     private var appGridLoaded = false
     /** 从系统卸载页返回后需重载应用网格 */
@@ -143,6 +145,7 @@ class MainActivity : AppCompatActivity() {
         desktopBtnNavHome = v.findViewById(R.id.btnNavHome)
         desktopBtnNavCompany = v.findViewById(R.id.btnNavCompany)
         desktopBtnNavFavorite = v.findViewById(R.id.btnNavFavorite)
+        desktopNavInfoOverlay = v.findViewById(R.id.navInfoOverlay)
         weatherText = v.findViewById(R.id.weatherText)
         weatherText?.setOnClickListener { startActivity(Intent(this, WeatherActivity::class.java)) }
         if (!page0Ready) {
@@ -199,7 +202,10 @@ class MainActivity : AppCompatActivity() {
         weatherFetcher = WeatherFetcher(this)
         weatherFetcher.onWeatherReady = { info ->
             weatherText?.text = "${info.city}  ${info.icon}  ${info.temperature.toInt()}°  ${info.description}"
-            weatherText?.visibility = android.view.View.VISIBLE
+            // 导航中天气区域让位给导航卡：天气文字不显示，导航结束由 NavInfoHost 恢复
+            if (navInfoHost?.isNavActive() != true) {
+                weatherText?.visibility = android.view.View.VISIBLE
+            }
             if (::weatherLayer.isInitialized) {
                 weatherLayer.effect = WeatherSurfaceView.effectFor(info.weatherCode)
                 weatherLayer.isDay = info.isDay == 1
@@ -395,6 +401,9 @@ class MainActivity : AppCompatActivity() {
         android.util.Log.d("NUI.Main", "onResume page=${binding.viewPager.currentItem} launchedExternal=$launchedExternalApp")
         if (::weatherFetcher.isInitialized) weatherFetcher.start()
         applyTheme()
+        // 回到前台时主动向高德查询导航状态，校准导航卡显示（防止被动广播错过）
+        navInfoHost?.queryNavState()
+        navInfoHost?.queryDayNight()
         // 设置页可能改了 Dock 形态/图标比例，返回时刷新
         applyDockStyle()
         renderDock()
@@ -451,6 +460,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         unregisterReceiver(amapDayNightReceiver)
         if (::trafficLightMonitor.isInitialized) trafficLightMonitor.stop()
+        navInfoHost?.stop()
         if (::weatherVoice.isInitialized) weatherVoice.shutdown()
         if (::weatherLayer.isInitialized) weatherLayer.removeCallbacks(weatherLayerFadeRunnable)
         if (::mapHost.isInitialized) mapHost.onDestroy()
@@ -490,6 +500,7 @@ class MainActivity : AppCompatActivity() {
         renderDock()
         if (::wallpaper.isInitialized) wallpaper.applyForAppearance(UiTheme.isDark(this))
         if (::musicHost.isInitialized) musicHost.refresh()
+        navInfoHost?.applyTheme()
     }
 
     private fun applyTheme(dark: Boolean) {
@@ -778,6 +789,13 @@ class MainActivity : AppCompatActivity() {
         navHost.onHideFloat = { mapHost.closeFloat() }
         navHost.onShowFloat = { mapHost.showFloat() }
         navHost.start()
+        // 导航信息显示：导航中右上角按钮区切换为导航卡（转向/距离/时间/道路/速度）
+        navInfoHost = com.nui.launcher.nav.NavInfoHost(
+            this,
+            desktopNavInfoOverlay!!,
+            listOf(desktopBtnNavHome!!, desktopBtnNavCompany!!, desktopBtnNavFavorite!!),
+        )
+        navInfoHost?.start()
         // 收藏夹按钮：打开高德地图收藏夹
         desktopBtnNavFavorite?.setOnClickListener {
             try {
