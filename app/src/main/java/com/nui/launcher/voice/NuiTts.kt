@@ -11,6 +11,7 @@ import android.util.Log
 import android.widget.Toast
 import com.k2fsa.sherpa.onnx.GeneratedAudio
 import com.k2fsa.sherpa.onnx.OfflineTts
+import com.k2fsa.sherpa.onnx.OfflineTtsCallback
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
@@ -87,6 +88,13 @@ private object NuiTtsCore {
     private var loadedSpec: VoiceSpec? = null
     private var failNotified = false
 
+    /** 已加载过的引擎按音色缓存，切换后不释放：第二次切换同一音色立即出声，无需重新加载模型 */
+    private val engineCache = HashMap<String, OfflineTts>()
+
+    /** 打断标志：置 true 后正在合成的播报在下一段回调处提前停止（新播报/切换优先）。 */
+    @Volatile
+    private var generationCancelled = false
+
     @Volatile
     private var currentTrack: AudioTrack? = null
 
@@ -100,6 +108,10 @@ private object NuiTtsCore {
     }
 
     fun speak(text: String) {
+        // 新播报优先：打断正在合成的旧播报，避免长播报占线导致后续播报排队等十几秒。
+        // 注意：requestInterrupt 置位后，本任务不再检查 flag（flag 由 speakNow 重置），
+        // 排队期间被更新的播报打断由"track.stop + 回调见 flag 提前结束"保证。
+        requestInterrupt()
         handler.post {
             if (tts == null && !initEngine()) return@post
             speakNow(text)
@@ -113,20 +125,37 @@ private object NuiTtsCore {
         }
     }
 
-    fun stop() {
-        handler.removeCallbacksAndMessages(null)
-        runCatching { currentTrack?.pause() }
+    /** 打断当前播报（UI 线程可调用）：置标志 + 停 AudioTrack。
+     *  正在 write 的线程会因 track.stop() 立即返回，合成回调见标志后提前停止，
+     *  worker 队列即可继续执行后续任务。 */
+    fun requestInterrupt() {
+        generationCancelled = true
+        runCatching { currentTrack?.stop() }
         runCatching { currentTrack?.flush() }
     }
 
-    /** 切换音色：立即停止、释放旧引擎、加载新引擎并用新音色自我介绍。
-     *  为减少车机低性能下加载模型的等待感知，切换瞬间先用当前引擎出声
-     *  （"正在切换语音"），新引擎就绪后再播报"主人好，我是xx"。 */
+    fun stop() {
+        requestInterrupt()
+        handler.removeCallbacksAndMessages(null)
+        currentTrack = null
+    }
+
+    /** 切换音色：目标音色已加载过则立即切换并播报；否则先出声反馈，
+     *  加载完成后缓存（不释放旧引擎），下次切换同音色秒切。 */
     fun switchVoice(gender: String) {
+        // 切换优先：先打断正在播的旧播报，再排队切换
+        requestInterrupt()
         handler.post {
             val target = specFor(gender)
             // 已是目标音色：直接播报，无需重载
             if (loadedSpec?.dir == target.dir && tts != null) {
+                speakNow("主人好，我是${target.selfName}")
+                return@post
+            }
+            // 目标音色已缓存：立即切换出声
+            engineCache[target.dir]?.let { cached ->
+                tts = cached
+                loadedSpec = target
                 speakNow("主人好，我是${target.selfName}")
                 return@post
             }
@@ -135,12 +164,7 @@ private object NuiTtsCore {
                 runCatching { speakNow("正在切换语音") }
             }
             stopPlayback()
-            if (loadedSpec != null && loadedSpec!!.dir != target.dir) {
-                runCatching { tts?.release() }
-                tts = null
-                loadedSpec = null
-            }
-            if (tts == null && !initEngine()) return@post
+            if (!loadEngine(target)) return@post
             Log.i(TAG, "音色已切换：${target.dir}")
             speakNow("主人好，我是${target.selfName}")
         }
@@ -148,22 +172,39 @@ private object NuiTtsCore {
 
     // ---------- 后台线程执行 ----------
 
+    /** 加载（或复用缓存）指定音色引擎 */
+    private fun loadEngine(spec: VoiceSpec): Boolean {
+        engineCache[spec.dir]?.let {
+            tts = it
+            loadedSpec = spec
+            return true
+        }
+        if (!initEngineFor(spec)) return false
+        engineCache[spec.dir] = tts!!
+        loadedSpec = spec
+        return true
+    }
+
     /** 首次使用时初始化引擎；失败时提示一次 */
     private fun initEngine(): Boolean {
+        val spec = specFor(NuiTts.voiceGender(appContext))
+        return loadEngine(spec)
+    }
+
+    private fun initEngineFor(spec: VoiceSpec): Boolean {
         return try {
-            val spec = specFor(NuiTts.voiceGender(appContext))
             val dir = extractModel(spec.dir)
             val vits = OfflineTtsVitsModelConfig.builder()
                 .setModel(File(dir, spec.modelFile).absolutePath)
                 .setTokens(File(dir, TOKENS_FILE).absolutePath)
                 .setLexicon(File(dir, LEXICON_FILE).absolutePath)
-                .setLengthScale(1.0f)
+                .setLengthScale(0.85f)
                 .setNoiseScale(0.667f)
                 .setNoiseScaleW(0.8f)
                 .build()
             val model = OfflineTtsModelConfig.builder()
                 .setVits(vits)
-                .setNumThreads(2)
+                .setNumThreads(4)
                 .setDebug(false)
                 .setProvider("cpu")
                 .build()
@@ -173,7 +214,6 @@ private object NuiTtsCore {
                 .setMaxNumSentences(1)
                 .build()
             tts = OfflineTts(config)
-            loadedSpec = spec
             Log.i(TAG, "sherpa-onnx 引擎就绪：${spec.dir} (${tts!!.sampleRate} Hz)")
             true
         } catch (t: Throwable) {
@@ -212,24 +252,8 @@ private object NuiTtsCore {
     private fun speakNow(text: String) {
         stopPlayback()
         val engine = tts ?: return
-        val audio: GeneratedAudio = try {
-            engine.generate(text)
-        } catch (t: Throwable) {
-            Log.w(TAG, "语音合成失败: ${t.message}")
-            return
-        }
-        play(audio)
-    }
-
-    private fun stopPlayback() {
-        runCatching { currentTrack?.pause() }
-        runCatching { currentTrack?.flush() }
-        currentTrack = null
-    }
-
-    private fun play(audio: GeneratedAudio) {
-        val sr = audio.sampleRate
-        if (sr <= 0 || audio.samples.isEmpty()) return
+        val sr = engine.sampleRate
+        if (sr <= 0) return
         val minBuf = AudioTrack.getMinBufferSize(
             sr, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_FLOAT
         )
@@ -245,15 +269,42 @@ private object NuiTtsCore {
             return
         }
         currentTrack = track
+        generationCancelled = false
         try {
             track.play()
-            track.write(audio.samples, 0, audio.samples.size, AudioTrack.WRITE_BLOCKING)
+            // 首段音频开始写入 = 出声时刻（测试打点：T1/T2 的端点）
+            Log.i(TAG, "audio_start")
+            // 流式合成：回调按段返回音频，边生成边写入 AudioTrack 播放，
+            // 首段完成后立即出声，无需等整段文本全部合成完
+            engine.generateWithCallback(text, OfflineTtsCallback { samples ->
+                if (generationCancelled) {
+                    0 // 被打断：停止合成
+                } else if (samples.isNotEmpty()) {
+                    val n = track.write(samples, 0, samples.size, AudioTrack.WRITE_BLOCKING)
+                    if (n < 0) {
+                        generationCancelled = true
+                        0
+                    } else {
+                        1
+                    }
+                } else {
+                    1
+                }
+            })
+            // 全部音频写完并播放完（测试打点：一段播报的结束时刻）
+            Log.i(TAG, "audio_end")
         } catch (t: Throwable) {
             Log.w(TAG, "播放失败: ${t.message}")
         }
         runCatching { track.stop() }
         runCatching { track.release() }
         if (currentTrack === track) currentTrack = null
+    }
+
+    private fun stopPlayback() {
+        runCatching { currentTrack?.pause() }
+        runCatching { currentTrack?.flush() }
+        currentTrack = null
     }
 
     private fun notifyFail() {
