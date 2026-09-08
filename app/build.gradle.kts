@@ -12,24 +12,24 @@ android {
         applicationId = "com.nui.launcher"
         minSdk = 21
         targetSdk = 34
-        versionCode = 15
-        versionName = "0.0.15"
+        versionCode = 16
+        versionName = "0.0.16"
         // ABI 由 productFlavors 拆分（arm32 / arm64），见下
     }
 
-    // 按架构拆包：
-    //   arm32 : armeabi-v7a（ARM 32 位车机）+ x86（32 位 x86 模拟器/BlueStacks）——debug 用
-    //   arm64 : arm64-v8a（64 位车机/模拟器）+ x86_64（64 位 x86 模拟器）
-    // release 变体通过 buildTypes.release 的 packaging 排除模拟器 x86 库，只保留真机 ARM 库以减小体积
+    // 按架构拆包（AGP 9 下 abiFilters/packaging excludes 行为已变，改用源集控制原生库）：
+    //   arm32/      : armeabi-v7a（ARM 32 位车机）
+    //   arm64/      : arm64-v8a（64 位车机）
+    //   arm32Debug/ : x86（32 位 x86 模拟器，仅 debug 打包）
+    //   arm64Debug/ : x86_64（64 位 x86 模拟器，仅 debug 打包）
+    // 真机 ARM 库放 flavor 源集、模拟器库放 buildType 源集，release 天然只含真机库。
     flavorDimensions += "arch"
     productFlavors {
         create("arm32") {
             dimension = "arch"
-            ndk { abiFilters += listOf("armeabi-v7a", "x86") }
         }
         create("arm64") {
             dimension = "arch"
-            ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
         }
     }
 
@@ -40,12 +40,6 @@ android {
             isShrinkResources = true
             // 临时用 debug 签名，保证 release 包可直接安装测试；正式发布时换成正式签名即可
             signingConfig = signingConfigs.getByName("debug")
-            // release 只留真机 ARM 库，去掉模拟器 x86/x86_64 库（debug 包保留，供模拟器测试）
-            packaging {
-                jniLibs {
-                    excludes += listOf("lib/x86/**", "lib/x86_64/**")
-                }
-            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

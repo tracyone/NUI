@@ -20,6 +20,33 @@ object UiTheme {
     private const val KEY_SHOW_STATUS_BAR = "show_status_bar"
     private const val KEY_MAP_LAUNCH_DELAY_SEC = "map_launch_delay_sec"
     private const val KEY_MAP_RETURN_DELAY_SEC = "map_return_delay_sec"
+    private const val KEY_UI_DPI = "ui_dpi"
+
+    /** 界面 DPI（应用内覆盖，0=跟随系统）。车机 ROM 常报 240dpi 导致 NUI 界面文字偏大/放不下，
+     *  通过降低 dpi 让所有 dp/sp 按更小比例渲染，等效"显示缩放"，从根本上解决文字过大。 */
+    fun uiDpi(ctx: Context): Int =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_UI_DPI, 0)
+
+    fun setUiDpi(ctx: Context, dpi: Int) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putInt(KEY_UI_DPI, dpi.coerceIn(0, 360)).apply()
+    }
+
+    /**
+     * 应用内界面 DPI 覆盖（等效"显示缩放"）。在 Activity.attachBaseContext 中调用：
+     * override fun attachBaseContext(base: Context) {
+     *     super.attachBaseContext(UiTheme.overrideUiDpi(base))
+     * }
+     * dpi<=0（跟随系统）时原样返回 base。
+     */
+    fun overrideUiDpi(base: Context): Context {
+        val dpi = base.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getInt(KEY_UI_DPI, 0)
+        if (dpi <= 0) return base
+        val config = Configuration(base.resources.configuration)
+        config.densityDpi = dpi
+        return base.createConfigurationContext(config)
+    }
 
     /**
      * 是否显示系统 Dock（底部导航栏，即"原桌面"的系统级 Dock 栏）。

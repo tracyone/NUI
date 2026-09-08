@@ -1,5 +1,6 @@
 package com.nui.launcher
 
+import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.content.res.Configuration
@@ -37,6 +38,10 @@ import com.nui.launcher.nav.NavHost
 import com.nui.launcher.UiTheme
 
 class MainActivity : AppCompatActivity() {
+
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(UiTheme.overrideUiDpi(base))
+    }
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var mapHost: MapHost
@@ -174,7 +179,9 @@ class MainActivity : AppCompatActivity() {
             override fun onPageSelected(position: Int) {
                 updatePageIndicator(position)
                 if (::mapHost.isInitialized) {
-                    if (position == 0) mapHost.showFloat() else mapHost.closeFloat()
+                    // 回桌面页时重新取几何并刷新浮窗（设置页切换系统 Dock 开关时地图卡片离屏，
+                    // 几何可能未更新；回来时强制 primeCache + showFloat 用最新几何下发）
+                    if (position == 0) mapHost.refreshFloat() else mapHost.closeFloat()
                 }
                 syncWeatherLayer(position)
             }
@@ -1010,6 +1017,18 @@ class MainActivity : AppCompatActivity() {
         }
         window.decorView.systemUiVisibility = vis
 
+        // 悬浮地图底部限制：按当前配置主动计算并下发（不依赖 insets 回调时序），
+        // 修复切换系统 Dock 显隐后高德浮窗底边不恢复/不避让的问题
+        if (::mapHost.isInitialized) {
+            if (showDock) {
+                val sh = resources.displayMetrics.heightPixels
+                val navH = getNavBarHeight()
+                mapHost.setBottomLimit(sh - navH - (8 * resources.displayMetrics.density).toInt())
+            } else {
+                mapHost.setBottomLimit(0)
+            }
+        }
+
         // 系统栏显示时显式让位：按状态栏/导航栏 inset 给根布局加 padding，
         // 使左侧 dock、页面、天气层等各窗口动态缩小上移，不遮挡系统 Dock。
         binding.root.setOnApplyWindowInsetsListener { v, insets ->
@@ -1033,6 +1052,12 @@ class MainActivity : AppCompatActivity() {
         if (::mapHost.isInitialized) {
             mapHost.refreshFloat()
         }
+    }
+
+    /** 系统导航栏高度（px，含手势条场景尽量取系统上报值）；获取失败返回 0 */
+    private fun getNavBarHeight(): Int {
+        val id = resources.getIdentifier("navigation_bar_height", "dimen", "android")
+        return if (id > 0) resources.getDimensionPixelSize(id) else 0
     }
 
     /** 重新获得焦点时重设系统栏标志（部分设备焦点变化后会恢复系统栏） */

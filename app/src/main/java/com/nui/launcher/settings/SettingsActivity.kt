@@ -2,6 +2,7 @@ package com.nui.launcher.settings
 
 import android.app.AlertDialog
 import android.app.Dialog
+import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.content.res.Configuration
@@ -28,6 +29,10 @@ import com.nui.launcher.voice.NuiTts
 
 /** 桌面设置：左侧分类（音乐 / 方向盘 / 外观）+ 右侧详情（iOS 风格） */
 class SettingsActivity : AppCompatActivity() {
+
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(UiTheme.overrideUiDpi(base))
+    }
 
     private lateinit var recordList: LinearLayout
     // 缓存 view 引用，避免回调中重复 findViewById（拖动滑块时可能返回 null）
@@ -70,6 +75,8 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var tvDockIconTitle: TextView
     private lateinit var seekDockIcon: SeekBar
     private lateinit var tvDockIconValue: TextView
+    private lateinit var seekUiDpi: SeekBar
+    private lateinit var tvUiDpiValue: TextView
     private lateinit var seekAppIcon: SeekBar
     private lateinit var tvAppIconValue: TextView
     private lateinit var tvAppIconTitle: TextView
@@ -132,6 +139,8 @@ class SettingsActivity : AppCompatActivity() {
         tvDockIconTitle = findViewById(R.id.tvDockIconTitle)
         seekDockIcon = findViewById(R.id.seekDockIcon)
         tvDockIconValue = findViewById(R.id.tvDockIconValue)
+        seekUiDpi = findViewById(R.id.seekUiDpi)
+        tvUiDpiValue = findViewById(R.id.tvUiDpiValue)
         seekAppIcon = findViewById(R.id.seekAppIcon)
         tvAppIconValue = findViewById(R.id.tvAppIconValue)
         tvAppIconTitle = findViewById(R.id.tvAppIconTitle)
@@ -205,11 +214,13 @@ class SettingsActivity : AppCompatActivity() {
         }
         // 语音：女声 / 男声（通用离线语音服务，零下载）
         findViewById<View>(R.id.optVoiceFemale).setOnClickListener {
+            android.util.Log.i("NuiTts", "switch_click gender=female")
             NuiTts.setVoiceGender(this, NuiTts.VOICE_FEMALE)
             NuiTts(this).switchVoice(NuiTts.VOICE_FEMALE)
             renderVoice()
         }
         findViewById<View>(R.id.optVoiceMale).setOnClickListener {
+            android.util.Log.i("NuiTts", "switch_click gender=male")
             NuiTts.setVoiceGender(this, NuiTts.VOICE_MALE)
             NuiTts(this).switchVoice(NuiTts.VOICE_MALE)
             renderVoice()
@@ -249,6 +260,28 @@ class SettingsActivity : AppCompatActivity() {
                         val scale = 0.6f + progress / 80f * 0.8f
                         UiTheme.setAppIconScale(this@SettingsActivity, scale)
                         tvAppIconValue.text = "${(scale * 100).toInt()}%"
+                    }
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
+        }
+        // 界面 DPI：0=跟随系统；1~200 映射 160~359。改动写入后提示重启生效
+        fun updateUiDpiLabel(dpi: Int) {
+            tvUiDpiValue.text = if (dpi <= 0) getString(R.string.ui_dpi_follow_system) else "$dpi dpi"
+        }
+        updateUiDpiLabel(UiTheme.uiDpi(this))
+        seekUiDpi.apply {
+            max = 200
+            progress = UiTheme.uiDpi(this@SettingsActivity).let { if (it <= 0) 0 else it - 159 }
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    if (!fromUser) return
+                    val dpi = if (progress <= 0) 0 else progress + 159
+                    UiTheme.setUiDpi(this@SettingsActivity, dpi)
+                    updateUiDpiLabel(dpi)
+                    if (dpi > 0) {
+                        com.nui.launcher.NuiToast.show(this@SettingsActivity, "重启桌面后生效", Toast.LENGTH_SHORT)
                     }
                 }
                 override fun onStartTrackingTouch(seekBar: SeekBar?) {}
@@ -440,6 +473,8 @@ class SettingsActivity : AppCompatActivity() {
         seekDockIcon.thumbTintList = ColorStateList.valueOf(p.accent)
         seekAppIcon.progressTintList = ColorStateList.valueOf(p.accent)
         seekAppIcon.thumbTintList = ColorStateList.valueOf(p.accent)
+        seekUiDpi.progressTintList = ColorStateList.valueOf(p.accent)
+        seekUiDpi.thumbTintList = ColorStateList.valueOf(p.accent)
         findViewById<Button>(R.id.btnAdd).background = RippleDrawable(
             ColorStateList.valueOf(p.ripple), null,
             GradientDrawable().apply { setColor(p.accent); cornerRadius = 12 * dp },

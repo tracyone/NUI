@@ -39,6 +39,9 @@
     <string name="system_dock_hint">顶部状态栏与底部系统 Dock 独立控制；开启后显示原桌面系统 Dock（如空调等快捷控制），NUI 各窗口自动让位；若原桌面 Dock 为应用私有视图则此开关不生效</string>
     <string name="app_icon_scale">应用列表图标大小</string>
     <string name="app_icon_scale_hint">数值越大图标越大（默认 100%）</string>
+    <string name="ui_dpi_title">界面 DPI</string>
+    <string name="ui_dpi_follow_system">跟随系统</string>
+    <string name="ui_dpi_hint">车机文字/控件过大时调低 DPI（如 160~200），相当于显示缩放；调高则放大。重启桌面后生效</string>
     <string name="wallpaper_group">壁纸</string>    <string name="wallpaper_day">白天壁纸</string>
     <string name="wallpaper_night">晚上壁纸</string>
     <string name="wallpaper_set">已设置</string>

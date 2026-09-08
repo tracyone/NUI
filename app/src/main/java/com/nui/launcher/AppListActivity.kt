@@ -1,6 +1,7 @@
 package com.nui.launcher
 
 import android.app.AlertDialog
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.net.Uri
@@ -20,6 +21,10 @@ import kotlin.math.abs
  * 长按应用：弹出菜单（卸载 / 隐藏），卸载/隐藏前需确认；隐藏的应用可在 桌面设置 → 应用 中恢复。
  */
 class AppListActivity : AppCompatActivity() {
+
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(UiTheme.overrideUiDpi(base))
+    }
 
     private lateinit var binding: ActivityAppListBinding
 

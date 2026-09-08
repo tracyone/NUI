@@ -2,6 +2,7 @@ package com.nui.launcher.weather
 
 import android.Manifest
 import android.content.Context
+import com.nui.launcher.UiTheme
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
@@ -32,6 +33,10 @@ import java.util.Locale
  * - 语音播报（TTS）：首次成功获取到天气后自动播报；后续刷新发现新的重大天气突发时自动播报
  */
 class WeatherActivity : AppCompatActivity() {
+
+    override fun attachBaseContext(base: Context) {
+        super.attachBaseContext(UiTheme.overrideUiDpi(base))
+    }
 
     private lateinit var surface: WeatherSurfaceView
     private lateinit var weatherFetcher: WeatherFetcher

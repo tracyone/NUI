@@ -7,11 +7,17 @@
     android:background="@color/settings_bg"
     android:padding="24dp">
 
-    <!-- 左侧：设置分类 -->
-    <LinearLayout
+    <!-- 左侧：设置分类（包 ScrollView，低密度/矮屏车机上可滚动，避免底部"应用/关于"入口被截断） -->
+    <ScrollView
         android:layout_width="240dp"
         android:layout_height="match_parent"
-        android:orientation="vertical">
+        android:scrollbars="none"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -135,7 +141,8 @@
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1" />
-    </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
 
     <!-- 右侧：详细设置 -->
     <LinearLayout
@@ -694,6 +701,49 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
                         android:text="@string/app_icon_scale_hint"
+                        android:textColor="@color/settings_value"
+                        android:textSize="13sp" />
+
+                    <!-- 界面 DPI（显示缩放，0=跟随系统，根本性解决车机文字/控件过大） -->
+                    <TextView
+                        android:id="@+id/tvUiDpiTitle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="20dp"
+                        android:text="@string/ui_dpi_title"
+                        android:textColor="@color/settings_label"
+                        android:textSize="17sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <SeekBar
+                            android:id="@+id/seekUiDpi"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="12dp"
+                            android:max="200" />
+
+                        <TextView
+                            android:id="@+id/tvUiDpiValue"
+                            android:layout_width="96dp"
+                            android:layout_height="wrap_content"
+                            android:gravity="end"
+                            android:text="@string/ui_dpi_follow_system"
+                            android:textColor="@color/settings_value"
+                            android:textSize="17sp" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="@string/ui_dpi_hint"
                         android:textColor="@color/settings_value"
                         android:textSize="13sp" />
 

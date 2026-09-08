@@ -100,13 +100,29 @@ class MapHost(
     /** 设置地图底部上限（px，屏幕坐标系）；系统 Dock 显示时调用，0=不限制 */
     fun setBottomLimit(px: Int) {
         bottomLimit = px
-        if (px <= 0) return
         val lp = mapPanel.layoutParams as FrameLayout.LayoutParams
-        val loc = IntArray(2)
-        mapPanel.getLocationOnScreen(loc)
-        val bottomY = loc[1] + lp.height
+        val sh = context.resources.displayMetrics.heightPixels
+        if (px <= 0) {
+            // 解除限制：恢复地图底边到屏幕底部（8dp 边距）。
+            // 此前直接 return，地图保持被压缩的高度，导致高德浮窗底边永远停在系统栏上方无法超过。
+            // 用布局参数（topMargin+height）计算，不依赖 getLocationOnScreen，
+            // 保证在设置页（地图卡片离屏）切换开关时也能正确恢复。
+            val maxBottomY = sh - dp(8)
+            val bottomY = lp.topMargin + lp.height
+            if (bottomY < maxBottomY) {
+                val newH = (maxBottomY - lp.topMargin).coerceAtLeast(MIN_SIZE)
+                if (lp.height != newH) {
+                    lp.height = newH
+                    mapPanel.layoutParams = lp
+                    onGeometryChanged?.invoke()
+                    refreshFloat()
+                }
+            }
+            return
+        }
+        val bottomY = lp.topMargin + lp.height
         if (bottomY > px) {
-            val newH = (px - loc[1]).coerceAtLeast(MIN_SIZE)
+            val newH = (px - lp.topMargin).coerceAtLeast(MIN_SIZE)
             if (lp.height != newH) {
                 lp.height = newH
                 mapPanel.layoutParams = lp
