@@ -265,7 +265,22 @@
                         android:ellipsize="end"
                         android:visibility="gone" />
 
-                    <!-- 行5：速度 · 限速 -->
+                    <!-- 行5：前方拥堵（13011 TMC 实时路况光柱图；显示距下一段拥堵的实时距离，
+                         颜色区分拥堵程度：红=拥堵 / 深红=严重拥堵） -->
+                    <TextView
+                        android:id="@+id/navInfoTmc"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="前方800米 拥堵"
+                        android:textSize="18sp"
+                        android:textStyle="bold"
+                        android:textColor="#FF5252"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:visibility="gone" />
+
+                    <!-- 行6：速度 · 限速 -->
                     <TextView
                         android:id="@+id/navInfoSpeed"
                         android:layout_width="wrap_content"

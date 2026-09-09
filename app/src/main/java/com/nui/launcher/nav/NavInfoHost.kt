@@ -15,6 +15,7 @@ import android.widget.TextView
 import com.nui.launcher.R
 import com.nui.launcher.voice.NuiTts
 import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * 导航/巡航信息显示（右上角"回家/公司/收藏"按钮区动态变化）。
@@ -49,6 +50,7 @@ class NavInfoHost(
         private const val KEY_TYPE_NAV_STATE = 10019
         private const val KEY_TYPE_NAVI_INFO = 10001
         private const val KEY_TYPE_TRAFFIC_LIGHT = 60073
+        private const val KEY_TYPE_TMC = 13011
         private const val NAV_STATE_NAVIGATING = 8
         private const val NAV_STATE_NAV_EXIT = 9
         // 协议 10019 状态表：46=主界面（含主图巡航界面），47=子界面（除主图巡航外的其他界面）
@@ -70,6 +72,7 @@ class NavInfoHost(
     private var etaView: TextView? = null
     private var cameraView: TextView? = null
     private var exitView: TextView? = null
+    private var tmcView: TextView? = null
     private var speedView: TextView? = null
     private var sapaView: TextView? = null
     private var sapaMoreView: TextView? = null
@@ -104,6 +107,7 @@ class NavInfoHost(
                 KEY_TYPE_NAV_STATE -> handleNavState(intent)
                 KEY_TYPE_NAVI_INFO -> handleNaviInfo(intent)
                 KEY_TYPE_TRAFFIC_LIGHT -> handleTrafficLight(intent)
+                KEY_TYPE_TMC -> handleTmc(intent)
             }
         }
     }
@@ -114,6 +118,7 @@ class NavInfoHost(
         etaView = overlay.findViewById(R.id.navInfoEta)
         cameraView = overlay.findViewById(R.id.navInfoCamera)
         exitView = overlay.findViewById(R.id.navInfoExit)
+        tmcView = overlay.findViewById(R.id.navInfoTmc)
         speedView = overlay.findViewById(R.id.navInfoSpeed)
         sapaView = overlay.findViewById(R.id.navInfoSapa)
         sapaMoreView = overlay.findViewById(R.id.navInfoSapaMore)
@@ -413,6 +418,62 @@ class NavInfoHost(
         } catch (e: Exception) {
             Log.w(TAG, "解析红绿灯失败: ${e.message}")
         }
+    }
+
+    // ---------- 13011 TMC 实时路况（前方拥堵） ----------
+
+    /**
+     * 导航卡"前方拥堵"：遍历路况分段（从当前位置往后连续排列），
+     * 找第一段拥堵（status≥3，3=拥堵红 / 4=严重拥堵深红），
+     * 显示距它的实时距离（段距离累加），颜色区分拥堵程度；前方无拥堵则隐藏。
+     * 协议：13011 每 6s 广播一次，tmc_segment_distance 之和 = residual_distance。
+     */
+    private fun handleTmc(intent: Intent) {
+        val view = tmcView ?: return
+        if (mode != Mode.NAVI) return
+        val json = intent.getStringExtra("EXTRA_TMC_SEGMENT") ?: return
+        try {
+            val root = JSONObject(json)
+            if (!root.optBoolean("tmc_segment_enabled", true)) {
+                view.visibility = View.GONE
+                return
+            }
+            val info = root.optJSONArray("tmc_info")
+            if (info == null || info.length() == 0) {
+                view.visibility = View.GONE
+                return
+            }
+            var aheadMeters = 0
+            for (i in 0 until info.length()) {
+                val seg = info.getJSONObject(i)
+                val status = seg.optInt("tmc_status", -1)
+                if (status >= 3) {
+                    // 找到第一段拥堵/严重拥堵：aheadMeters = 距它的距离
+                    val level = if (status >= 4) "严重拥堵" else "拥堵"
+                    val text = if (aheadMeters <= 0) "当前路段 $level" else "前方${formatAhead(aheadMeters)} $level"
+                    view.text = text
+                    view.setTextColor(if (status >= 4) 0xFFD50000.toInt() else 0xFFFF5252.toInt())
+                    view.visibility = View.VISIBLE
+                    resetDataWatchdog()
+                    Log.i(TAG, "前方拥堵: $text (status=$status 距=${aheadMeters}m)")
+                    return
+                }
+                aheadMeters += seg.optInt("tmc_segment_distance", 0)
+            }
+            // 剩余路段无拥堵
+            view.visibility = View.GONE
+        } catch (e: Exception) {
+            Log.w(TAG, "解析TMC路况失败: ${e.message}")
+        }
+    }
+
+    /** 米 → 友好文本：≥1000 米转公里（1位小数），并缩小单位字 */
+    private fun formatAhead(meters: Int): CharSequence {
+        val text = if (meters >= 1000) {
+            val km = meters / 1000.0
+            (if (km >= 10) "${km.toInt()}" else String.format("%.1f", km)) + "公里"
+        } else "${meters}米"
+        return text.withSmallUnit()
     }
 
     /** 超速检测：巡航下速度>限速 时语音提醒一次（回落后再超速会再提醒） */
