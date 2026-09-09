@@ -910,6 +910,18 @@
                 android:layout_marginBottom="20dp"
                 android:background="@color/settings_divider" />
 
+            <!-- 系统语音不可用提示（无 TTS 引擎/绑定失败时显示） -->
+            <TextView
+                android:id="@+id/tvVoiceUnavailable"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                android:gravity="center"
+                android:text="@string/voice_unavailable"
+                android:textColor="@color/settings_danger"
+                android:textSize="14sp"
+                android:visibility="gone" />
+
             <!-- 女声（小雅） -->
             <LinearLayout
                 android:id="@+id/optVoiceFemale"

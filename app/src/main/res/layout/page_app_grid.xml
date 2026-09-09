@@ -3,7 +3,9 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <androidx.recyclerview.widget.RecyclerView
+    <!-- 应用网格：横向分页翻页（每页 6 列 × 行数随屏幕高度自适应），
+         左右滑动翻页；与桌面外层 ViewPager2 嵌套，边界滑动手势自动交给外层切换桌面 -->
+    <androidx.viewpager2.widget.ViewPager2
         android:id="@+id/appGridMain"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
@@ -11,6 +13,5 @@
         android:paddingStart="116dp"
         android:paddingEnd="32dp"
         android:paddingTop="32dp"
-        android:paddingBottom="48dp"
-        android:scrollbars="vertical" />
+        android:paddingBottom="48dp" />
 </FrameLayout>

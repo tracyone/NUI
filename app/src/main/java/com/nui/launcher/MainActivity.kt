@@ -102,8 +102,9 @@ class MainActivity : AppCompatActivity() {
     private var appGridLoaded = false
     /** 从系统卸载页返回后需重载应用网格 */
     private var pendingReloadOnResume = false
-    private var appGridView: androidx.recyclerview.widget.RecyclerView? = null
-    private var appListAdapter: AppListAdapter? = null
+    private var appGridView: androidx.viewpager2.widget.ViewPager2? = null
+    /** 分页应用网格：每页一个 6 列 RecyclerView，各页独立的 AppListAdapter（刷新时逐页 notify） */
+    private val appGridPageAdapters = mutableMapOf<Int, AppListAdapter>()
     /** 是否从桌面启动了外部 app——按 home 回来时恢复到启动前的 page */
     private var launchedExternalApp = false
     /** 启动外部 app 前所在的 page */
@@ -154,6 +155,9 @@ class MainActivity : AppCompatActivity() {
                 setupMap(); setupNav(); setupMusic(); setupWallpaper(); syncRightPanel()
                 applyDockStyle()
                 applyTheme()
+                // mapHost 就绪后按当前开关重算悬浮地图底部边界（onCreate/onResume 时
+                // mapHost 尚未初始化，applySystemDock 会跳过 setBottomLimit）
+                applySystemDock()
             }
         }
     }
@@ -181,6 +185,9 @@ class MainActivity : AppCompatActivity() {
         binding.viewPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
                 updatePageIndicator(position)
+                // 手势分流：page0（桌面）保留外层横滑切到应用列表；
+                // page1（应用列表）禁用外层横滑，左右滑动全部交给内层应用网格翻页
+                binding.viewPager.isUserInputEnabled = position == 0
                 if (::mapHost.isInitialized) {
                     // 回桌面页时重新取几何并刷新浮窗（设置页切换系统 Dock 开关时地图卡片离屏，
                     // 几何可能未更新；回来时强制 primeCache + showFloat 用最新几何下发）
@@ -225,10 +232,16 @@ class MainActivity : AppCompatActivity() {
                     android.util.Log.d("NUI.Weather", "无新预警，跳过全屏动画")
                 }
             }
-            if (::weatherVoice.isInitialized) deliverFirstWeather(info)
+            // 首播统一由 scheduleFirstWeatherVoice 的 30s 检查处理（有天气播完整版/无天气播问候版）；
+            // 30s 检查执行后的每次刷新，交给 WeatherVoice 内部去重（仅新预警播报，不重复首播）
+            if (::weatherVoice.isInitialized && firstWeatherCheckDone) {
+                weatherVoice.onWeather(info)
+            }
         }
         // 尝试获取当前位置，获取到后更新天气查询位置
         tryLoadLocation()
+        // 首次启动天气播报统一调度：30 秒后检查是否有天气，有则播完整版（含天气），无则播问候版
+        scheduleFirstWeatherVoice()
     }
 
     /** 首次启动天气播报延迟（ms）：等高德自动启动返回桌面（约10s）并留出操作时间，30 秒后再播 */
@@ -237,33 +250,60 @@ class MainActivity : AppCompatActivity() {
     /** 首次启动的高德自动启动返回完成前，先暂存天气播报，返回桌面后再播（避免与高德前台重叠） */
     private var pendingFirstWeather: WeatherFetcher.WeatherInfo? = null
 
-    /** 首次启动天气播报只调度一次（WeatherVoice 内部也有 firstSpoken 去重，双保险） */
+    /** 30 秒首播检查是否已执行（true 后每次天气刷新交给 WeatherVoice 播新预警） */
     private var firstWeatherScheduled = false
 
-    /** 天气首次播报入口：统一延迟 30 秒后播报（覆盖高德自动启动返回 + 留操作时间）。
+    /** 30 秒首播检查已执行标记（区别于 firstWeatherScheduled 的"已调度"） */
+    private var firstWeatherCheckDone = false
+
+    /** 天气查询不到时，30s 检查若遇高德返回中，暂存"播问候版"标记，返回后 flush */
+    private var pendingGreetingOnly = false
+
+    /** 首次启动天气播报统一入口：30 秒后检查是否有天气数据。
+     *  - 有天气：播完整版（问候+日期+天气，走 WeatherVoice.onWeather 首播逻辑）
+     *  - 无天气（查询失败/未返回）：播问候+日期（speakGreetingOnly），天气部分跳过
      *  期间高德返回中则暂存，返回完成后 flush 播放（正常 10s 内返回，30s 后基本直接播）。 */
-    private fun deliverFirstWeather(info: WeatherFetcher.WeatherInfo) {
+    private fun scheduleFirstWeatherVoice() {
         if (firstWeatherScheduled) return
         firstWeatherScheduled = true
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            if (::mapHost.isInitialized && mapHost.isAutoReturnPending) {
-                android.util.Log.d("WeatherVoice", "高德返回中，暂存天气播报 ${info.city}")
-                pendingFirstWeather = info
+            firstWeatherCheckDone = true
+            val info = weatherFetcher.current
+            if (info != null) {
+                if (::mapHost.isInitialized && mapHost.isAutoReturnPending) {
+                    android.util.Log.d("WeatherVoice", "高德返回中，暂存天气播报 ${info.city}")
+                    pendingFirstWeather = info
+                } else {
+                    android.util.Log.d("WeatherVoice", "延迟${FIRST_WEATHER_VOICE_DELAY_MS / 1000}s播报天气 ${info.city}")
+                    weatherVoice.onWeather(info)
+                }
             } else {
-                android.util.Log.d("WeatherVoice", "延迟${FIRST_WEATHER_VOICE_DELAY_MS / 1000}s播报天气 ${info.city}")
-                weatherVoice.onWeather(info)
+                if (::mapHost.isInitialized && mapHost.isAutoReturnPending) {
+                    android.util.Log.d("WeatherVoice", "高德返回中，暂存问候播报")
+                    pendingGreetingOnly = true
+                } else {
+                    android.util.Log.d("WeatherVoice", "延迟${FIRST_WEATHER_VOICE_DELAY_MS / 1000}s播报（无天气数据，仅问候）")
+                    weatherVoice.speakGreetingOnly()
+                }
             }
         }, FIRST_WEATHER_VOICE_DELAY_MS)
     }
 
-    /** 高德自动返回桌面完成：播报暂存的天气 */
+    /** 高德自动返回桌面完成：播报暂存的天气 / 问候 */
     private fun flushPendingWeatherVoice() {
-        android.util.Log.d("WeatherVoice", "高德已返回桌面，flush 暂存天气")
+        android.util.Log.d("WeatherVoice", "高德已返回桌面，flush 暂存播报")
         pendingFirstWeather?.let {
             pendingFirstWeather = null
             if (::weatherVoice.isInitialized) {
                 android.util.Log.d("WeatherVoice", "开始播报暂存天气 ${it.city}")
                 weatherVoice.onWeather(it)
+            }
+        }
+        if (pendingGreetingOnly) {
+            pendingGreetingOnly = false
+            if (::weatherVoice.isInitialized) {
+                android.util.Log.d("WeatherVoice", "开始播报暂存问候")
+                weatherVoice.speakGreetingOnly()
             }
         }
     }
@@ -399,6 +439,8 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         android.util.Log.d("NUI.Main", "onResume page=${binding.viewPager.currentItem} launchedExternal=$launchedExternalApp")
+        // 设置页可能改了显示状态栏/系统Dock开关，返回时重新应用系统栏 flags 与悬浮地图底部边界
+        applySystemDock()
         if (::weatherFetcher.isInitialized) weatherFetcher.start()
         applyTheme()
         // 回到前台时主动向高德查询导航状态，校准导航卡显示（防止被动广播错过）
@@ -417,8 +459,8 @@ class MainActivity : AppCompatActivity() {
             musicHost.refresh()
             musicHost.setFloatAreaVisible(true)
         }
-        // 设置页可能改了应用列表图标比例，返回时刷新
-        appListAdapter?.notifyDataSetChanged()
+        // 设置页可能改了应用列表图标比例，返回时刷新（分页：逐页 notify）
+        for (a in appGridPageAdapters.values) a.notifyDataSetChanged()
         // 从系统卸载页返回：重载应用网格（被卸载的应用消失）
         if (pendingReloadOnResume) {
             pendingReloadOnResume = false
@@ -426,7 +468,7 @@ class MainActivity : AppCompatActivity() {
             val grid = appGridView
             if (grid != null) {
                 grid.adapter = null
-                appListAdapter = null
+                appGridPageAdapters.clear()
                 loadAppGrid(grid)
             }
         }
@@ -828,12 +870,18 @@ class MainActivity : AppCompatActivity() {
         wallpaper.onShowFloat = { mapHost.showFloat() }
     }
 
-    private fun loadAppGrid(grid: RecyclerView) {
+    private fun loadAppGrid(grid: androidx.viewpager2.widget.ViewPager2) {
         if (appGridLoaded) return
         appGridLoaded = true
-        grid.layoutManager = GridLayoutManager(this, 6)
-        grid.setHasFixedSize(true)
-        grid.itemAnimator = null
+
+        // 每页行数：按屏幕可用高度估算（图标 72dp*scale + 名称标签约 24dp），至少 2 行
+        val density = resources.displayMetrics.density
+        val availH = (resources.displayMetrics.heightPixels / density) - 32f - 48f // 上下 padding
+        val iconScale = UiTheme.appIconScale(this)
+        val itemH = 72f * iconScale + 24f
+        val rows = maxOf(2, (availH / itemH).toInt())
+        val perPage = 6 * rows
+        android.util.Log.d("NUI.AppGrid", "分页网格: rows=$rows perPage=$perPage availH=$availH")
 
         Thread {
             val pm = packageManager
@@ -847,12 +895,16 @@ class MainActivity : AppCompatActivity() {
                 AppModel(
                     label = ri.loadLabel(pm).toString(),
                     packageName = pkg,
-                    icon = IconUtils.getIconWithFallback(pm, pkg, fallbackIcon),
+                    // icon 不在此处加载：AppListAdapter 按需加载（仅显示页加载，LruCache 缓存）
+                    hasIcon = IconUtils.hasCustomIcon(pm, pkg, fallbackIcon),
                     launchIntent = pm.getLaunchIntentForPackage(pkg)
                         ?.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
                         ?: Intent(Intent.ACTION_MAIN).setPackage(pkg),
                 )
-            }.sortedBy { it.label.lowercase() }
+            }.sortedWith(
+                // 有自定义图标的应用优先（排前面的页），无图标（系统默认图标）靠后；组内按名称
+                compareByDescending<AppModel> { it.hasIcon }.thenBy { it.label.lowercase() }
+            )
             val settingsEntry = AppModel(
                 label = getString(R.string.desktop_settings),
                 packageName = packageName,
@@ -874,7 +926,7 @@ class MainActivity : AppCompatActivity() {
                         val grid = appGridView
                         if (grid != null) {
                             grid.adapter = null
-                            appListAdapter = null
+                            appGridPageAdapters.clear()
                             loadAppGrid(grid)
                         }
                         if (::musicHost.isInitialized) musicHost.refresh()
@@ -883,17 +935,46 @@ class MainActivity : AppCompatActivity() {
                     dlg.show()
                 },
             )
+            val allApps = listOf(settingsEntry) + apps
+            val pages = allApps.chunked(perPage)
+            android.util.Log.d("NUI.AppGrid", "应用总数=${allApps.size} 页数=${pages.size}")
             runOnUiThread {
-                appListAdapter = AppListAdapter(
-                    context = this,
-                    apps = listOf(settingsEntry) + apps,
-                    onClick = { app ->
-                        if (app.onClick != null) app.onClick.invoke()
-                        else startActivity(app.launchIntent)
-                    },
-                    onLongClick = { app -> if (app.onClick == null) showAppMenu(app) },
-                )
-                grid.adapter = appListAdapter
+                grid.adapter = object : androidx.recyclerview.widget.RecyclerView.Adapter<androidx.recyclerview.widget.RecyclerView.ViewHolder>() {
+                    override fun getItemCount() = pages.size
+                    override fun onCreateViewHolder(
+                        parent: ViewGroup,
+                        viewType: Int,
+                    ): androidx.recyclerview.widget.RecyclerView.ViewHolder {
+                        // 每页一个 6 列网格（不参与滚动，翻页由外层 ViewPager2 驱动）
+                        val rv = androidx.recyclerview.widget.RecyclerView(parent.context)
+                        rv.layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                        )
+                        rv.layoutManager = GridLayoutManager(parent.context, 6)
+                        rv.setHasFixedSize(true)
+                        rv.itemAnimator = null
+                        rv.isNestedScrollingEnabled = false
+                        return object : androidx.recyclerview.widget.RecyclerView.ViewHolder(rv) {}
+                    }
+                    override fun onBindViewHolder(
+                        holder: androidx.recyclerview.widget.RecyclerView.ViewHolder,
+                        position: Int,
+                    ) {
+                        val rv = holder.itemView as androidx.recyclerview.widget.RecyclerView
+                        val pageAdapter = AppListAdapter(
+                            context = this@MainActivity,
+                            apps = pages[position],
+                            onClick = { app ->
+                                if (app.onClick != null) app.onClick.invoke()
+                                else startActivity(app.launchIntent)
+                            },
+                            onLongClick = { app -> if (app.onClick == null) showAppMenu(app) },
+                        )
+                        appGridPageAdapters[position] = pageAdapter
+                        rv.adapter = pageAdapter
+                    }
+                }
             }
         }.start()
     }
@@ -951,7 +1032,7 @@ class MainActivity : AppCompatActivity() {
                 val grid = appGridView
                 if (grid != null) {
                     grid.adapter = null
-                    appListAdapter = null
+                    appGridPageAdapters.clear()
                     loadAppGrid(grid)
                 }
             }
@@ -1037,9 +1118,10 @@ class MainActivity : AppCompatActivity() {
 
         // 悬浮地图底部限制：按当前配置主动计算并下发（不依赖 insets 回调时序），
         // 修复切换系统 Dock 显隐后高德浮窗底边不恢复/不避让的问题
+        // 注意：用物理屏高度计算（displayMetrics 在非沉浸下已扣系统栏，再减导航栏会双重扣减）
         if (::mapHost.isInitialized) {
             if (showDock) {
-                val sh = resources.displayMetrics.heightPixels
+                val sh = realScreenHeight()
                 val navH = getNavBarHeight()
                 mapHost.setBottomLimit(sh - navH - (8 * resources.displayMetrics.density).toInt())
             } else {
@@ -1053,12 +1135,14 @@ class MainActivity : AppCompatActivity() {
             val top = if (UiTheme.showStatusBar(this)) insets.getSystemWindowInsetTop() else 0
             val bottom = if (UiTheme.showSystemDock(this)) insets.getSystemWindowInsetBottom() else 0
             v.setPadding(0, top, 0, bottom)
-            // 悬浮地图（高德浮窗）同步避让底部系统 Dock：上限=屏幕高-导航栏高-8dp；
+            // 悬浮地图（高德浮窗）同步避让底部系统 Dock：上限=物理屏高-导航栏高-8dp；
             // Dock 隐藏时解除限制（可拖到屏幕最底部）
             if (::mapHost.isInitialized) {
-                if (UiTheme.showSystemDock(this) && bottom > 0) {
-                    val sh = resources.displayMetrics.heightPixels
-                    mapHost.setBottomLimit(sh - bottom - (8 * resources.displayMetrics.density).toInt())
+                if (UiTheme.showSystemDock(this)) {
+                    // 导航栏高度统一用 getNavBarHeight()（含 nui_debug_navbar_h 模拟值），
+                    // 不用 inset：模拟器/无系统栏设备无真实 inset，用 inset 会把限制错误清掉
+                    val sh = realScreenHeight()
+                    mapHost.setBottomLimit(sh - getNavBarHeight() - (8 * resources.displayMetrics.density).toInt())
                 } else {
                     mapHost.setBottomLimit(0)
                 }
@@ -1074,8 +1158,24 @@ class MainActivity : AppCompatActivity() {
 
     /** 系统导航栏高度（px，含手势条场景尽量取系统上报值）；获取失败返回 0 */
     private fun getNavBarHeight(): Int {
+        // [调试] 模拟系统导航栏高度（px）：模拟器/无系统栏设备上验证 Dock 边界逻辑用。
+        // 用法: adb shell settings put global nui_debug_navbar_h 120 （0=关闭模拟）
+        val sim = android.provider.Settings.Global.getInt(
+            contentResolver, "nui_debug_navbar_h", 0)
+        if (sim > 0) return sim
         val id = resources.getIdentifier("navigation_bar_height", "dimen", "android")
         return if (id > 0) resources.getDimensionPixelSize(id) else 0
+    }
+
+    /** 物理屏幕高度（px，含系统栏区域）。
+     *  displayMetrics.heightPixels 在非沉浸窗口下会扣掉系统栏，用它算地图底部边界
+     *  会造成"有/无系统 Docker 栏"时边界不一致（双重扣减），故统一用真实物理尺寸。 */
+    private fun realScreenHeight(): Int {
+        val m = android.util.DisplayMetrics()
+        @Suppress("DEPRECATION")
+        (getSystemService(android.content.Context.WINDOW_SERVICE) as android.view.WindowManager)
+            .defaultDisplay.getRealMetrics(m)
+        return m.heightPixels
     }
 
     /** 重新获得焦点时重设系统栏标志（部分设备焦点变化后会恢复系统栏） */

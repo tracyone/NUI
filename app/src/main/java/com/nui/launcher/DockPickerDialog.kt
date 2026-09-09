@@ -51,7 +51,10 @@ object DockPickerDialog {
                     setMessage("没有可添加的应用")
                     setPositiveButton("确定", null)
                 } else {
-                    val adapter = IconTextAdapter(context, apps.map { it.icon to it.label })
+                    val adapter = IconTextAdapter(
+                        context,
+                        apps.map { (it.icon ?: pm.defaultActivityIcon) to it.label },
+                    )
                     setAdapter(adapter) { _, which -> onPick(apps[which]) }
                 }
             }

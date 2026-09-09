@@ -67,6 +67,9 @@ class WeatherFetcher(private val context: Context) {
     /** 天气回调 */
     var onWeatherReady: ((WeatherInfo) -> Unit)? = null
 
+    /** 当前可用天气数据（最近一次成功获取的缓存；未获取到为 null，供首播判断是否有天气可播） */
+    val current: WeatherInfo? get() = cached
+
     private val handler = Handler(Looper.getMainLooper())
     @Volatile
     private var fetching = false

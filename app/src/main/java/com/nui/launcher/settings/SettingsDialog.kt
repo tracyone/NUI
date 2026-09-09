@@ -81,6 +81,15 @@ class SettingsDialog(context: Context) : Dialog(context) {
     private lateinit var checkVoiceFemale: TextView
     private lateinit var tvOptVoiceMale: TextView
     private lateinit var checkVoiceMale: TextView
+
+    /** 系统 TTS 男声可用性：null=引擎未就绪（未知），false=不支持（置灰），true=支持 */
+    private var voiceMaleSupported: Boolean? = null
+
+    /** 系统 TTS 引擎可用性：null=未知，false=不可用，true=可用（用于 applySettingsTheme 统一上色） */
+    private var voiceSystemAvailable: Boolean? = null
+
+    /** 引擎初始化轮询计数（上限 12 次 × 500ms = 6s，超时按不可用处理） */
+    private var voiceSupportRetries = 0
     private lateinit var optWallpaperDay: View
     private lateinit var optWallpaperNight: View
     private lateinit var tvWallpaperDayStatus: TextView
@@ -244,6 +253,9 @@ class SettingsDialog(context: Context) : Dialog(context) {
             NuiTts(context).switchVoice(NuiTts.VOICE_MALE)
             renderVoice()
         }
+        // 男声能力检测：引擎未就绪时先预热，就绪后刷新可用性
+        NuiTts(context).warmUp()
+        refreshVoiceSupport()
         renderVoice()
         renderMap()
         renderAbout()
@@ -586,7 +598,14 @@ class SettingsDialog(context: Context) : Dialog(context) {
         findViewById<TextView>(R.id.groupTitleApps).setTextColor(p.value)
         findViewById<View>(R.id.dividerApps).setBackgroundColor(p.divider)
         findViewById<TextView>(R.id.tvOptHiddenApps).setTextColor(p.label)
-        tvOptVoiceMale.setTextColor(p.label)
+        tvOptVoiceFemale.setTextColor(if (voiceSystemAvailable == false) p.value else p.label)
+        findViewById<View>(R.id.optVoiceFemale).isEnabled = voiceSystemAvailable != false
+        findViewById<View>(R.id.optVoiceFemale).alpha = if (voiceSystemAvailable == false) 0.4f else 1f
+        tvOptVoiceMale.setTextColor(if (voiceSystemAvailable == false || voiceMaleSupported == false) p.value else p.label)
+        findViewById<View>(R.id.optVoiceMale).isEnabled = voiceSystemAvailable != false && voiceMaleSupported != false
+        findViewById<View>(R.id.optVoiceMale).alpha = if (voiceSystemAvailable == false || voiceMaleSupported == false) 0.4f else 1f
+        findViewById<TextView>(R.id.tvVoiceUnavailable).visibility =
+            if (voiceSystemAvailable == false) View.VISIBLE else View.GONE
         // 外观 → 壁纸
         findViewById<TextView>(R.id.groupTitleWallpaper).setTextColor(p.value)
         findViewById<View>(R.id.dividerWallpaper).setBackgroundColor(p.divider)
@@ -635,6 +654,66 @@ class SettingsDialog(context: Context) : Dialog(context) {
         val g = NuiTts.voiceGender(context)
         checkVoiceFemale.visibility = if (g == NuiTts.VOICE_FEMALE) View.VISIBLE else View.GONE
         checkVoiceMale.visibility = if (g == NuiTts.VOICE_MALE) View.VISIBLE else View.GONE
+    }
+
+    /** 男声能力检测：系统 TTS 无男声音色时置灰不可点；若当前已选男声则回退女声（不播报）。
+     *  引擎不可用（无 TTS 引擎/绑定失败）时男女声都置灰并显示提示。 */
+    private fun refreshVoiceSupport() {
+        val available = NuiTts(context).isSystemAvailable()
+        voiceSystemAvailable = available
+        val optFemale = findViewById<View>(R.id.optVoiceFemale)
+        val tvFemale = findViewById<TextView>(R.id.tvOptVoiceFemale)
+        val optMale = findViewById<View>(R.id.optVoiceMale)
+        val tvMale = findViewById<TextView>(R.id.tvOptVoiceMale)
+        val tvUnavailable = findViewById<TextView>(R.id.tvVoiceUnavailable)
+        val sp = UiTheme.settingsPalette(UiTheme.isDark(context))
+
+        when (available) {
+            // 引擎不可用：男女声全部置灰 + 红色提示
+            false -> {
+                voiceMaleSupported = false
+                optFemale.isEnabled = false; optFemale.alpha = 0.4f
+                tvFemale.setTextColor(sp.value)
+                optMale.isEnabled = false; optMale.alpha = 0.4f
+                tvMale.setTextColor(sp.value)
+                tvUnavailable.visibility = View.VISIBLE
+                if (NuiTts.voiceGender(context) == NuiTts.VOICE_MALE) {
+                    NuiTts.setVoiceGender(context, NuiTts.VOICE_FEMALE)
+                }
+                renderVoice()
+            }
+            // 引擎初始化中：暂不置灰，轮询等待（最多 ~6s），超时按不可用处理
+            null -> {
+                if (voiceSupportRetries++ < 12) {
+                    findViewById<View>(R.id.optVoiceMale).postDelayed({ refreshVoiceSupport() }, 500)
+                } else {
+                    voiceMaleSupported = false
+                    optFemale.isEnabled = false; optFemale.alpha = 0.4f
+                    tvFemale.setTextColor(sp.value)
+                    optMale.isEnabled = false; optMale.alpha = 0.4f
+                    tvMale.setTextColor(sp.value)
+                    tvUnavailable.visibility = View.VISIBLE
+                }
+            }
+            // 引擎可用：按音色支持情况置灰男声
+            true -> {
+                voiceMaleSupported = NuiTts(context).supportsVoice(NuiTts.VOICE_MALE)
+                tvUnavailable.visibility = View.GONE
+                optFemale.isEnabled = true; optFemale.alpha = 1f
+                tvFemale.setTextColor(sp.label)
+                if (voiceMaleSupported == false) {
+                    optMale.isEnabled = false; optMale.alpha = 0.4f
+                    tvMale.setTextColor(sp.value)
+                    if (NuiTts.voiceGender(context) == NuiTts.VOICE_MALE) {
+                        NuiTts.setVoiceGender(context, NuiTts.VOICE_FEMALE)
+                        renderVoice()
+                    }
+                } else {
+                    optMale.isEnabled = true; optMale.alpha = 1f
+                    tvMale.setTextColor(sp.label)
+                }
+            }
+        }
     }
 
     /** 刷新壁纸槽位状态文字（默认/已设置），宿主选图返回后调用 */

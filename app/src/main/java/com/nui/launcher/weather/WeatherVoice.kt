@@ -54,24 +54,45 @@ class WeatherVoice(context: Context) {
     /** 手动重播天气摘要 */
     fun speakSummary(info: WeatherFetcher.WeatherInfo) = tts.speak(summary(info))
 
+    /** 天气查询不到时的首播：只播问候+日期，不播天气部分。
+     *  与 [onWeather] 共用 firstSpoken 去重：先播了问候版，后续天气到达时不再重复首播，
+     *  仅在有新重大预警时播报预警。 */
+    fun speakGreetingOnly() {
+        var needGreet = false
+        synchronized(lock) {
+            if (!firstSpoken) {
+                firstSpoken = true
+                announcedKeys = emptySet()
+                needGreet = true
+            }
+        }
+        if (needGreet) {
+            val text = greetingAndDate()
+            tts.speak(text)
+            android.util.Log.d("WeatherVoice", "天气查询不到，首播仅问候: ${text.take(30)}...")
+        }
+    }
+
     /** 停止当前播报（离开界面时调用，避免与其它界面抢声） */
     fun stop() = tts.stop()
 
     /** 释放（共享引擎保留在内存中，此处仅停止播放） */
     fun shutdown() = tts.stop()
 
+    /** 问候 + 日期（不含天气数据，天气查询不到时也能播） */
+    private fun greetingAndDate(): String {
+        val c = Calendar.getInstance()
+        val hour = c.get(Calendar.HOUR_OF_DAY)
+        val greeting = greetingFor(hour)
+        val week = arrayOf("周日", "周一", "周二", "周三", "周四", "周五", "周六")[c.get(Calendar.DAY_OF_WEEK) - 1]
+        return "$greeting，现在是${c.get(Calendar.MONTH) + 1}月${c.get(Calendar.DAY_OF_MONTH)}日$week。"
+    }
+
     /** 生成语音摘要文案 */
     private fun summary(info: WeatherFetcher.WeatherInfo): String {
         val c = Calendar.getInstance()
         val hour = c.get(Calendar.HOUR_OF_DAY)
-        val greeting = when (hour) {
-            in 5..8 -> "主人早上好"
-            in 9..11 -> "主人上午好"
-            12 -> "主人中午好"
-            in 13..17 -> "主人下午好"
-            in 18..22 -> "主人晚上好"
-            else -> "主人夜深了"
-        }
+        val greeting = greetingFor(hour)
         val week = arrayOf("周日", "周一", "周二", "周三", "周四", "周五", "周六")[c.get(Calendar.DAY_OF_WEEK) - 1]
         val sb = StringBuilder()
         sb.append("$greeting，现在是${c.get(Calendar.MONTH) + 1}月${c.get(Calendar.DAY_OF_MONTH)}日$week。")
@@ -84,6 +105,15 @@ class WeatherVoice(context: Context) {
             sb.append(info.alerts.joinToString("，") { it.message })
         }
         return sb.toString()
+    }
+
+    private fun greetingFor(hour: Int): String = when (hour) {
+        in 5..8 -> "主人早上好"
+        in 9..11 -> "主人上午好"
+        12 -> "主人中午好"
+        in 13..17 -> "主人下午好"
+        in 18..22 -> "主人晚上好"
+        else -> "主人夜深了"
     }
 
     private fun advice(info: WeatherFetcher.WeatherInfo): String = when {

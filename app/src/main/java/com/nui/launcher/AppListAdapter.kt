@@ -36,7 +36,15 @@ class AppListAdapter(
         holder.binding.appIcon.layoutParams = holder.binding.appIcon.layoutParams.apply {
             width = sizePx; height = sizePx
         }
-        holder.binding.appIcon.setImageBitmap(IconUtils.toBitmap(app.icon, sizePx))
+        // 按需加载图标：LruCache 命中秒显，未命中才从 PackageManager 加载（分页滚动不卡顿）
+        holder.binding.appIcon.setImageBitmap(
+            IconUtils.loadBitmap(
+                context.packageManager,
+                app.packageName,
+                context.packageManager.defaultActivityIcon,
+                sizePx,
+            )
+        )
         holder.binding.appLabel.text = app.label
         // 应用名称标签随外观变化：深色=半透明黑底+白字，浅色=半透明白底+黑字
         val dark = UiTheme.isDark(context)

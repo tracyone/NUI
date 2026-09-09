@@ -62,6 +62,18 @@ class MapHost(
     private var adjustOverlay: View? = null
     private val wm: WindowManager
         get() = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+    /** 物理屏幕尺寸（含系统栏区域）。displayMetrics 在非沉浸窗口下会扣掉系统栏，用于
+     *  地图底部边界会导致"有/无系统 Docker 栏"时边界不一致，故统一用真实物理尺寸。 */
+    private val realScreenW: Int by lazy {
+        val m = android.util.DisplayMetrics()
+        @Suppress("DEPRECATION") wm.defaultDisplay.getRealMetrics(m)
+        m.widthPixels
+    }
+    private val realScreenH: Int by lazy {
+        val m = android.util.DisplayMetrics()
+        @Suppress("DEPRECATION") wm.defaultDisplay.getRealMetrics(m)
+        m.heightPixels
+    }
     /** 调整模式：起点（按下时的屏幕坐标+overlay尺寸）*/
     private var dragStartX = 0f
     private var dragStartY = 0f
@@ -101,7 +113,7 @@ class MapHost(
     fun setBottomLimit(px: Int) {
         bottomLimit = px
         val lp = mapPanel.layoutParams as FrameLayout.LayoutParams
-        val sh = context.resources.displayMetrics.heightPixels
+        val sh = realScreenH
         if (px <= 0) {
             // 解除限制：恢复地图底边到屏幕底部（8dp 边距）。
             // 此前直接 return，地图保持被压缩的高度，导致高德浮窗底边永远停在系统栏上方无法超过。
@@ -532,12 +544,15 @@ class MapHost(
                 else
                     @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
                 format = PixelFormat.TRANSLUCENT
-                flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                // NO_LIMITS：让 overlay 覆盖整个物理屏幕（含系统导航栏/Dock 区域），
+                // 否则非沉浸时 overlay 被限制在可用区域，地图底部拖不进系统栏区域
+                flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
                 gravity = Gravity.TOP or Gravity.START
                 x = 0
                 y = 0
-                width = context.resources.displayMetrics.widthPixels
-                height = context.resources.displayMetrics.heightPixels
+                width = realScreenW
+                height = realScreenH
             }
         runCatching { wm.addView(overlay, lp) }
             .onFailure {
@@ -636,8 +651,8 @@ class MapHost(
      *  右面板的显示/隐藏由外部 syncRightPanel 根据剩余空间自动处理，
      *  这里地图右边可铺到屏幕宽 - 20dp。 */
     private fun clampSizeFixed(x: Int, y: Int, w: Int, h: Int): IntArray {
-        val sw = context.resources.displayMetrics.widthPixels
-        val sh = context.resources.displayMetrics.heightPixels
+        val sw = realScreenW
+        val sh = realScreenH
         // 右侧面板固定贴边后：地图右缘不超过 rightLimit（有值用值，无值用 屏幕宽-8dp）
         val maxRight = if (rightLimit > 0) rightLimit else sw - dp(8)
         // 底部：系统 Dock 显示时不超过 bottomLimit（避开导航栏），否则不碰到底边 8dp
@@ -687,8 +702,8 @@ class MapHost(
         val leftGap = dp(24)         // dock 与地图之间的安全间距
         val x = dockWidth + leftGap  // = 120dp，不遮盖 dock 栏
         val y = dp(8)
-        val sw = context.resources.displayMetrics.widthPixels
-        val sh = context.resources.displayMetrics.heightPixels
+        val sw = realScreenW
+        val sh = realScreenH
         val density = context.resources.displayMetrics.density
         val musicPanelW = dp(240)   // 音乐栏默认宽度（>180dp 最小阈值，保证可见）
         val gap = dp(12)             // 地图与音乐栏之间的间距
@@ -715,7 +730,7 @@ class MapHost(
     /** 强制地图上下边距为 8dp（保留左右位置和宽度），避免上下留空过大 */
     private fun normalizeVerticalMargins() {
         val lp = mapPanel.layoutParams as FrameLayout.LayoutParams
-        val sh = context.resources.displayMetrics.heightPixels
+        val sh = realScreenH
         val targetTop = dp(8)
         val targetH = (sh - targetTop - dp(8)).coerceAtLeast(MIN_SIZE)
         if (lp.topMargin != targetTop || lp.height != targetH) {

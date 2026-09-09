@@ -130,10 +130,15 @@ class NavInfoHost(
             .onSuccess { Log.i(TAG, "已向高德查询昼夜模式(13030)") }
     }
 
-    /** 外观切换时调用：转向图标重新染色（深色白、浅色深灰）；车道线 HUD 固定白色不随外观 */
+    /** 外观切换时调用：转向图标重新染色（深色白、浅色深灰）；车道线 HUD 固定白色不随外观。
+     *  距离/道路名/速度/服务区文字也必须跟随主题（XML 默认色是深色套的白色，浅色外观下会看不清）。 */
     fun applyTheme() {
-        val color = com.nui.launcher.UiTheme.palette(context).textPrimary
-        turnView?.setColorFilter(color, android.graphics.PorterDuff.Mode.SRC_IN)
+        val p = com.nui.launcher.UiTheme.palette(context)
+        turnView?.setColorFilter(p.textPrimary, android.graphics.PorterDuff.Mode.SRC_IN)
+        distView?.setTextColor(p.textPrimary)
+        timeView?.setTextColor(p.textPrimary)
+        speedView?.setTextColor(p.textSecondary)
+        sapaMoreView?.setTextColor(p.textSecondary)
         Log.i(TAG, "外观染色: ${if (com.nui.launcher.UiTheme.isDark(context)) "深色" else "浅色"}")
     }
 

@@ -52,6 +52,7 @@
     <string name="voice_title">语音</string>
     <string name="voice_female">女声（小雅）</string>
     <string name="voice_male">男声（超文）</string>
+    <string name="voice_unavailable">系统语音不可用（无可用 TTS 引擎），请在系统设置中检查语音引擎</string>
     <string name="lyric_bg_alpha">悬浮歌词背景不透明度</string>
     <string name="lyric_bg_alpha_hint">数值越大背景越不透明（100% 为完全不透明）</string>
     <string name="key_mapping_list">方向盘按键映射</string>

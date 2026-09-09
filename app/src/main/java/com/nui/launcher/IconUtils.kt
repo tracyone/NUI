@@ -4,13 +4,24 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.Drawable
+import android.util.LruCache
 
 /**
  * 应用图标加载工具：
  * - getIconWithFallback: 返回应用图标，若系统未给则用默认占位图
- * - toBitmap: 将 Drawable 转为 Bitmap（适配 RecyclerView 异步回收）
+ * - hasCustomIcon: 判断应用是否有自定义图标（区别于系统默认图标）
+ * - loadBitmap: 按需加载图标 Bitmap（LruCache 缓存，翻页回来秒显；不同尺寸分别缓存）
+ * - toBitmap: 将 Drawable 转为 Bitmap
+ *
+ * 内存考虑：车机内存有限，缓存上限 8MB，按"包名@尺寸"为 key，
+ * 避免重复加载同一应用同一尺寸的图标。
  */
 object IconUtils {
+
+    private const val MAX_CACHE_BYTES = 8 * 1024 * 1024
+    private val bitmapCache = object : LruCache<String, Bitmap>(MAX_CACHE_BYTES) {
+        override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
+    }
 
     fun getIconWithFallback(pm: PackageManager, packageName: String, fallback: Drawable): Drawable {
         return try {
@@ -19,6 +30,34 @@ object IconUtils {
             fallback
         }
     }
+
+    /** 应用是否有自定义图标（区别于系统默认图标）：比较 constantState，同一资源返回同一实例状态 */
+    fun hasCustomIcon(pm: PackageManager, packageName: String, fallback: Drawable): Boolean {
+        return try {
+            val icon = pm.getApplicationIcon(packageName) ?: return false
+            icon.constantState != fallback.constantState
+        } catch (e: PackageManager.NameNotFoundException) {
+            false
+        }
+    }
+
+    /** 按需加载应用图标 Bitmap：先查缓存，未命中才从 PackageManager 加载并转 Bitmap 入缓存 */
+    fun loadBitmap(
+        pm: PackageManager,
+        packageName: String,
+        fallback: Drawable,
+        sizePx: Int,
+    ): Bitmap {
+        val key = "$packageName@$sizePx"
+        bitmapCache.get(key)?.let { return it }
+        val drawable = getIconWithFallback(pm, packageName, fallback)
+        val bmp = toBitmap(drawable, sizePx)
+        bitmapCache.put(key, bmp)
+        return bmp
+    }
+
+    /** 清除缓存（应用卸载/图标变化后调用，避免残留旧图标） */
+    fun clearCache() = bitmapCache.evictAll()
 
     fun toBitmap(drawable: Drawable, sizePx: Int): Bitmap {
         val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
