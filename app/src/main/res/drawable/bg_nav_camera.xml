@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 电子眼警示底：暗红圆角底，衬托黄色警示文字 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#4D8B1A1A" />
+    <corners android:radius="10dp" />
+    <stroke
+        android:width="1dp"
+        android:color="#80FFD54F" />
+</shape>

@@ -102,9 +102,8 @@ class MainActivity : AppCompatActivity() {
     private var appGridLoaded = false
     /** 从系统卸载页返回后需重载应用网格 */
     private var pendingReloadOnResume = false
-    private var appGridView: androidx.viewpager2.widget.ViewPager2? = null
-    /** 分页应用网格：每页一个 6 列 RecyclerView，各页独立的 AppListAdapter（刷新时逐页 notify） */
-    private val appGridPageAdapters = mutableMapOf<Int, AppListAdapter>()
+    /** 分页应用网格：外层 ViewPager2 每页一个 6 列 RecyclerView；key=页索引(0..N) */
+    private val appPageViews = mutableMapOf<Int, RecyclerView>()
     /** 是否从桌面启动了外部 app——按 home 回来时恢复到启动前的 page */
     private var launchedExternalApp = false
     /** 启动外部 app 前所在的 page */
@@ -118,22 +117,81 @@ class MainActivity : AppCompatActivity() {
     }
 
     private inner class PagerAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
-        override fun getItemCount() = 2
-        override fun getItemViewType(position: Int) = position
+        /** 应用分页数据（由 loadAppGrid 异步填充后增量 notify）；页面 0=桌面，1..N=应用各页 */
+        var appPages: List<List<AppModel>> = emptyList()
+        var appRowHeightDp: Float = 0f
+
+        init {
+            // stable ids = position：桌面页(0)的 ViewHolder 永不重建，
+            // mapHost/musicHost 等持有的 View 引用不失效；应用页变化只做增量插入/删除
+            setHasStableIds(true)
+        }
+
+        override fun getItemId(position: Int): Long = position.toLong()
+
+        override fun getItemCount() = 1 + appPages.size
+        override fun getItemViewType(position: Int) = if (position == 0) 0 else 1
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
             val inflater = LayoutInflater.from(parent.context)
             val v = when (viewType) {
                 0 -> inflater.inflate(R.layout.page_desktop, parent, false)
-                else -> inflater.inflate(R.layout.page_app_grid, parent, false)
+                else -> {
+                    // 应用页容器：必须 MATCH_PARENT（ViewPager2 要求页面占满），
+                    // 带与桌面一致的 padding（dock 让位），内容为单页 6 列网格
+                    FrameLayout(parent.context).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                        )
+                        val dp = resources.displayMetrics.density
+                        setPadding(
+                            (116 * dp).toInt(),
+                            (32 * dp).toInt(),
+                            (32 * dp).toInt(),
+                            (48 * dp).toInt(),
+                        )
+                    }
+                }
             }
             return object : RecyclerView.ViewHolder(v) {}
         }
         override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
-            when (position) {
-                0 -> bindDesktop(holder.itemView)
-                1 -> bindAppGrid(holder.itemView)
+            when {
+                position == 0 -> bindDesktop(holder.itemView)
+                else -> bindAppPage(holder.itemView as ViewGroup, position - 1)
             }
         }
+    }
+
+    /** 应用页：往容器里放一个静态 6 列网格（不参与滚动，翻页由外层 ViewPager2 驱动） */
+    private fun bindAppPage(container: ViewGroup, pageIndex: Int) {
+        val pa = binding.viewPager.adapter as? PagerAdapter ?: return
+        val pages = pa.appPages
+        if (pageIndex < 0 || pageIndex >= pages.size) return
+        val rv = RecyclerView(this).apply {
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            )
+            layoutManager = GridLayoutManager(this@MainActivity, 6)
+            setHasFixedSize(true)
+            itemAnimator = null
+            isNestedScrollingEnabled = false
+            adapter = AppListAdapter(
+                context = this@MainActivity,
+                apps = pages[pageIndex],
+                onClick = { app ->
+                    if (app.onClick != null) app.onClick.invoke()
+                    else startActivity(app.launchIntent)
+                },
+                onLongClick = { app -> if (app.onClick == null) showAppMenu(app) },
+                rowHeightDp = pa.appRowHeightDp,
+            )
+        }
+        appPageViews[pageIndex] = rv
+        // 同一 ViewHolder 可能被多次 re-bind（图标比例/数据变化时 notifyItemRangeChanged），先清空再挂
+        container.removeAllViews()
+        container.addView(rv)
     }
 
     private fun bindDesktop(v: View) {
@@ -149,6 +207,7 @@ class MainActivity : AppCompatActivity() {
         desktopNavInfoOverlay = v.findViewById(R.id.navInfoOverlay)
         weatherText = v.findViewById(R.id.weatherText)
         weatherText?.setOnClickListener { startActivity(Intent(this, WeatherActivity::class.java)) }
+        bindNavFavoriteClick()
         if (!page0Ready) {
             page0Ready = true
             v.post {
@@ -158,14 +217,13 @@ class MainActivity : AppCompatActivity() {
                 // mapHost 就绪后按当前开关重算悬浮地图底部边界（onCreate/onResume 时
                 // mapHost 尚未初始化，applySystemDock 会跳过 setBottomLimit）
                 applySystemDock()
+                // 加载应用分页并挂到外层 PagerAdapter（页面 1..N 为应用各页）
+                loadAppGrid()
             }
         }
     }
 
-    private fun bindAppGrid(v: View) {
-        appGridView = v.findViewById(R.id.appGridMain)
-        loadAppGrid(v.findViewById(R.id.appGridMain))
-    }
+    /** 桌面页应用列表按钮（dock 底部）：切到应用第 1 页 */
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -176,30 +234,37 @@ class MainActivity : AppCompatActivity() {
         // 临时测试：监听高德昼夜模式广播
         registerReceiver(amapDayNightReceiver, android.content.IntentFilter("AUTONAVI_STANDARD_BROADCAST_SEND"))
 
-        // 红绿灯倒计时监控（测试版）
-        trafficLightMonitor = com.nui.launcher.nav.TrafficLightMonitor(this)
-        trafficLightMonitor.start()
+        // 红绿灯监控已并入 NavInfoHost（巡航 ICON=0 数据驱动，比 10019 STATE=24 更可靠），
+        // 旧 TrafficLightMonitor 停用以避免重复语音提醒
+        // trafficLightMonitor = com.nui.launcher.nav.TrafficLightMonitor(this)
+        // trafficLightMonitor.start()
 
         binding.viewPager.adapter = PagerAdapter()
         binding.viewPager.isUserInputEnabled = true
         binding.viewPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
+                // 指示器：点索引 = 外层页索引（0=桌面，1..N=应用各页）
                 updatePageIndicator(position)
-                // 手势分流：page0（桌面）保留外层横滑切到应用列表；
-                // page1（应用列表）禁用外层横滑，左右滑动全部交给内层应用网格翻页
-                binding.viewPager.isUserInputEnabled = position == 0
-                if (::mapHost.isInitialized) {
-                    // 回桌面页时重新取几何并刷新浮窗（设置页切换系统 Dock 开关时地图卡片离屏，
-                    // 几何可能未更新；回来时强制 primeCache + showFloat 用最新几何下发）
-                    if (position == 0) mapHost.refreshFloat() else mapHost.closeFloat()
-                }
+                // 离开桌面时关闭高德浮窗；回到桌面时浮窗几何由 IDLE 回调刷新
+                // （滑动动画中 getLocationOnScreen 会取到过渡坐标，导致浮窗与 dock 重叠）
+                if (::mapHost.isInitialized && position != 0) mapHost.closeFloat()
                 syncWeatherLayer(position)
+            }
+
+            override fun onPageScrollStateChanged(state: Int) {
+                // 页面完全静止后再刷新浮窗几何：HOME/应用列表按钮/滑动回桌面统一走这里，
+                // 保证取数时机一致（非滑动切换与滑动结束都触发 SCROLL_STATE_IDLE）
+                if (state == ViewPager2.SCROLL_STATE_IDLE &&
+                    binding.viewPager.currentItem == 0 && ::mapHost.isInitialized
+                ) {
+                    mapHost.refreshFloat()
+                }
             }
         })
 
         setupDock()
         applyDockStyle()
-        setupPageIndicator()
+        setupPageIndicator(1)
 
         // 桌面全屏透明天气动画层 + 语音播报
         setupWeatherLayer()
@@ -459,18 +524,16 @@ class MainActivity : AppCompatActivity() {
             musicHost.refresh()
             musicHost.setFloatAreaVisible(true)
         }
-        // 设置页可能改了应用列表图标比例，返回时刷新（分页：逐页 notify）
-        for (a in appGridPageAdapters.values) a.notifyDataSetChanged()
+        // 设置页可能改了应用列表图标比例，返回时刷新：仅重绑应用页（桌面页 ViewHolder 复用）
+        (binding.viewPager.adapter as? PagerAdapter)?.let { pa ->
+            if (pa.appPages.isNotEmpty()) pa.notifyItemRangeChanged(1, pa.appPages.size)
+        }
         // 从系统卸载页返回：重载应用网格（被卸载的应用消失）
         if (pendingReloadOnResume) {
             pendingReloadOnResume = false
             appGridLoaded = false
-            val grid = appGridView
-            if (grid != null) {
-                grid.adapter = null
-                appGridPageAdapters.clear()
-                loadAppGrid(grid)
-            }
+            // 应用页 ViewHolder 复用，无需 clear（loadAppGrid 增量更新时会重新 bind）
+            loadAppGrid()
         }
     }
 
@@ -501,7 +564,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         unregisterReceiver(amapDayNightReceiver)
-        if (::trafficLightMonitor.isInitialized) trafficLightMonitor.stop()
+        // if (::trafficLightMonitor.isInitialized) trafficLightMonitor.stop()
         navInfoHost?.stop()
         if (::weatherVoice.isInitialized) weatherVoice.shutdown()
         if (::weatherLayer.isInitialized) weatherLayer.removeCallbacks(weatherLayerFadeRunnable)
@@ -643,10 +706,10 @@ class MainActivity : AppCompatActivity() {
                 mp.post { mapHost?.refreshFloat() }
             }
         }
-        // 应用网格：dock 右侧留出 12dp 统一间距（参考氢桌面比例）
-        appGridView?.let { g ->
-            val leftPad = if (edge) dockW + 12 else 8 + dockW + 12
-            g.setPadding((leftPad * dp.toFloat()).toInt(), g.paddingTop, g.paddingEnd, g.paddingBottom)
+        // 应用网格：dock 右侧留出 12dp 统一间距（参考氢桌面比例），各应用页同步
+        val leftPad = if (edge) dockW + 12 else 8 + dockW + 12
+        for (rv in appPageViews.values) {
+            rv.setPadding((leftPad * dp.toFloat()).toInt(), rv.paddingTop, rv.paddingEnd, rv.paddingBottom)
         }
     }
 
@@ -763,9 +826,10 @@ class MainActivity : AppCompatActivity() {
         return true
     }
 
-    private fun setupPageIndicator() {
-        val dots = arrayOfNulls<View>(2)
-        for (i in 0..1) {
+    private fun setupPageIndicator(count: Int) {
+        binding.pageIndicator.removeAllViews()
+        val dots = arrayOfNulls<View>(count)
+        for (i in 0 until count) {
             val dot = View(this)
             val size = (8 * resources.displayMetrics.density).toInt()
             val lp = LinearLayout.LayoutParams(size, size).apply {
@@ -782,8 +846,10 @@ class MainActivity : AppCompatActivity() {
 
     @Suppress("UNCHECKED_CAST")
     private fun updatePageIndicator(position: Int) {
-        val dots = binding.pageIndicator.tag as Array<View>
-        for (i in dots.indices) dots[i].alpha = if (i == position) 1f else 0.35f
+        val dots = binding.pageIndicator.tag as? Array<View> ?: return
+        if (dots.isEmpty()) return
+        val safe = position.coerceIn(0, dots.size - 1)
+        for (i in dots.indices) dots[i].alpha = if (i == safe) 1f else 0.35f
     }
 
     private fun setupMap() {
@@ -835,10 +901,14 @@ class MainActivity : AppCompatActivity() {
         navInfoHost = com.nui.launcher.nav.NavInfoHost(
             this,
             desktopNavInfoOverlay!!,
-            listOf(desktopBtnNavHome!!, desktopBtnNavCompany!!, desktopBtnNavFavorite!!),
         )
         navInfoHost?.start()
-        // 收藏夹按钮：打开高德地图收藏夹
+        bindNavFavoriteClick()
+    }
+
+    /** 收藏夹按钮：打开高德地图收藏夹。page0 由 ViewPager2 管理，ViewHolder 重建后
+     *  旧引用失效，须在 bindDesktop 每次重建时重新绑定 */
+    private fun bindNavFavoriteClick() {
         desktopBtnNavFavorite?.setOnClickListener {
             try {
                 val intent = android.content.Intent(
@@ -870,18 +940,28 @@ class MainActivity : AppCompatActivity() {
         wallpaper.onShowFloat = { mapHost.showFloat() }
     }
 
-    private fun loadAppGrid(grid: androidx.viewpager2.widget.ViewPager2) {
+    private fun loadAppGrid() {
         if (appGridLoaded) return
         appGridLoaded = true
 
-        // 每页行数：按屏幕可用高度估算（图标 72dp*scale + 名称标签约 24dp），至少 2 行
+        // 每页行数：按当前 DPI 与图标尺寸精确计算，保证每行图标+名称完整显示。
+        // 行高 = item 上下 padding(12dp*2) + 图标(72dp*scale) + 标签区(8dp marginTop + 14sp 文字≈17dp + 上下 padding 4dp)，
+        // 可用高 = 屏高(dp) - 网格上下 padding(32+48dp)。宁可少放一行也不允许文字被裁掉。
         val density = resources.displayMetrics.density
-        val availH = (resources.displayMetrics.heightPixels / density) - 32f - 48f // 上下 padding
+        val screenHdp = resources.displayMetrics.heightPixels / density
         val iconScale = UiTheme.appIconScale(this)
-        val itemH = 72f * iconScale + 24f
+        val gridPadTop = 32f    // page_app_grid.xml paddingTop
+        val gridPadBottom = 48f // page_app_grid.xml paddingBottom
+        val itemPad = 24f       // item_app_grid.xml item 上下 padding 12dp*2
+        val iconSizeDp = UiTheme.DEFAULT_APP_ICON_DP * iconScale
+        val labelH = 29f        // 8dp marginTop + 14sp 文字(≈17dp) + 文字上下 padding 4dp
+        val itemH = itemPad + iconSizeDp + labelH
+        val availH = screenHdp - gridPadTop - gridPadBottom
         val rows = maxOf(2, (availH / itemH).toInt())
         val perPage = 6 * rows
-        android.util.Log.d("NUI.AppGrid", "分页网格: rows=$rows perPage=$perPage availH=$availH")
+        // 固定行高：均分可用高度撑满整屏（最后一行贴底不悬空），item 内容垂直居中
+        val rowHeightDp = availH / rows
+        android.util.Log.d("NUI.AppGrid", "分页网格: rows=$rows perPage=$perPage availH=$availH itemH=$itemH rowH=$rowHeightDp")
 
         Thread {
             val pm = packageManager
@@ -923,12 +1003,8 @@ class MainActivity : AppCompatActivity() {
                         // 隐藏/恢复应用可能已变化：重载应用网格（而非仅 notifyDataSetChanged，
                         // 否则恢复的应用不会重新出现）
                         appGridLoaded = false
-                        val grid = appGridView
-                        if (grid != null) {
-                            grid.adapter = null
-                            appGridPageAdapters.clear()
-                            loadAppGrid(grid)
-                        }
+                        // 应用页 ViewHolder 复用，无需 clear（loadAppGrid 增量更新时会重新 bind）
+                        loadAppGrid()
                         if (::musicHost.isInitialized) musicHost.refresh()
                     }
                     settingsDialog = dlg
@@ -939,42 +1015,22 @@ class MainActivity : AppCompatActivity() {
             val pages = allApps.chunked(perPage)
             android.util.Log.d("NUI.AppGrid", "应用总数=${allApps.size} 页数=${pages.size}")
             runOnUiThread {
-                grid.adapter = object : androidx.recyclerview.widget.RecyclerView.Adapter<androidx.recyclerview.widget.RecyclerView.ViewHolder>() {
-                    override fun getItemCount() = pages.size
-                    override fun onCreateViewHolder(
-                        parent: ViewGroup,
-                        viewType: Int,
-                    ): androidx.recyclerview.widget.RecyclerView.ViewHolder {
-                        // 每页一个 6 列网格（不参与滚动，翻页由外层 ViewPager2 驱动）
-                        val rv = androidx.recyclerview.widget.RecyclerView(parent.context)
-                        rv.layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                        )
-                        rv.layoutManager = GridLayoutManager(parent.context, 6)
-                        rv.setHasFixedSize(true)
-                        rv.itemAnimator = null
-                        rv.isNestedScrollingEnabled = false
-                        return object : androidx.recyclerview.widget.RecyclerView.ViewHolder(rv) {}
-                    }
-                    override fun onBindViewHolder(
-                        holder: androidx.recyclerview.widget.RecyclerView.ViewHolder,
-                        position: Int,
-                    ) {
-                        val rv = holder.itemView as androidx.recyclerview.widget.RecyclerView
-                        val pageAdapter = AppListAdapter(
-                            context = this@MainActivity,
-                            apps = pages[position],
-                            onClick = { app ->
-                                if (app.onClick != null) app.onClick.invoke()
-                                else startActivity(app.launchIntent)
-                            },
-                            onLongClick = { app -> if (app.onClick == null) showAppMenu(app) },
-                        )
-                        appGridPageAdapters[position] = pageAdapter
-                        rv.adapter = pageAdapter
-                    }
+                // 增量更新应用页：stable ids 保证桌面页 ViewHolder 复用（mapHost 引用不失效），
+                // 只插入/删除/重绑应用页，绝不重建整个 adapter
+                val pa = binding.viewPager.adapter as? PagerAdapter ?: return@runOnUiThread
+                val oldAppCount = pa.appPages.size
+                pa.appPages = pages
+                pa.appRowHeightDp = rowHeightDp
+                when {
+                    oldAppCount < pages.size ->
+                        pa.notifyItemRangeInserted(1 + oldAppCount, pages.size - oldAppCount)
+                    oldAppCount > pages.size ->
+                        pa.notifyItemRangeRemoved(1 + pages.size, oldAppCount - pages.size)
                 }
+                if (minOf(oldAppCount, pages.size) > 0) {
+                    pa.notifyItemRangeChanged(1, minOf(oldAppCount, pages.size))
+                }
+                setupPageIndicator(1 + pages.size)
             }
         }.start()
     }
@@ -1029,12 +1085,8 @@ class MainActivity : AppCompatActivity() {
                 NuiToast.show(this, getString(R.string.hide_done, app.label), Toast.LENGTH_SHORT)
                 // 重新加载应用网格（隐藏项消失），保留"桌面设置"入口
                 appGridLoaded = false
-                val grid = appGridView
-                if (grid != null) {
-                    grid.adapter = null
-                    appGridPageAdapters.clear()
-                    loadAppGrid(grid)
-                }
+                // 应用页 ViewHolder 复用，无需 clear（loadAppGrid 增量更新时会重新 bind）
+                loadAppGrid()
             }
             .setNegativeButton(R.string.back, null)
             .show()

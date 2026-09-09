@@ -163,108 +163,207 @@
                     android:maxLines="1"
                     android:ellipsize="end" />
             </LinearLayout>
+        </LinearLayout>
 
-            <!-- 导航信息覆盖层：高德导航中替换"回家/公司/收藏"三按钮，
-                 参照 CarPlay 右上角转向卡：转向图标 + 大字距离 + 道路名 + 小字时间/速度 -->
+        <!-- 导航信息覆盖层：高德导航/巡航中替换"回家/公司/收藏"三按钮。
+             设计：深蓝黑实色卡片 + 白色大字，任何壁纸下显眼；
+                 导航模式：终点+全程 / 电子眼 / 出口 / 速度限速 / 服务区；
+                 巡航模式：当前速度大字 / 最近测速 / 最近红绿灯（地图上不明显或没有的信息） -->
             <LinearLayout
                 android:id="@+id/navInfoOverlay"
-                android:layout_width="0dp"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
                 android:orientation="vertical"
-                android:gravity="center"
+                android:gravity="center_horizontal"
+                android:background="@drawable/bg_nav_card"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingTop="10dp"
+                android:paddingBottom="12dp"
                 android:visibility="gone">
 
+                <!-- ========== 导航模式内容 ========== -->
                 <LinearLayout
-                    android:layout_width="wrap_content"
+                    android:id="@+id/navInfoNavBlock"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center">
+                    android:orientation="vertical"
+                    android:gravity="center_horizontal"
+                    android:visibility="gone">
 
-                    <ImageView
-                        android:id="@+id/navInfoTurn"
-                        android:layout_width="44dp"
-                        android:layout_height="44dp"
-                        android:scaleType="centerInside"
-                        android:contentDescription="转向" />
+                    <!-- 行1：转向图标 + 终点名 -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center">
 
+                        <ImageView
+                            android:id="@+id/navInfoTurn"
+                            android:layout_width="56dp"
+                            android:layout_height="56dp"
+                            android:scaleType="centerInside"
+                            android:contentDescription="转向" />
+
+                        <TextView
+                            android:id="@+id/navInfoDest"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginStart="8dp"
+                            android:text="回家"
+                            android:textSize="28sp"
+                            android:textStyle="bold"
+                            android:textColor="#FFFFFF"
+                            android:maxLines="1"
+                            android:ellipsize="end" />
+                    </LinearLayout>
+
+                    <!-- 行2：全程剩余时间 · 距离 -->
                     <TextView
-                        android:id="@+id/navInfoDist"
+                        android:id="@+id/navInfoEta"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="6dp"
-                        android:text="2.1公里"
-                        android:textSize="22sp"
+                        android:layout_marginTop="2dp"
+                        android:text="23分钟 · 12公里"
+                        android:textSize="20sp"
                         android:textStyle="bold"
-                        android:textColor="@color/text_primary"
+                        android:textColor="#E0F0FF"
                         android:maxLines="1"
                         android:ellipsize="end" />
+
+                    <!-- 行3：电子眼警示（黄色大字，仅测速/摄像时显示） -->
+                    <TextView
+                        android:id="@+id/navInfoCamera"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:background="@drawable/bg_nav_camera"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp"
+                        android:paddingTop="4dp"
+                        android:paddingBottom="4dp"
+                        android:text="⚠ 前方300米测速 限速60"
+                        android:textSize="18sp"
+                        android:textStyle="bold"
+                        android:textColor="#FFD54F"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:visibility="gone" />
+
+                    <!-- 行4：出口提示（仅高速显示） -->
+                    <TextView
+                        android:id="@+id/navInfoExit"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="出口 郑州 · 2公里"
+                        android:textSize="18sp"
+                        android:textStyle="bold"
+                        android:textColor="#FFFFFF"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:visibility="gone" />
+
+                    <!-- 行5：速度 · 限速 -->
+                    <TextView
+                        android:id="@+id/navInfoSpeed"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="65km/h · 限速80"
+                        android:textSize="16sp"
+                        android:textColor="#B0C4DE"
+                        android:maxLines="1"
+                        android:ellipsize="end" />
+
+                    <!-- 行6：服务区（仅高速公路显示；深绿指示牌风格，保留原样式） -->
+                    <TextView
+                        android:id="@+id/navInfoSapa"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:background="@drawable/bg_sapa_board"
+                        android:paddingStart="14dp"
+                        android:paddingEnd="14dp"
+                        android:paddingTop="5dp"
+                        android:paddingBottom="5dp"
+                        android:text="原阳服务区 · 8公里"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        android:textColor="#FFFFFF"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:visibility="gone" />
+
+                    <!-- 服务区小行：前方服务区个数 -->
+                    <TextView
+                        android:id="@+id/navInfoSapaMore"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="前方共 2 个服务区"
+                        android:textSize="12sp"
+                        android:textColor="#C8D8EA"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:visibility="gone" />
                 </LinearLayout>
 
-                <!-- 车道线：13012 广播 drive_way_info 动态渲染 -->
+                <!-- ========== 巡航模式内容 ========== -->
                 <LinearLayout
-                    android:id="@+id/navInfoLanes"
-                    android:layout_width="wrap_content"
-                    android:layout_height="44dp"
-                    android:orientation="horizontal"
-                    android:gravity="center"
-                    android:visibility="gone" />
-
-                <TextView
-                    android:id="@+id/navInfoTime"
-                    android:layout_width="wrap_content"
+                    android:id="@+id/navInfoCruiseBlock"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
-                    android:text="进入宝石路"
-                    android:textSize="14sp"
-                    android:textColor="@color/text_primary"
-                    android:maxLines="1"
-                    android:ellipsize="end" />
+                    android:orientation="vertical"
+                    android:gravity="center_horizontal"
+                    android:visibility="gone">
 
-                <TextView
-                    android:id="@+id/navInfoSpeed"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="1dp"
-                    android:text="37分钟 · 65km/h · 限速80"
-                    android:textSize="12sp"
-                    android:textColor="@color/text_secondary"
-                    android:maxLines="1"
-                    android:ellipsize="end" />
+                    <!-- 行1：当前速度大字（超速变红） -->
+                    <TextView
+                        android:id="@+id/cruiseSpeed"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="65km/h"
+                        android:textSize="40sp"
+                        android:textStyle="bold"
+                        android:textColor="#FFFFFF"
+                        android:maxLines="1" />
 
-                <!-- 服务区：仅高速公路（ROAD_TYPE=0）显示；深绿指示牌风格（参考高德，无配套图标） -->
-                <TextView
-                    android:id="@+id/navInfoSapa"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:background="@drawable/bg_sapa_board"
-                    android:paddingStart="14dp"
-                    android:paddingEnd="14dp"
-                    android:paddingTop="5dp"
-                    android:paddingBottom="5dp"
-                    android:text="原阳服务区 · 8公里"
-                    android:textSize="15sp"
-                    android:textStyle="bold"
-                    android:textColor="#FFFFFF"
-                    android:maxLines="1"
-                    android:ellipsize="end"
-                    android:visibility="gone" />
+                    <!-- 行2：最近测速（黄色警示，仅测速时显示） -->
+                    <TextView
+                        android:id="@+id/cruiseCamera"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:background="@drawable/bg_nav_camera"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp"
+                        android:paddingTop="4dp"
+                        android:paddingBottom="4dp"
+                        android:text="⚠ 前方300米 限速60"
+                        android:textSize="18sp"
+                        android:textStyle="bold"
+                        android:textColor="#FFD54F"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:visibility="gone" />
 
-                <!-- 服务区小行：前方服务区个数（协议无第二个服务区名称/距离，用 SAPA_NUM 提示） -->
-                <TextView
-                    android:id="@+id/navInfoSapaMore"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
-                    android:text="前方共 2 个服务区"
-                    android:textSize="11sp"
-                    android:textColor="@color/text_secondary"
-                    android:maxLines="1"
-                    android:ellipsize="end"
-                    android:visibility="gone" />
+                    <!-- 行3：最近红绿灯（方向+状态+倒计时；红灯红字/绿灯绿字） -->
+                    <TextView
+                        android:id="@+id/cruiseLight"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="🚦 直行 红灯 12秒"
+                        android:textSize="20sp"
+                        android:textStyle="bold"
+                        android:textColor="#FF6B6B"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:visibility="gone" />
+                </LinearLayout>
             </LinearLayout>
-        </LinearLayout>
 
         <!-- 时钟 -->
         <LinearLayout

@@ -17,7 +17,7 @@
 
 | KEY_TYPE | 含义 | 关键字段 | 状态 |
 |----------|------|----------|------|
-| 10001 | 导航/巡航信息（核心） | `CUR_SPEED`：当前速度<br>`LIMITED_SPEED`：限速<br>`ICON`/`NEW_ICON`：转向图标<br>`SEG_REMAIN_DIS_AUTO`：段剩余距离<br>`ROUTE_REMAIN_DIS`/`_AUTO`：全程剩余距离<br>`ROUTE_REMAIN_TIME_AUTO`：剩余时间<br>`ETA_TEXT`：预计到达<br>`NEXT_ROAD_NAME`/`CUR_ROAD_NAME`：下一条/当前道路名<br>`ROUTE_ALL_DIS`：全程总距离<br>`CAMERA_DIST`/`CAMERA_SPEED`：电子眼距离/限速<br>`endPOIName`：终点名称<br>`TRAFFIC_LIGHT_NUM`：红绿灯总数<br>`EXIT_NAME_INFO`/`EXIT_DIRECTION_INFO`：出口信息<br>`CAR_DIRECTION`：车头方向 | 🔍 已检索，待实现 |
+| 10001 | 导航/巡航信息（核心） | `TYPE`：模式判据（0=GPS导航/1=模拟导航/2=巡航，见协议 PDF 第50页）<br>`CUR_SPEED`：当前速度<br>`LIMITED_SPEED`：限速<br>`ICON`/`NEW_ICON`：转向图标<br>`SEG_REMAIN_DIS_AUTO`：段剩余距离<br>`ROUTE_REMAIN_DIS`/`_AUTO`：全程剩余距离<br>`ROUTE_REMAIN_TIME_AUTO`：剩余时间<br>`ETA_TEXT`：预计到达<br>`NEXT_ROAD_NAME`/`CUR_ROAD_NAME`：下一条/当前道路名<br>`ROUTE_ALL_DIS`：全程总距离<br>`CAMERA_DIST`/`CAMERA_SPEED`：电子眼距离/限速<br>`endPOIName`：终点名称<br>`TRAFFIC_LIGHT_NUM`：红绿灯总数<br>`EXIT_NAME_INFO`/`EXIT_DIRECTION_INFO`：出口信息<br>`CAR_DIRECTION`：车头方向<br>**模式判定（实测 TYPE 常不带，按用户确认规则）**：`ICON≠0`→导航模式（有转向引导）；`ICON=0` 且 10019 `EXTRA_STATE=46`（主图巡航界面）→巡航模式；退出巡航=10019 `STATE=47`（子界面）或 `ICON≠0` | ✅ 已实现 |
 | 10019 | 昼夜模式变化 | `EXTRA_STATE`：昼夜模式值 | ✅ 已实现（跟随地图外观） |
 | 60073 | 红绿灯数据 | `trafficLightStatus`：灯状态（红/黄/绿）<br>`dir`：方向<br>`redLightCountDownSeconds`：倒计时秒数<br>`lightsData`：巡航模式 JSON 数组（多方向红绿灯） | 🔍 已检索，待实现 |
 | 13011 | TMC 路况 | `EXTRA_TMC_SEGMENT`：JSON 路况分段数据 | 🔍 已检索，待实现 |

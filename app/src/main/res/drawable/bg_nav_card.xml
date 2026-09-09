@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 导航信息卡背景：深蓝黑实色圆角卡片，白字+描边，任何壁纸/外观下都显眼 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#E61B2432" />
+    <corners android:radius="16dp" />
+    <stroke
+        android:width="2dp"
+        android:color="#4D8AB4F8" />
+</shape>
