@@ -1,6 +1,7 @@
 package com.nui.launcher
 
 import android.content.pm.PackageManager
+import android.content.pm.ResolveInfo
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.Drawable
@@ -31,14 +32,18 @@ object IconUtils {
         }
     }
 
-    /** 应用是否有自定义图标（区别于系统默认图标）：比较 constantState，同一资源返回同一实例状态 */
-    fun hasCustomIcon(pm: PackageManager, packageName: String, fallback: Drawable): Boolean {
-        return try {
-            val icon = pm.getApplicationIcon(packageName) ?: return false
-            icon.constantState != fallback.constantState
-        } catch (e: PackageManager.NameNotFoundException) {
-            false
-        }
+    /**
+     * 应用是否有自定义图标（区别于系统默认图标）：
+     * 直接检查 activity / application 是否声明了 icon 资源（icon != 0）。
+     *
+     * 不用 `getApplicationIcon().constantState != default.constantState` 比较，原因：
+     * - getApplicationIcon 只看 application 级图标，仅 activity 声明图标的应用会
+     *   被误判为"无图标"（启动器实际显示的是 activity 图标，有图标）；
+     * - 多个应用共用同一图标资源时 constantState 相同，会被误判为"默认图标"。
+     */
+    fun hasCustomIcon(ri: ResolveInfo): Boolean {
+        val ai = ri.activityInfo ?: return false
+        return ai.icon != 0 || ai.applicationInfo?.icon != 0
     }
 
     /** 按需加载应用图标 Bitmap：先查缓存，未命中才从 PackageManager 加载并转 Bitmap 入缓存 */

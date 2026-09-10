@@ -203,7 +203,8 @@
                             android:layout_width="56dp"
                             android:layout_height="56dp"
                             android:scaleType="centerInside"
-                            android:contentDescription="转向" />
+                            android:contentDescription="转向"
+                            android:visibility="gone" />
 
                         <TextView
                             android:id="@+id/navInfoDest"
@@ -212,23 +213,23 @@
                             android:layout_weight="1"
                             android:layout_marginStart="8dp"
                             android:text="回家"
-                            android:textSize="28sp"
+                            android:textSize="18sp"
                             android:textStyle="bold"
                             android:textColor="#FFFFFF"
                             android:maxLines="1"
                             android:ellipsize="end" />
                     </LinearLayout>
 
-                    <!-- 行2：全程剩余时间 · 距离 -->
+                    <!-- 行2：全程剩余时间 · 距离（重要信息，大字显示） -->
                     <TextView
                         android:id="@+id/navInfoEta"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="2dp"
                         android:text="23分钟 · 12公里"
-                        android:textSize="20sp"
+                        android:textSize="26sp"
                         android:textStyle="bold"
-                        android:textColor="#E0F0FF"
+                        android:textColor="#FFFFFF"
                         android:maxLines="1"
                         android:ellipsize="end" />
 
@@ -265,8 +266,8 @@
                         android:ellipsize="end"
                         android:visibility="gone" />
 
-                    <!-- 行5：前方拥堵（13011 TMC 实时路况光柱图；显示距下一段拥堵的实时距离，
-                         颜色区分拥堵程度：红=拥堵 / 深红=严重拥堵） -->
+                    <!-- 行5：前方拥堵（13011 TMC 实时路况光柱图；颜色按拥堵程度变化：
+                         黄=缓行 / 红=拥堵 / 深红=严重拥堵；当前拥堵时显示剩余距离） -->
                     <TextView
                         android:id="@+id/navInfoTmc"
                         android:layout_width="wrap_content"
@@ -280,15 +281,16 @@
                         android:ellipsize="end"
                         android:visibility="gone" />
 
-                    <!-- 行6：速度 · 限速 -->
+                    <!-- 行6：当前速度（大字，数字≈2.1x，km/h 常规，限速小字灰蓝） -->
                     <TextView
                         android:id="@+id/navInfoSpeed"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
+                        android:layout_marginTop="2dp"
                         android:text="65km/h · 限速80"
-                        android:textSize="16sp"
-                        android:textColor="#B0C4DE"
+                        android:textSize="18sp"
+                        android:textStyle="bold"
+                        android:textColor="#FFFFFF"
                         android:maxLines="1"
                         android:ellipsize="end" />
 

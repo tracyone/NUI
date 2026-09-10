@@ -967,7 +967,6 @@ class MainActivity : AppCompatActivity() {
             val pm = packageManager
             val main = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
             val resolved = pm.queryIntentActivities(main, 0)
-            val fallbackIcon = pm.defaultActivityIcon
             val hidden = HiddenApps.hiddenSet(this)
             val apps = resolved.mapNotNull { ri ->
                 val pkg = ri.activityInfo.packageName
@@ -976,7 +975,7 @@ class MainActivity : AppCompatActivity() {
                     label = ri.loadLabel(pm).toString(),
                     packageName = pkg,
                     // icon 不在此处加载：AppListAdapter 按需加载（仅显示页加载，LruCache 缓存）
-                    hasIcon = IconUtils.hasCustomIcon(pm, pkg, fallbackIcon),
+                    hasIcon = IconUtils.hasCustomIcon(ri),
                     launchIntent = pm.getLaunchIntentForPackage(pkg)
                         ?.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
                         ?: Intent(Intent.ACTION_MAIN).setPackage(pkg),

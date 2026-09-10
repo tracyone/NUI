@@ -1,6 +1,7 @@
 package com.nui.launcher.weather
 
 import android.content.Context
+import android.os.Build
 import com.nui.launcher.voice.NuiTts
 import java.util.Calendar
 
@@ -79,13 +80,88 @@ class WeatherVoice(context: Context) {
     /** 释放（共享引擎保留在内存中，此处仅停止播放） */
     fun shutdown() = tts.stop()
 
-    /** 问候 + 日期（不含天气数据，天气查询不到时也能播） */
+    /** 问候 + 日期（不含天气数据，天气查询不到时也能播）。
+     *  星期用全称"星期X"+ 逗号停顿便于听清；当天是节日时顺带播报（离线计算，无需联网）。 */
     private fun greetingAndDate(): String {
         val c = Calendar.getInstance()
         val hour = c.get(Calendar.HOUR_OF_DAY)
         val greeting = greetingFor(hour)
-        val week = arrayOf("周日", "周一", "周二", "周三", "周四", "周五", "周六")[c.get(Calendar.DAY_OF_WEEK) - 1]
-        return "$greeting，现在是${c.get(Calendar.MONTH) + 1}月${c.get(Calendar.DAY_OF_MONTH)}日$week。"
+        return "$greeting，${dateText(c)}"
+    }
+
+    /** 日期段文案：现在是X月X日，星期X。+（今天是XX节。） */
+    private fun dateText(c: Calendar): String {
+        val week = arrayOf("星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六")[c.get(Calendar.DAY_OF_WEEK) - 1]
+        val base = "现在是${c.get(Calendar.MONTH) + 1}月${c.get(Calendar.DAY_OF_MONTH)}日，$week。"
+        val festival = festivalOf(c) ?: return base
+        return "${base}今天是$festival。"
+    }
+
+    /**
+     * 当天节日（离线判断，无需联网）：
+     * - 公历固定节日（元旦/国庆等）
+     * - 可计算的周日/周四节日（母亲节/父亲节/感恩节）
+     * - 农历节日（春节/元宵/端午/中秋/重阳/腊八，Android 9 及以上系统内置农历）
+     * 无节日返回 null。清明等日期随年份漂移的公历节日不包含，避免报错。
+     */
+    private fun festivalOf(c: Calendar): String? {
+        val m = c.get(Calendar.MONTH) + 1
+        val d = c.get(Calendar.DAY_OF_MONTH)
+        val solar = when {
+            m == 1 && d == 1 -> "元旦"
+            m == 2 && d == 14 -> "情人节"
+            m == 3 && d == 8 -> "妇女节"
+            m == 3 && d == 12 -> "植树节"
+            m == 4 && d == 1 -> "愚人节"
+            m == 5 && d == 1 -> "劳动节"
+            m == 5 && d == 4 -> "青年节"
+            m == 6 && d == 1 -> "儿童节"
+            m == 7 && d == 1 -> "建党节"
+            m == 8 && d == 1 -> "建军节"
+            m == 9 && d == 10 -> "教师节"
+            m == 10 && d == 1 -> "国庆节"
+            m == 12 && d == 24 -> "平安夜"
+            m == 12 && d == 25 -> "圣诞节"
+            else -> null
+        }
+        if (solar != null) return solar
+
+        // 周日/周四节日：母亲节=5月第2个周日、父亲节=6月第3个周日、感恩节=11月第4个周四
+        val special = when {
+            m == 5 && d == nthWeekdayOfMonth(c, 5, Calendar.SUNDAY, 2) -> "母亲节"
+            m == 6 && d == nthWeekdayOfMonth(c, 6, Calendar.SUNDAY, 3) -> "父亲节"
+            m == 11 && d == nthWeekdayOfMonth(c, 11, Calendar.THURSDAY, 4) -> "感恩节"
+            else -> null
+        }
+        if (special != null) return special
+
+        // 农历节日（Android 8.0+ 内置农历；车机 Android 9 可用，低版本跳过农历部分）
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val cc = android.icu.util.ChineseCalendar()
+            cc.timeInMillis = c.timeInMillis
+            val lm = cc.get(android.icu.util.ChineseCalendar.MONTH) + 1
+            val ld = cc.get(android.icu.util.ChineseCalendar.DAY_OF_MONTH)
+            return when {
+                lm == 1 && ld == 1 -> "春节"
+                lm == 1 && ld == 15 -> "元宵节"
+                lm == 5 && ld == 5 -> "端午节"
+                lm == 8 && ld == 15 -> "中秋节"
+                lm == 9 && ld == 9 -> "重阳节"
+                lm == 12 && ld == 8 -> "腊八节"
+                else -> null
+            }
+        }
+        return null
+    }
+
+    /** 计算某年第 nth 个 dayOfWeek 的日期（1-7），非当月返回 -1 */
+    private fun nthWeekdayOfMonth(c: Calendar, month: Int, dayOfWeek: Int, nth: Int): Int {
+        val first = Calendar.getInstance().apply {
+            set(c.get(Calendar.YEAR), month - 1, 1)
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+        }
+        val firstDow = first.get(Calendar.DAY_OF_WEEK)
+        return 1 + (dayOfWeek - firstDow + 7) % 7 + (nth - 1) * 7
     }
 
     /** 生成语音摘要文案 */
@@ -93,9 +169,8 @@ class WeatherVoice(context: Context) {
         val c = Calendar.getInstance()
         val hour = c.get(Calendar.HOUR_OF_DAY)
         val greeting = greetingFor(hour)
-        val week = arrayOf("周日", "周一", "周二", "周三", "周四", "周五", "周六")[c.get(Calendar.DAY_OF_WEEK) - 1]
         val sb = StringBuilder()
-        sb.append("$greeting，现在是${c.get(Calendar.MONTH) + 1}月${c.get(Calendar.DAY_OF_MONTH)}日$week。")
+        sb.append("$greeting，${dateText(c)}")
         sb.append("${info.city}当前${info.description}，气温${info.temperature.toInt()}度，体感${info.apparentTemperature.toInt()}度，")
         sb.append("${windDirectionText(info.windDirection)}风${windLevel(info.windSpeed)}级，相对湿度百分之${info.humidity}。")
         sb.append("今天最高${info.maxTemp.toInt()}度，最低${info.minTemp.toInt()}度。")

@@ -5,7 +5,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.text.SpannableString
+import android.text.SpannableStringBuilder
 import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.text.style.RelativeSizeSpan
 import android.util.Log
 import android.view.View
@@ -53,18 +55,13 @@ class NavInfoHost(
         private const val KEY_TYPE_TMC = 13011
         private const val NAV_STATE_NAVIGATING = 8
         private const val NAV_STATE_NAV_EXIT = 9
-        // 协议 10019 状态表：46=主界面（含主图巡航界面），47=子界面（除主图巡航外的其他界面）
-        private const val NAV_STATE_MAIN_CRUISE_UI = 46
-        private const val NAV_STATE_SUB_UI = 47
+        // 10019 状态表（参考 Navi-Link 实测）：25=巡航结束（退出巡航界面）；46/47 实车不可靠，已弃用
+        private const val NAV_STATE_CRUISE_END = 25
     }
 
     // 模式：NONE=普通桌面 / NAVI=导航 / CRUISE=巡航
     private enum class Mode { NONE, NAVI, CRUISE }
     private var mode = Mode.NONE
-
-    // 高德是否处于主图巡航界面（10019 STATE=46 置位 / 47 或 8、9 复位）。
-    // 巡航显示的完整条件：isMainCruiseUi=true 且 10001 ICON=0（双重确认）
-    private var isMainCruiseUi = false
 
     // 导航卡元素
     private var turnView: ImageView? = null
@@ -179,14 +176,11 @@ class NavInfoHost(
         val state = intent.getIntExtra("EXTRA_STATE", -1)
         when (state) {
             // 8：导航中（权威导航判据）
-            NAV_STATE_NAVIGATING -> { isMainCruiseUi = false; setMode(Mode.NAVI) }
-            // 9：导航结束
-            NAV_STATE_NAV_EXIT -> { isMainCruiseUi = false; setMode(Mode.NONE) }
-            // 46：主界面=主图巡航界面（进巡航的必要条件，还需 ICON=0 双重确认）
-            NAV_STATE_MAIN_CRUISE_UI -> { isMainCruiseUi = true; Log.i(TAG, "主图巡航界面(46)") }
-            // 47：子界面（权威退巡航）
-            NAV_STATE_SUB_UI -> {
-                isMainCruiseUi = false
+            NAV_STATE_NAVIGATING -> setMode(Mode.NAVI)
+            // 9：导航结束（回桌面，等待 ICON=0 巡航数据进入巡航）
+            NAV_STATE_NAV_EXIT -> setMode(Mode.NONE)
+            // 25：巡航结束（退出巡航界面）
+            NAV_STATE_CRUISE_END -> {
                 if (mode == Mode.CRUISE) setMode(Mode.NONE)
             }
         }
@@ -246,15 +240,14 @@ class NavInfoHost(
     // ---------- 10001 导航/巡航信息 ----------
 
     private fun handleNaviInfo(intent: Intent) {
-        // 模式判据（用户确认的规则）：
-        // - ICON≠0：有转向引导，一定是导航模式 → 切导航信息显示（无条件）
-        // - ICON=0：无转向引导，需叠加"主图巡航界面(46)"才判定为巡航 → 巡航信息显示
-        // - 退出巡航：10019 STATE=47（子界面）或 ICON≠0（任一触发）
-        // - ICON=0 且非巡航：若已在导航中则保持导航卡（段间无转向），否则保持按钮区（普通主图）
-        // （协议文档 TYPE 字段实测高德不带，已弃用）
+        // 模式判据（对齐 Navi-Link 实测方式）：
+        // - ICON≠0（NEW_ICON 优先，ICON 兜底）：有转向引导 → 导航模式
+        // - ICON=0：巡航数据。非导航模式下进入/更新巡航；导航模式下忽略巡航数据（不打断导航，
+        //   导航活跃只由 ICON≠0 定义，导航结束由 STATE=9 或导航看门狗处理）
+        // - 巡航结束：10019 STATE=25
+        // （46/47 实车不可靠，已弃用；协议文档 TYPE 字段实测高德不带，已弃用）
         var icon = intent.getIntExtra("NEW_ICON", 0)
         if (icon == 0) icon = intent.getIntExtra("ICON", 0)
-        val isCruise = icon == 0 && isMainCruiseUi
 
         // 速度/限速：导航和巡航都更新（超速检测）
         val speed = intent.getIntExtra("CUR_SPEED", 0)
@@ -262,25 +255,25 @@ class NavInfoHost(
         if (speed > 0) curSpeed = speed
         if (limited > 0) limitedSpeed = limited
 
-        if (isCruise) {
-            // 巡航数据：切到巡航模式并更新巡航卡（速度/测速）；从导航态来也强制切换
-            if (mode != Mode.CRUISE) setMode(Mode.CRUISE)
-            updateCruise(intent)
-            resetDataWatchdog()
-            checkOverspeed()
-            return
-        }
-
-        // ICON=0 且非巡航：导航段间（保持导航卡，仅更新数据）或普通主图（保持按钮区）
         if (icon == 0) {
-            if (mode == Mode.NAVI) {
-                // 导航中段间无转向（长直线/高速）：保持导航卡，只更新速度限速/电子眼
-                updateCamera(intent, cameraView)
-                val speedText = if (curSpeed > 0) "$curSpeed" + "km/h" else ""
-                val limitText = if (limitedSpeed > 0) "限速$limitedSpeed" else ""
-                speedView?.text = listOf(speedText, limitText).filter { it.isNotBlank() }.joinToString(" · ")
-                resetDataWatchdog()
-                checkOverspeed()
+            when (mode) {
+                Mode.NAVI -> {
+                    // 导航中忽略巡航广播（双高德共存时不打断导航）；仅更新速度/限速/电子眼供导航卡
+                    updateCamera(intent, cameraView)
+                    renderNavSpeed(speedView, curSpeed, limitedSpeed)
+                    resetDataWatchdog()
+                    checkOverspeed()
+                }
+                else -> {
+                    // ICON=0 → 巡航数据：进入或更新巡航卡
+                    if (mode != Mode.CRUISE) {
+                        setMode(Mode.CRUISE)
+                        Log.i(TAG, "巡航进入: ICON=0")
+                    }
+                    updateCruise(intent)
+                    resetDataWatchdog()
+                    checkOverspeed()
+                }
             }
             return
         }
@@ -289,7 +282,8 @@ class NavInfoHost(
         setMode(Mode.NAVI)
         resetDataWatchdog()
 
-        turnView?.setImageResource(turnIconRes(icon))
+        // 导航卡不显示转向图标/信息，速度区尽量放大当前速度
+        turnView?.visibility = View.GONE
 
         // 终点名 + 全程剩余
         val dest = intent.getStringExtra("endPOIName") ?: ""
@@ -316,10 +310,8 @@ class NavInfoHost(
             exitView?.visibility = View.GONE
         }
 
-        // 速度 · 限速（导航卡小字）
-        val speedText = if (curSpeed > 0) "$curSpeed" + "km/h" else ""
-        val limitText = if (limitedSpeed > 0) "限速$limitedSpeed" else ""
-        speedView?.text = listOf(speedText, limitText).filter { it.isNotBlank() }.joinToString(" · ")
+        // 当前速度大字（含限速小字）
+        renderNavSpeed(speedView, curSpeed, limitedSpeed)
 
         // 服务区
         val roadType = intent.getIntExtra("ROAD_TYPE", -1)
@@ -423,10 +415,12 @@ class NavInfoHost(
     // ---------- 13011 TMC 实时路况（前方拥堵） ----------
 
     /**
-     * 导航卡"前方拥堵"：遍历路况分段（从当前位置往后连续排列），
-     * 找第一段拥堵（status≥3，3=拥堵红 / 4=严重拥堵深红），
-     * 显示距它的实时距离（段距离累加），颜色区分拥堵程度；前方无拥堵则隐藏。
-     * 协议：13011 每 6s 广播一次，tmc_segment_distance 之和 = residual_distance。
+     * 导航卡"前方拥堵"：
+     * 分段坐标系判定——协议文档称所有段距离之和=residual_distance（分段覆盖剩余路程、从当前位置起算），
+     * 但实测（参考 Navi-Link 实现按 total_distance 画比例）高德真实广播的分段覆盖全程（段之和≈total_distance），
+     * 段0 是路线起点而非当前位置，必须用 finish_distance（已行驶里程）定位当前位置所在的段，再从当前段往后找拥堵。
+     * 兼容两种坐标系：segSum≈residual → 当前位置=段0 起点；否则按全程坐标系用 finish_distance 定位。
+     * 显示距下一段拥堵的实时距离（红=拥堵 / 深红=严重拥堵）；前方无拥堵则隐藏。
      */
     private fun handleTmc(intent: Intent) {
         val view = tmcView ?: return
@@ -434,6 +428,8 @@ class NavInfoHost(
         val json = intent.getStringExtra("EXTRA_TMC_SEGMENT") ?: return
         try {
             val root = JSONObject(json)
+            // 打印完整原始数据，便于核对真实广播的坐标系与字段
+            Log.i(TAG, "TMC原始: $json")
             if (!root.optBoolean("tmc_segment_enabled", true)) {
                 view.visibility = View.GONE
                 return
@@ -443,25 +439,79 @@ class NavInfoHost(
                 view.visibility = View.GONE
                 return
             }
-            var aheadMeters = 0
+            val totalDistance = root.optInt("total_distance", 0)
+            val residualDistance = root.optInt("residual_distance", 0)
+            val finishDistance = root.optInt("finish_distance", 0)
+
+            // 每段起点（分段坐标系内）+ 段总距离
+            val segStart = IntArray(info.length())
+            var segSum = 0
             for (i in 0 until info.length()) {
-                val seg = info.getJSONObject(i)
-                val status = seg.optInt("tmc_status", -1)
-                if (status >= 3) {
-                    // 找到第一段拥堵/严重拥堵：aheadMeters = 距它的距离
-                    val level = if (status >= 4) "严重拥堵" else "拥堵"
-                    val text = if (aheadMeters <= 0) "当前路段 $level" else "前方${formatAhead(aheadMeters)} $level"
-                    view.text = text
-                    view.setTextColor(if (status >= 4) 0xFFD50000.toInt() else 0xFFFF5252.toInt())
-                    view.visibility = View.VISIBLE
-                    resetDataWatchdog()
-                    Log.i(TAG, "前方拥堵: $text (status=$status 距=${aheadMeters}m)")
-                    return
-                }
-                aheadMeters += seg.optInt("tmc_segment_distance", 0)
+                segStart[i] = segSum
+                segSum += info.getJSONObject(i).optInt("tmc_segment_distance", 0)
             }
-            // 剩余路段无拥堵
-            view.visibility = View.GONE
+
+            // 坐标系判定：段之和≈剩余路程 → 分段覆盖剩余路程（当前位置=段0 起点）；
+            // 否则按全程坐标系，用 finish_distance 定位当前段
+            val isResidualCoords = residualDistance > 0 &&
+                Math.abs(segSum - residualDistance) <= Math.max(100, residualDistance / 10)
+            val curOffset = if (isResidualCoords) 0 else finishDistance
+
+            // 起点段：residual 坐标系=段0；全程坐标系=finish_distance 落在的段
+            var firstIdx = 0
+            if (!isResidualCoords) {
+                firstIdx = -1
+                for (i in info.length() - 1 downTo 0) {
+                    if (segStart[i] <= curOffset) {
+                        firstIdx = i
+                        break
+                    }
+                }
+                if (firstIdx < 0) firstIdx = 0
+            }
+
+            var aheadMeters = -1
+            var targetStatus = -1
+            var congestionEndMeters = -1
+            for (i in firstIdx until info.length()) {
+                val status = info.getJSONObject(i).optInt("tmc_status", -1)
+                // 缓行(2)/拥堵(3)/严重拥堵(4) 都纳入，颜色区分；10=已驶过(灰)等其它状态跳过
+                if (status == 2 || status == 3 || status == 4) {
+                    aheadMeters = segStart[i] - curOffset
+                    targetStatus = status
+                    congestionEndMeters = segStart[i] +
+                        info.getJSONObject(i).optInt("tmc_segment_distance", 0) - curOffset
+                    break
+                }
+            }
+            if (targetStatus < 0) {
+                // 剩余路段无拥堵
+                view.visibility = View.GONE
+                return
+            }
+            val level = when (targetStatus) {
+                4 -> "严重拥堵"
+                3 -> "拥堵"
+                else -> "缓行"
+            }
+            val text = if (aheadMeters <= 0) {
+                // 当前位置已在拥堵段内：显示剩余距离（结束拥堵还需多远）
+                val remain = if (congestionEndMeters > 0) congestionEndMeters else 0
+                "当前$level · 剩余${formatAhead(remain)}"
+            } else {
+                "前方${formatAhead(aheadMeters)} $level"
+            }
+            view.text = text
+            view.setTextColor(
+                when (targetStatus) {
+                    4 -> 0xFFD50000.toInt() // 严重拥堵：深红
+                    3 -> 0xFFFF5252.toInt() // 拥堵：红
+                    else -> 0xFFFFC400.toInt() // 缓行：黄
+                }
+            )
+            view.visibility = View.VISIBLE
+            resetDataWatchdog()
+            Log.i(TAG, "前方拥堵: $text (status=$targetStatus 距=${aheadMeters}m 结束=${congestionEndMeters}m 坐标系=${if (isResidualCoords) "剩余路程" else "全程"} 段和=$segSum total=$totalDistance residual=$residualDistance finish=$finishDistance)")
         } catch (e: Exception) {
             Log.w(TAG, "解析TMC路况失败: ${e.message}")
         }
@@ -474,6 +524,45 @@ class NavInfoHost(
             (if (km >= 10) "${km.toInt()}" else String.format("%.1f", km)) + "公里"
         } else "${meters}米"
         return text.withSmallUnit()
+    }
+
+    /**
+     * 导航卡当前速度大字渲染：数字≈2.4x 加粗，km/h 常规字号，
+     * 限速以" 限速80"小字灰蓝附加（可选），速度未知则只显示限速。
+     * 颜色随超速程度变亮：不超速白 / 超10%内黄 / 超20%内橙 / 超20%以上亮红。
+     */
+    private fun renderNavSpeed(view: TextView?, speed: Int, limit: Int) {
+        if (view == null) return
+        val ss = SpannableStringBuilder()
+        if (speed > 0) {
+            val num = "$speed"
+            val unit = "km/h"
+            ss.append(num).append(unit)
+            ss.setSpan(RelativeSizeSpan(2.4f), 0, num.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            ss.setSpan(RelativeSizeSpan(1.0f), num.length, ss.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            ss.setSpan(ForegroundColorSpan(speedColor(speed, limit)), 0, ss.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        if (limit > 0) {
+            if (ss.isNotEmpty()) ss.append("  ")
+            val lt = "限速$limit"
+            ss.append(lt)
+            ss.setSpan(RelativeSizeSpan(0.75f), ss.length - lt.length, ss.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            ss.setSpan(ForegroundColorSpan(0xFFB0C4DE.toInt()), ss.length - lt.length, ss.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        view.text = ss
+    }
+
+    /** 速度颜色：不超速=白；超速≤10%=黄；≤20%=橙；>20%=亮红（越严重越亮） */
+    private fun speedColor(speed: Int, limit: Int): Int {
+        if (limit <= 0) return 0xFFFFFFFF.toInt()
+        val over = speed - limit
+        if (over <= 0) return 0xFFFFFFFF.toInt()
+        val pct = over * 100 / limit
+        return when {
+            pct <= 10 -> 0xFFFFD600.toInt() // 黄
+            pct <= 20 -> 0xFFFF9100.toInt() // 橙
+            else -> 0xFFFF1744.toInt()      // 亮红
+        }
     }
 
     /** 超速检测：巡航下速度>限速 时语音提醒一次（回落后再超速会再提醒） */
