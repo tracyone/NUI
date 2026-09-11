@@ -233,24 +233,40 @@
                         android:maxLines="1"
                         android:ellipsize="end" />
 
-                    <!-- 行3：电子眼警示（黄色大字，仅测速/摄像时显示） -->
-                    <TextView
+                    <!-- 行3：电子眼警示（黄色大字+摄像头图标，仅测速/摄像时显示） -->
+                    <LinearLayout
                         android:id="@+id/navInfoCamera"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="6dp"
                         android:background="@drawable/bg_nav_camera"
-                        android:paddingStart="12dp"
+                        android:paddingStart="10dp"
                         android:paddingEnd="12dp"
                         android:paddingTop="4dp"
                         android:paddingBottom="4dp"
-                        android:text="⚠ 前方300米测速 限速60"
-                        android:textSize="18sp"
-                        android:textStyle="bold"
-                        android:textColor="#FFD54F"
-                        android:maxLines="1"
-                        android:ellipsize="end"
-                        android:visibility="gone" />
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:visibility="gone">
+
+                        <ImageView
+                            android:id="@+id/navInfoCameraIcon"
+                            android:layout_width="22dp"
+                            android:layout_height="22dp"
+                            android:contentDescription="@null"
+                            android:src="@drawable/camera_default" />
+
+                        <TextView
+                            android:id="@+id/navInfoCameraText"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="6dp"
+                            android:text="300米测速 限速60"
+                            android:textSize="18sp"
+                            android:textStyle="bold"
+                            android:textColor="#FFD54F"
+                            android:maxLines="1"
+                            android:ellipsize="end" />
+                    </LinearLayout>
 
                     <!-- 行4：出口提示（仅高速显示） -->
                     <TextView
@@ -347,37 +363,49 @@
                         android:textColor="#FFFFFF"
                         android:maxLines="1" />
 
-                    <!-- 行2：最近测速（黄色警示，仅测速时显示） -->
-                    <TextView
+                    <!-- 行2：最近测速（黄色警示+摄像头图标，仅测速时显示） -->
+                    <LinearLayout
                         android:id="@+id/cruiseCamera"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="4dp"
                         android:background="@drawable/bg_nav_camera"
-                        android:paddingStart="12dp"
+                        android:paddingStart="10dp"
                         android:paddingEnd="12dp"
                         android:paddingTop="4dp"
                         android:paddingBottom="4dp"
-                        android:text="⚠ 前方300米 限速60"
-                        android:textSize="18sp"
-                        android:textStyle="bold"
-                        android:textColor="#FFD54F"
-                        android:maxLines="1"
-                        android:ellipsize="end"
-                        android:visibility="gone" />
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
+                        android:visibility="gone">
 
-                    <!-- 行3：最近红绿灯（方向+状态+倒计时；红灯红字/绿灯绿字） -->
-                    <TextView
+                        <ImageView
+                            android:id="@+id/cruiseCameraIcon"
+                            android:layout_width="22dp"
+                            android:layout_height="22dp"
+                            android:contentDescription="@null"
+                            android:src="@drawable/camera_default" />
+
+                        <TextView
+                            android:id="@+id/cruiseCameraText"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="6dp"
+                            android:text="300米 限速60"
+                            android:textSize="18sp"
+                            android:textStyle="bold"
+                            android:textColor="#FFD54F"
+                            android:maxLines="1"
+                            android:ellipsize="end" />
+                    </LinearLayout>
+
+                    <!-- 行3：最近红绿灯（Navi-Link 样式：每个方向一个圆形灯+箭头+倒计时，代码动态生成） -->
+                    <LinearLayout
                         android:id="@+id/cruiseLight"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="6dp"
-                        android:text="🚦 直行 红灯 12秒"
-                        android:textSize="20sp"
-                        android:textStyle="bold"
-                        android:textColor="#FF6B6B"
-                        android:maxLines="1"
-                        android:ellipsize="end"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal"
                         android:visibility="gone" />
                 </LinearLayout>
             </LinearLayout>

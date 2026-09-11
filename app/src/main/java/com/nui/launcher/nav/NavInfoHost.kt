@@ -12,7 +12,9 @@ import android.text.style.RelativeSizeSpan
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.TextView
 import com.nui.launcher.R
 import com.nui.launcher.voice.NuiTts
@@ -67,7 +69,7 @@ class NavInfoHost(
     private var turnView: ImageView? = null
     private var destView: TextView? = null
     private var etaView: TextView? = null
-    private var cameraView: TextView? = null
+    private var cameraView: ViewGroup? = null
     private var exitView: TextView? = null
     private var tmcView: TextView? = null
     private var speedView: TextView? = null
@@ -78,8 +80,8 @@ class NavInfoHost(
     // 巡航卡元素
     private var cruiseBlock: View? = null
     private var cruiseSpeedView: TextView? = null
-    private var cruiseCameraView: TextView? = null
-    private var cruiseLightView: TextView? = null
+    private var cruiseCameraView: ViewGroup? = null
+    private var cruiseLightView: LinearLayout? = null   // 红绿灯容器（每方向一个胶囊，动态生成）
 
     private var weatherView: View? = null
 
@@ -126,7 +128,7 @@ class NavInfoHost(
         cruiseBlock = overlay.findViewById(R.id.navInfoCruiseBlock)
         cruiseSpeedView = overlay.findViewById(R.id.cruiseSpeed)
         cruiseCameraView = overlay.findViewById(R.id.cruiseCamera)
-        cruiseLightView = overlay.findViewById(R.id.cruiseLight)
+        cruiseLightView = overlay.findViewById(R.id.cruiseLight) as LinearLayout
         // 天气文字在右侧面板（导航卡的兄弟节点）：导航时占掉天气区域的位置
         weatherView = (overlay.parent as? ViewGroup)?.findViewById(R.id.weatherText)
         tts = NuiTts(context)
@@ -193,8 +195,11 @@ class NavInfoHost(
         when (state) {
             // 8：导航中（权威导航判据）
             NAV_STATE_NAVIGATING -> setMode(Mode.NAVI)
-            // 9：导航结束（回桌面，等待 ICON=0 巡航数据进入巡航）
-            NAV_STATE_NAV_EXIT -> setMode(Mode.NONE)
+            // 9：导航结束（回桌面）。仅结束导航态：巡航中收到 STATE=9（高德巡航下
+            // 12404 查询即返回 9，会被周期性查询误杀巡航），巡航退出靠 STATE=25 / 看门狗
+            NAV_STATE_NAV_EXIT -> {
+                if (mode == Mode.NAVI) setMode(Mode.NONE)
+            }
             // 25：巡航结束（退出巡航界面）
             NAV_STATE_CRUISE_END -> {
                 if (mode == Mode.CRUISE) setMode(Mode.NONE)
@@ -357,7 +362,7 @@ class NavInfoHost(
 
     /** 巡航卡更新：当前速度大字 + 最近测速 */
     private fun updateCruise(intent: Intent) {
-        val speedText = if (curSpeed > 0) "$curSpeed" + "km/h" else "--"
+        val speedText = if (curSpeed > 0) "$curSpeed" else "--"
         cruiseSpeedView?.text = speedText
         // 巡航限速：只认测速点 CAMERA_SPEED（LIMITED_SPEED 巡航下恒 50 不可信）
         val camSpeed = intent.getIntExtra("CAMERA_SPEED", 0)
@@ -371,17 +376,32 @@ class NavInfoHost(
         updateCamera(intent, cruiseCameraView)
     }
 
-    /** 电子眼：距离+限速；有则显示黄色警示，无则隐藏 */
-    private fun updateCamera(intent: Intent, view: TextView?) {
+    /** 电子眼：距离+限速/类型；有则显示黄色警示，无则隐藏 */
+    private fun updateCamera(intent: Intent, view: ViewGroup?) {
         val cameraDist = intent.getStringExtra("CAMERA_DIST") ?: ""
         val cameraSpeed = intent.getIntExtra("CAMERA_SPEED", 0)
+        val cameraType = intent.getIntExtra("CAMERA_TYPE", 0)
+        val icon = view?.findViewById<ImageView>(R.id.navInfoCameraIcon)
+            ?: view?.findViewById<ImageView>(R.id.cruiseCameraIcon)
+        val text = view?.findViewById<TextView>(R.id.navInfoCameraText)
+            ?: view?.findViewById<TextView>(R.id.cruiseCameraText)
         if (cameraDist.isNotBlank()) {
-            val warn = buildString {
-                append("⚠ 前方")
-                append(cameraDist.withSmallUnit())
-                if (cameraSpeed > 0) append(" 限速$cameraSpeed")
+            // 摄像头类型图标（Navi-Link 同款资源；协议 CAMERA_TYPE：0=测速 1=监控 4=公交专用道）
+            val iconRes = when (cameraType) {
+                4 -> R.drawable.camera_bus
+                1 -> R.drawable.camera_light
+                else -> R.drawable.camera_default
             }
-            view?.text = warn
+            icon?.setImageResource(iconRes)
+            val warn = buildString {
+                append(cameraDist.withSmallUnit())
+                when {
+                    cameraSpeed > 0 -> append(" 限速$cameraSpeed")          // 测速摄像头（含限速）
+                    cameraType == 1 -> append(" 违章抓拍")                   // 监控/压线摄像头
+                    cameraType == 4 -> append(" 公交专用道")                  // 公交专用道摄像头
+                }
+            }
+            text?.text = warn
             view?.visibility = View.VISIBLE
         } else {
             view?.visibility = View.GONE
@@ -390,45 +410,123 @@ class NavInfoHost(
 
     // ---------- 60073 红绿灯（巡航显示 + 变灯提醒） ----------
 
+    /**
+     * 巡航红绿灯：遍历 lightsData 每个方向，动态生成"胶囊"（深蓝圆角背景 +
+     * 圆形灯(颜色随灯状态) + 圆内白色方向箭头 + 右侧白色倒计时数字），
+     * 参考 Navi-Link TrafficLightView 样式，多个方向横排。
+     */
     private fun handleTrafficLight(intent: Intent) {
         if (mode != Mode.CRUISE) return
         resetDataWatchdog()
+        val container = cruiseLightView ?: return
         val lights = intent.getStringExtra("lightsData")
             ?: intent.getStringExtra("LIGHTS_DATA")
-        if (lights.isNullOrBlank()) return
+        if (lights.isNullOrBlank()) {
+            container.visibility = View.GONE
+            return
+        }
         try {
             val array = JSONArray(lights)
-            if (array.length() == 0) return
-            val first = array.getJSONObject(0)
-            val dir = first.optString("dir", first.optString("direction", "路口"))
-            val status = first.optString(
-                "trafficLightStatus",
-                first.optString("status", first.optString("state", "unknown"))
-            )
-            val countdown = first.optInt(
-                "redLightCountDownSeconds",
-                first.optInt("countdown", first.optInt("countDown",
-                    first.optInt("remaining_time", -1)))
-            )
-            val isRed = status.contains("red", ignoreCase = true) ||
-                status == "1" || status == "0"
-            val statusText = if (isRed) "红灯" else if (status.contains("green", true)) "绿灯" else "黄灯"
-            val color = when {
-                isRed -> 0xFFFF6B6B.toInt()
-                status.contains("green", true) -> 0xFF4CAF50.toInt()
-                else -> 0xFFFFD54F.toInt()
+            if (array.length() == 0) {
+                container.visibility = View.GONE
+                return
             }
-            cruiseLightView?.text = "🚦 $dir $statusText " + if (countdown >= 0) "${countdown}秒" else ""
-            cruiseLightView?.setTextColor(color)
-            cruiseLightView?.visibility = View.VISIBLE
+            container.removeAllViews()
+            val dm = context.resources.displayMetrics.density
+            fun dp(v: Int): Int = (v * dm + 0.5f).toInt()
+            // 多方向时紧凑模式（参考 Navi-Link setCompact）：圆/字缩小，保证 4 个以上胶囊放得下
+            val compact = array.length() >= 3
+            val dotSize = if (compact) dp(26) else dp(44)
+            val timeSize = if (compact) 18f else 30f
+            val padH = if (compact) dp(3) else dp(6)
+            val itemMargin = if (compact) dp(3) else dp(8)
+            // 最近（第一个）红灯倒计时，供变灯提醒用
+            var firstRedCountdown = -1
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                val dir = obj.optString("dir", obj.optString("direction", "路口"))
+                val status = obj.optString(
+                    "trafficLightStatus",
+                    obj.optString("status", obj.optString("state", "unknown"))
+                )
+                val countdown = obj.optInt(
+                    "redLightCountDownSeconds",
+                    obj.optInt("countdown", obj.optInt("countDown",
+                        obj.optInt("remaining_time", -1)))
+                )
+                val isRed = status.contains("red", ignoreCase = true) ||
+                    status == "1" || status == "0"
+                val color = when {
+                    isRed -> 0xFFFF3333.toInt()
+                    status.contains("green", true) -> 0xFF34C759.toInt()
+                    else -> 0xFFCC9900.toInt()
+                }
+                if (i == 0 && isRed) firstRedCountdown = countdown
+                // 方向 → 箭头图标（Navi-Link 同款矢量箭头，叠加在圆形灯上）
+                val arrowRes = when {
+                    dir.contains("左") -> R.drawable.light_left
+                    dir.contains("右") -> R.drawable.light_right
+                    dir.contains("掉头") || dir.contains("回转") || dir.contains("调头") -> R.drawable.light_u_turn
+                    else -> R.drawable.light_straight
+                }
+                // 胶囊：深蓝圆角背景 + [圆形灯(带箭头) + 倒计时数字]
+                val item = LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = android.view.Gravity.CENTER_VERTICAL
+                    setPadding(padH, dp(2), padH, dp(2))
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        cornerRadius = dp(24).toFloat()
+                        setColor(0xE61E2A3A.toInt())   // 深蓝半透明胶囊
+                    }
+                }
+                // 圆形灯 FrameLayout：底层圆形(灯色) + 上层箭头
+                val dotBox = FrameLayout(context)
+                dotBox.layoutParams = LinearLayout.LayoutParams(dotSize, dotSize)
+                val dot = View(context)
+                dot.layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                dot.background = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.OVAL
+                    setColor(color)
+                }
+                // 方向箭头（图片资源，白色箭头叠加在圆形灯上）
+                val arrowIv = ImageView(context).apply {
+                    setImageResource(arrowRes)
+                    scaleType = ImageView.ScaleType.CENTER_INSIDE
+                    setPadding(dp(6), dp(6), dp(6), dp(6))
+                    setColorFilter(0xFFFFFFFF.toInt(), android.graphics.PorterDuff.Mode.SRC_IN)
+                }
+                dotBox.addView(dot)
+                dotBox.addView(arrowIv, FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                // 倒计时数字
+                val timeTv = TextView(context).apply {
+                    text = if (countdown >= 0) "$countdown" else ""
+                    setTextColor(0xFFFFFFFF.toInt())
+                    textSize = timeSize
+                    setTypeface(null, android.graphics.Typeface.BOLD)
+                    includeFontPadding = false
+                }
+                timeTv.layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    marginStart = dp(4); marginEnd = dp(2)
+                }
+                item.addView(dotBox)
+                item.addView(timeTv)
+                container.addView(item, LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                    marginEnd = itemMargin
+                })
+                Log.d(TAG, "巡航红绿灯[$i]: dir=$dir status=$status ${countdown}秒 速度=${curSpeed}km/h")
+            }
+            container.visibility = View.VISIBLE
 
-            // 变灯提醒：≤25km/h 时红灯倒计时 ≤3s 语音提醒（去重由本方法内状态控制，阈值按用户要求 ≤25）
-            if (curSpeed <= 25 && isRed && countdown in 1..3) {
-                val text = if (countdown <= 1) "绿灯即将亮起" else "${countdown}秒后变绿"
+            // 变灯提醒：≤25km/h 时最近红灯倒计时 ≤3s 语音提醒（去重由本方法内状态控制，阈值按用户要求 ≤25）
+            if (curSpeed <= 25 && firstRedCountdown in 1..3) {
+                val text = if (firstRedCountdown <= 1) "绿灯即将亮起" else "${firstRedCountdown}秒后变绿"
                 tts?.speak(text)
                 Log.i(TAG, "变灯提醒(巡航): $text")
             }
-            Log.d(TAG, "巡航红绿灯: $dir $statusText ${countdown}秒 速度=${curSpeed}km/h")
         } catch (e: Exception) {
             Log.w(TAG, "解析红绿灯失败: ${e.message}")
         }
@@ -549,7 +647,7 @@ class NavInfoHost(
     }
 
     /**
-     * 导航卡当前速度大字渲染：数字≈2.4x 加粗，km/h 常规字号，
+     * 导航卡当前速度大字渲染：数字 2.4x 加粗（无单位），
      * 限速以" 限速80"小字灰蓝附加（可选），速度未知则只显示限速。
      * 颜色随超速程度变亮：不超速白 / 超10%内黄 / 超20%内橙 / 超20%以上亮红。
      */
@@ -558,10 +656,8 @@ class NavInfoHost(
         val ss = SpannableStringBuilder()
         if (speed > 0) {
             val num = "$speed"
-            val unit = "km/h"
-            ss.append(num).append(unit)
+            ss.append(num)
             ss.setSpan(RelativeSizeSpan(2.4f), 0, num.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            ss.setSpan(RelativeSizeSpan(1.0f), num.length, ss.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             ss.setSpan(ForegroundColorSpan(speedColor(speed, limit)), 0, ss.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
         if (limit > 0) {
