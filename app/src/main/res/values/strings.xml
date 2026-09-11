@@ -59,7 +59,8 @@
     <string name="add_key_mapping">添加按键映射</string>
     <string name="edit">编辑</string>
     <string name="delete">删除</string>
-    <string name="listening_key">请按下方向盘按键…</string>
+    <string name="listening_key">监听按键</string>
+    <string name="listening_hint">请按下方向盘按键…</string>
     <string name="key_code">按键code（点击开始监听按键）</string>
     <string name="action_to_run">执行操作（点击选择）</string>
     <string name="save">保存</string>

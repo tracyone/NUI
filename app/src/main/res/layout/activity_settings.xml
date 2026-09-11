@@ -608,6 +608,11 @@
                             android:visibility="gone" />
                     </LinearLayout>
 
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="@color/settings_divider" />
+
                     <!-- 显示系统 Dock（原桌面底部导航栏） -->
                     <LinearLayout
                         android:id="@+id/optSystemDock"

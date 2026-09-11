@@ -845,7 +845,7 @@ class SettingsActivity : AppCompatActivity() {
             }
         }
         val tv = TextView(this).apply {
-            text = getString(R.string.listening_key)
+            text = getString(R.string.listening_hint)
             textSize = 22f
             gravity = Gravity.CENTER
             setTextColor(p.label)

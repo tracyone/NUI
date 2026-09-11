@@ -41,7 +41,8 @@ object DockPickerDialog {
                 icon = ri.loadIcon(pm),
                 launchIntent = launch.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) },
             )
-        }.filter { it.packageName !in exclude }
+        // 排除：已占用槽位 + NUI 自身（桌面不显示自己）+ 用户隐藏的应用
+        }.filter { it.packageName !in exclude && it.packageName != context.packageName && it.packageName !in com.nui.launcher.HiddenApps.hiddenSet(context) }
             .sortedBy { it.label.lowercase() }
 
         val dialog = AlertDialog.Builder(context)

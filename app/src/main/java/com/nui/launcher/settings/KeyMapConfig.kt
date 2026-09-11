@@ -15,12 +15,14 @@ object KeyMapConfig {
     const val ACTION_MUSIC_PREV = "music_prev"
     const val ACTION_NAV_HOME = "nav_home"
     const val ACTION_NAV_COMPANY = "nav_company"
+    const val ACTION_TOGGLE_DOCK = "toggle_dock"
 
     val ACTIONS = linkedMapOf(
         ACTION_MUSIC_NEXT to "音乐·下一首",
         ACTION_MUSIC_PREV to "音乐·上一首",
         ACTION_NAV_HOME to "导航·回家",
         ACTION_NAV_COMPANY to "导航·去公司",
+        ACTION_TOGGLE_DOCK to "系统·切换Dock栏",
     )
 
     fun actionName(action: String): String = ACTIONS[action] ?: action

@@ -43,8 +43,11 @@ class LyricFetcher(private val context: Context) {
     private var fetchingKey: String? = null
 
     /** 请求一首歌的歌词。命中缓存直接回调；否则后台抓取。线程安全（回调在主线程）。
-     *  @param durationMs 歌曲时长（毫秒），用于 QQ 音乐纯文本歌词估算时间戳；0 则用默认 200 秒 */
-    fun requestLyric(title: String, artist: String, durationMs: Long = 0L) {
+     *  @param durationMs 歌曲时长（毫秒），用于 QQ 音乐纯文本歌词估算时间戳；0 则用默认 200 秒
+     *  @param allowQqFallback 是否允许网易无真实时间轴歌词时 fallback 到 QQ 音乐纯文本。
+     *     调用方（MusicHost）按播放器包名判断：非标准 QQ 音乐（车机特殊版软件）传 false
+     *     只走网易歌词；标准 QQ 音乐与其他音乐传 true 保留 fallback。 */
+    fun requestLyric(title: String, artist: String, durationMs: Long = 0L, allowQqFallback: Boolean = true) {
         if (title.isBlank()) return
         val key = norm(title) + "||" + norm(artist)
         if (key == fetchingKey) return                 // 正在抓这首歌，跳过
@@ -55,9 +58,9 @@ class LyricFetcher(private val context: Context) {
             return
         }
         fetchingKey = key
-        Log.d(TAG, "fetch lyric: $title - $artist (duration=${durationMs}ms)")
+        Log.d(TAG, "fetch lyric: $title - $artist (duration=${durationMs}ms qqFallback=$allowQqFallback)")
         executor.execute {
-            val result = runCatching { fetchLrc(title, artist, durationMs) }.getOrNull()
+            val result = runCatching { fetchLrc(title, artist, durationMs, allowQqFallback) }.getOrNull()
             Log.d(TAG, "fetch lyric done: $title -> ${result?.length ?: 0} chars")
             handler.post {
                 if (fetchingKey == key) fetchingKey = null
@@ -73,7 +76,7 @@ class LyricFetcher(private val context: Context) {
 
     // ===== 网络 =====
 
-    private fun fetchLrc(title: String, artist: String, durationMs: Long = 0L): String? {
+    private fun fetchLrc(title: String, artist: String, durationMs: Long = 0L, allowQqFallback: Boolean = true): String? {
         val candidates = searchTop(title, artist)?.toMutableList() ?: mutableListOf()
         // 先尝试原始歌名候选，取第一个有真实时间轴歌词的
         for (song in candidates) {
@@ -101,7 +104,11 @@ class LyricFetcher(private val context: Context) {
                 Log.d(TAG, "skip song id=${song.id} name=${song.name} (no real lyric)")
             }
         }
-        // 网易云无时间轴歌词时，fallback 到 QQ 音乐（汽水/抖音独家歌曲 QQ 库更全，但返回纯文本无时间戳）
+        // 网易云无时间轴歌词时，允许 fallback 到 QQ 音乐（汽水/抖音独家歌曲 QQ 库更全，但返回纯文本无时间戳）
+        if (!allowQqFallback) {
+            Log.d(TAG, "QQ fallback disabled（非标准 QQ 音乐，只走网易歌词）")
+            return null
+        }
         val qqLrc = fetchQqLyric(cleaned.ifEmpty { title }, artist, durationMs)
         if (qqLrc != null) {
             Log.d(TAG, "QQ music fallback lyric: ${qqLrc.length} chars")

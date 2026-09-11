@@ -454,6 +454,7 @@ class MainActivity : AppCompatActivity() {
                     this, event.keyCode,
                     if (::musicHost.isInitialized) musicHost else null,
                     if (::navHost.isInitialized) navHost else null,
+                    onSystemDockToggle = { refreshForThemeChange() },
                 )) return true
         }
         return super.dispatchKeyEvent(event)
@@ -970,7 +971,8 @@ class MainActivity : AppCompatActivity() {
             val hidden = HiddenApps.hiddenSet(this)
             val apps = resolved.mapNotNull { ri ->
                 val pkg = ri.activityInfo.packageName
-                if (pkg in hidden) return@mapNotNull null
+                // 隐藏的应用 + NUI 自身（桌面启动器不显示自己）都跳过
+                if (pkg in hidden || pkg == packageName) return@mapNotNull null
                 val label = ri.loadLabel(pm).toString()
                 val hasIcon = IconUtils.hasCustomIcon(pm, ri)
                 AppModel(

@@ -94,7 +94,8 @@ class AppListActivity : AppCompatActivity() {
             val hidden = HiddenApps.hiddenSet(this)
             val apps = resolved.mapNotNull { ri ->
                 val pkg = ri.activityInfo.packageName
-                if (pkg in hidden) return@mapNotNull null
+                // 隐藏的应用 + NUI 自身（桌面启动器不显示自己）都跳过
+                if (pkg in hidden || pkg == packageName) return@mapNotNull null
                 AppModel(
                     label = ri.loadLabel(pm).toString(),
                     packageName = pkg,
