@@ -971,11 +971,13 @@ class MainActivity : AppCompatActivity() {
             val apps = resolved.mapNotNull { ri ->
                 val pkg = ri.activityInfo.packageName
                 if (pkg in hidden) return@mapNotNull null
+                val label = ri.loadLabel(pm).toString()
+                val hasIcon = IconUtils.hasCustomIcon(pm, ri)
                 AppModel(
-                    label = ri.loadLabel(pm).toString(),
+                    label = label,
                     packageName = pkg,
                     // icon 不在此处加载：AppListAdapter 按需加载（仅显示页加载，LruCache 缓存）
-                    hasIcon = IconUtils.hasCustomIcon(ri),
+                    hasIcon = hasIcon,
                     launchIntent = pm.getLaunchIntentForPackage(pkg)
                         ?.apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
                         ?: Intent(Intent.ACTION_MAIN).setPackage(pkg),

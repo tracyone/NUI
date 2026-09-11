@@ -91,6 +91,9 @@ class NavInfoHost(
     // 巡航状态（供超速/变灯判断）
     private var curSpeed = 0
     private var limitedSpeed = 0
+    // 巡航限速：车机巡航广播 LIMITED_SPEED 恒为 50（高德巡航默认值，不可信），
+    // 巡航超速判断/播报改用测速点 CAMERA_SPEED；LIMITED_SPEED 仅导航卡使用
+    private var cruiseLimit = 0
     private var overspeedAlerted = false   // 超速去重
     private var tts: NuiTts? = null
 
@@ -134,6 +137,19 @@ class NavInfoHost(
             queryDayNight()
         }, 2000L)
         Log.i(TAG, "导航/巡航信息显示已启动")
+    }
+
+    /** 高德巡航播报临时静音：10047 EXTRA_CASUAL_MUTE（进巡航静音，退巡航/导航恢复） */
+    private fun setAmapCruiseMute(mute: Boolean) {
+        val q = Intent(ACTION_RECV).apply {
+            putExtra("KEY_TYPE", 10047)
+            // 兼容 1.x：MUTE 与 CASUAL_MUTE 同时发送（EXTRA_MUTE=0 不永久静音）；2.x 单独发送亦兼容
+            putExtra("EXTRA_MUTE", 0)
+            putExtra("EXTRA_CASUAL_MUTE", if (mute) 1 else 0)
+            putExtra("SOURCE_APP", context.packageName)
+        }
+        runCatching { context.sendBroadcast(q) }
+            .onSuccess { Log.i(TAG, if (mute) "高德巡航播报临时静音(10047)" else "高德巡航播报恢复(10047)") }
     }
 
     /** 主动查询导航状态：12404 EXTRA_REQUEST_AUTO_STATE=1 → 高德回 10019 STATE=8/9 */
@@ -194,6 +210,9 @@ class NavInfoHost(
         if (mode == newMode) return
         val old = mode
         mode = newMode
+        // 高德巡航播报临时静音：进巡航静音，退巡航/进导航恢复（临时静音单次有效，不误伤导航语音）
+        if (newMode == Mode.CRUISE && old != Mode.CRUISE) setAmapCruiseMute(true)
+        if (old == Mode.CRUISE && newMode != Mode.CRUISE) setAmapCruiseMute(false)
         Log.i(TAG, "模式: ${old.name} -> ${newMode.name}")
         val active = newMode != Mode.NONE
         overlay.visibility = if (active) View.VISIBLE else View.GONE
@@ -340,8 +359,11 @@ class NavInfoHost(
     private fun updateCruise(intent: Intent) {
         val speedText = if (curSpeed > 0) "$curSpeed" + "km/h" else "--"
         cruiseSpeedView?.text = speedText
+        // 巡航限速：只认测速点 CAMERA_SPEED（LIMITED_SPEED 巡航下恒 50 不可信）
+        val camSpeed = intent.getIntExtra("CAMERA_SPEED", 0)
+        if (camSpeed > 0) cruiseLimit = camSpeed
         // 超速时速度变红
-        if (limitedSpeed > 0 && curSpeed > limitedSpeed) {
+        if (cruiseLimit > 0 && curSpeed > cruiseLimit) {
             cruiseSpeedView?.setTextColor(0xFFFF6B6B.toInt())
         } else {
             cruiseSpeedView?.setTextColor(0xFFFFFFFF.toInt())
@@ -567,12 +589,15 @@ class NavInfoHost(
 
     /** 超速检测：巡航下速度>限速 时语音提醒一次（回落后再超速会再提醒） */
     private fun checkOverspeed() {
-        if (limitedSpeed <= 0 || curSpeed <= 0) return
-        if (curSpeed > limitedSpeed) {
+        if (curSpeed <= 0) return
+        // 巡航限速用测速点（cruiseLimit），导航用 LIMITED_SPEED（导航下真实）
+        val limit = if (mode == Mode.CRUISE) cruiseLimit else limitedSpeed
+        if (limit <= 0) return
+        if (curSpeed > limit) {
             if (!overspeedAlerted) {
                 overspeedAlerted = true
-                tts?.speak("您已超速，当前限速${limitedSpeed}")
-                Log.i(TAG, "超速提醒: ${curSpeed}km/h > 限速${limitedSpeed}km/h")
+                tts?.speak("您已超速，当前限速${limit}")
+                Log.i(TAG, "超速提醒: ${curSpeed}km/h > 限速${limit}km/h")
             }
         } else {
             overspeedAlerted = false
