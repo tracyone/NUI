@@ -51,11 +51,10 @@ import com.nui.launcher.R
  *
  * 实现"协议方式"获取歌曲信息：MediaSession 是 Android 标准 API，
  * 所有注册了媒体会话的音乐 App（QQ音乐/网易云/酷狗/Spotify 等）都能读取。
- * 歌词来源（按优先级）：
- *   1. MediaSession 元数据 METADATA_KEY_LYRIC（API 24+，部分 App 提供）；
- *   2. 通知 bigText 兜底（MusicListenerService 解析）；
- *   3. 网络抓词（LyricFetcher）：酷我车机版不暴露歌词接口，按"歌名+歌手"
- *      从网易云公开接口抓 LRC，通用兜底。LRC 解析后按播放进度滚动高亮。
+ * 歌词来源（统一走网易云）：
+ *   1. 网易云歌词（LyricFetcher 按"歌名+歌手"从 music.163.com 抓 LRC，所有绑定音乐统一使用）；
+ *   2. 网易云结果到达前，暂显 MediaSession 元数据 LYRIC / 通知 bigText 歌词作兜底。
+ * LRC 解析后按播放进度滚动高亮。
  * 无歌词时显示"暂无歌词"。
  *
  * 无会话或未播放时：显示"点击打开音乐"启动卡（点击拉起首选音乐 App）。
@@ -91,7 +90,8 @@ class MusicHost(
                 if (parsed.isNotEmpty()) {
                     lyrics = parsed
                     lyricHighlight = -1
-                    lyricFetchKey = null
+                    // 不重置 lyricFetchKey：同一首歌保持"已处理"，避免缓存命中→重绘→再请求的循环；
+                    // 切歌后 key 变化自然触发新抓取
                     val ctrl = currentController
                     if (ctrl != null) renderPlaying(ctrl)
                 } else {
@@ -605,27 +605,16 @@ class MusicHost(
         container.addView(v)
     }
 
-    /** 歌词为空时按当前歌曲（歌名+歌手）触发网络抓词；LyricFetcher 内部按 key 去重+缓存，不会重复请求。
-     *  歌词来源按播放器包名判断（非统一改策略）：
-     *   - 标准 QQ 音乐（com.tencent.qqmusic）：保留现状——网易真实时间轴优先，无词时 fallback QQ 纯文本估算
-     *   - 非标准 QQ 音乐（包名含 qqmusic/aiqiting 的非标准包名，如车机特殊版软件）：走网易歌词，不做 QQ fallback
-     *   - 其他（酷我/酷狗/网易云等）：现状（网易优先 + QQ fallback） */
+    /** 所有绑定音乐统一走网易云歌词：切歌后总是触发（播放器自带歌词仅作网易云结果到达前的临时显示），
+     *  LyricFetcher 内部按 key 去重+缓存，不会重复请求。网易云无词时回调 null，保留自带歌词兜底。 */
     private fun maybeFetchLyric() {
-        if (lyrics.isNotEmpty()) return
         val t = lastTitle
         if (t.isBlank()) return
         val key = "$t||$lastArtist"
         if (key == lyricFetchKey) return
         lyricFetchKey = key
-        val pkg = currentController?.packageName?.lowercase()
-        // 非标准 QQ 音乐：包名含 qqmusic/aiqiting 但不是标准 com.tencent.qqmusic
-        val isSpecialQqMusic = pkg != null && pkg != "com.tencent.qqmusic" &&
-            (pkg.contains("qqmusic") || pkg.contains("aiqiting"))
-        android.util.Log.d("NUI.MusicHost", "maybeFetchLyric: $t - $lastArtist pkg=$pkg specialQq=$isSpecialQqMusic")
-        // 传入歌曲时长，供 QQ 音乐纯文本歌词估算时间戳
-        val duration = currentController?.metadata?.getLong(android.media.MediaMetadata.METADATA_KEY_DURATION) ?: 0L
-        // 非标准 QQ 音乐走网易歌词（禁止 QQ fallback）；标准 QQ 音乐与其他音乐保留现状
-        lyricFetcher.requestLyric(t, lastArtist, duration, allowQqFallback = !isSpecialQqMusic)
+        android.util.Log.d("NUI.MusicHost", "maybeFetchLyric: $t - $lastArtist")
+        lyricFetcher.requestLyric(t, lastArtist, 0L, allowQqFallback = false)
     }
 
     /** 启动首选音乐 App，延迟返回 NUI（与地图逻辑一致）。

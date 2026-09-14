@@ -43,10 +43,9 @@ class LyricFetcher(private val context: Context) {
     private var fetchingKey: String? = null
 
     /** 请求一首歌的歌词。命中缓存直接回调；否则后台抓取。线程安全（回调在主线程）。
-     *  @param durationMs 歌曲时长（毫秒），用于 QQ 音乐纯文本歌词估算时间戳；0 则用默认 200 秒
+     *  @param durationMs 歌曲时长（毫秒），仅 QQ 纯文本 fallback 用；当前统一走网易歌词传 0
      *  @param allowQqFallback 是否允许网易无真实时间轴歌词时 fallback 到 QQ 音乐纯文本。
-     *     调用方（MusicHost）按播放器包名判断：非标准 QQ 音乐（车机特殊版软件）传 false
-     *     只走网易歌词；标准 QQ 音乐与其他音乐传 true 保留 fallback。 */
+     *     当前所有绑定音乐统一走网易歌词，调用方恒传 false。 */
     fun requestLyric(title: String, artist: String, durationMs: Long = 0L, allowQqFallback: Boolean = true) {
         if (title.isBlank()) return
         val key = norm(title) + "||" + norm(artist)
@@ -229,6 +228,7 @@ class LyricFetcher(private val context: Context) {
         val q = listOf(title, artist).filter { it.isNotBlank() }.joinToString(" ")
         val url = "https://music.163.com/api/search/get/web?csrf_token=&s=" +
             enc(q) + "&type=1&offset=0&total=true&limit=10"
+        Log.d(TAG, "netease 搜索请求: $url")
         val body = httpGet(url) ?: return null
         val songs = runCatching {
             val obj = JSONObject(body)
@@ -269,6 +269,7 @@ class LyricFetcher(private val context: Context) {
 
     private fun fetchLyric(song: Song): String? {
         val url = "https://music.163.com/api/song/lyric?id=${song.id}&lv=1&kv=1&tv=-1"
+        Log.d(TAG, "netease 歌词请求: $url")
         val body = httpGet(url) ?: return null
         return runCatching {
             val obj = JSONObject(body)
