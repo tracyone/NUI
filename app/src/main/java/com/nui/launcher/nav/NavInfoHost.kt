@@ -4,6 +4,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.text.SpannableString
 import android.text.SpannableStringBuilder
 import android.text.Spanned
@@ -100,7 +102,8 @@ class NavInfoHost(
     // 巡航卡元素
     private var cruiseBlock: View? = null
     private var cruiseSpeedView: TextView? = null
-    private var cruiseCameraView: ViewGroup? = null
+    private var cruiseLimitView: TextView? = null
+    private var cruiseCamOtherView: ViewGroup? = null
     private var cruiseLightView: LinearLayout? = null   // 红绿灯容器（每方向一个胶囊，动态生成）
 
     private var weatherView: View? = null
@@ -117,6 +120,10 @@ class NavInfoHost(
     // 巡航超速判断/播报改用测速点 CAMERA_SPEED；LIMITED_SPEED 仅导航卡使用
     private var cruiseLimit = 0
     private var overspeedAlerted = false   // 超速去重
+    // 限速摄像头语音播报状态：首次发现播报一次 → 距离<200m 再播报一次 → 通过后"登"一声
+    private var camTracked = false         // 当前是否在跟踪限速摄像头
+    private var camAnnouncedFirst = false  // 首次发现已播报
+    private var camAnnouncedNear = false   // <200m 已播报
     private var tts: NuiTts? = null
 
     // 数据断流看门狗：导航/巡航态下超过该时长收不到任何 10001/10019 → 恢复按钮区
@@ -145,7 +152,8 @@ class NavInfoHost(
         navBlock = overlay.findViewById(R.id.navInfoNavBlock)
         cruiseBlock = overlay.findViewById(R.id.navInfoCruiseBlock)
         cruiseSpeedView = overlay.findViewById(R.id.cruiseSpeed)
-        cruiseCameraView = overlay.findViewById(R.id.cruiseCamera)
+        cruiseLimitView = overlay.findViewById(R.id.cruiseLimit)
+        cruiseCamOtherView = overlay.findViewById(R.id.cruiseCamOther)
         cruiseLightView = overlay.findViewById(R.id.cruiseLight) as LinearLayout
         // 天气文字在右侧面板（导航卡的兄弟节点）：导航时占掉天气区域的位置
         weatherView = (overlay.parent as? ViewGroup)?.findViewById(R.id.weatherText)
@@ -428,17 +436,124 @@ class NavInfoHost(
         cruiseSpeedView?.text = speedText
         // 巡航限速：只认测速点 CAMERA_SPEED（LIMITED_SPEED 巡航下恒 50 不可信）
         val camSpeed = intent.getIntExtra("CAMERA_SPEED", 0)
-        if (camSpeed > 0) cruiseLimit = camSpeed
-        // 超速时速度变红
+        if (camSpeed > 0) {
+            cruiseLimit = camSpeed
+            cruiseLimitView?.apply {
+                text = "$cruiseLimit"
+                visibility = View.VISIBLE
+            }
+        } else {
+            cruiseLimitView?.visibility = View.GONE
+        }
+        // 超速时速度变红 + 限速圈数字变红
         if (cruiseLimit > 0 && curSpeed > cruiseLimit) {
             cruiseSpeedView?.setTextColor(0xFFFF6B6B.toInt())
+            cruiseLimitView?.setTextColor(0xFFE53935.toInt())
         } else {
             cruiseSpeedView?.setTextColor(0xFFFFFFFF.toInt())
+            cruiseLimitView?.setTextColor(0xFF1C1C1E.toInt())
         }
-        updateCamera(intent, cruiseCameraView)
+        updateCruiseCamera(intent)
     }
 
-    /** 电子眼：距离+限速/类型；有则显示黄色警示，无则隐藏 */
+    /** 巡航摄像头：所有类型统一在第二行显示 类型图标 + 距离（限速摄像头用摄像头本身图标）。
+     *  第一行只保留 速度圈 + 限速值红圈。 */
+    private fun updateCruiseCamera(intent: Intent) {
+        val camDistRaw = intent.extras?.get("CAMERA_DIST")
+        val cameraDistInt = when (camDistRaw) {
+            is Int -> camDistRaw
+            is String -> camDistRaw.toIntOrNull() ?: 0
+            else -> 0
+        }
+        val cameraDist = if (cameraDistInt > 0) "$cameraDistInt" else ""
+        val cameraType = intent.getIntExtra("CAMERA_TYPE", 0)
+        if (cameraDist.isNotBlank()) {
+            val icon = cruiseCamOtherView?.findViewById<ImageView>(R.id.cruiseCamOtherIcon)
+            val text = cruiseCamOtherView?.findViewById<TextView>(R.id.cruiseCamOtherText)
+            icon?.setImageResource(cameraIconRes(cameraType))
+            text?.text = cameraDist.withSmallUnit()
+            cruiseCamOtherView?.visibility = View.VISIBLE
+            // 限速摄像头语音播报（TYPE=0 测速/限速；TYPE=1 监控不做语音，避免轰炸）
+            if (cameraType == 0) {
+                checkCameraVoice(cameraDistInt, intent.getIntExtra("CAMERA_SPEED", 0))
+            }
+        } else {
+            cruiseCamOtherView?.visibility = View.GONE
+            checkCameraVoice(0, 0)
+        }
+    }
+
+    /** 限速摄像头三阶段语音：首次发现播报限速 → 距离<200m 提醒临近 → 通过后"登"一声。
+     *  camDist<=0 视为通过（重置状态）；距离回跳（如 100→400）视为进入下一个摄像头，重新播报。 */
+    private fun checkCameraVoice(camDist: Int, camSpeed: Int) {
+        if (camDist > 0) {
+            // 距离回跳（通过后又遇到新的摄像头）重置跟踪
+            if (camAnnouncedNear && camDist >= 300) {
+                camTracked = false
+                camAnnouncedFirst = false
+                camAnnouncedNear = false
+            }
+            if (!camTracked) {
+                camTracked = true
+                camAnnouncedFirst = false
+                camAnnouncedNear = false
+            }
+            if (!camAnnouncedFirst) {
+                camAnnouncedFirst = true
+                val text = if (camSpeed > 0) "前方限速$camSpeed" else "前方测速摄像头"
+                tts?.speak(text)
+                Log.i(TAG, "限速摄像头首次提醒: $text (${camDist}米)")
+            }
+            if (!camAnnouncedNear && camDist < 200) {
+                camAnnouncedNear = true
+                tts?.speak("前方200米限速摄像头")
+                Log.i(TAG, "限速摄像头临近提醒: ${camDist}米")
+            }
+        } else {
+            if (camTracked) {
+                camTracked = false
+                camAnnouncedFirst = false
+                camAnnouncedNear = false
+                playDing()
+                Log.i(TAG, "限速摄像头已通过")
+            }
+        }
+    }
+
+    /** "登"一声通过提示音（ToneGenerator 短促滴声，不占用 TTS 队列） */
+    private fun playDing() {
+        runCatching {
+            val tg = ToneGenerator(AudioManager.STREAM_MUSIC, 85)
+            tg.startTone(ToneGenerator.TONE_PROP_BEEP2, 200)
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ tg.release() }, 500)
+        }
+    }
+
+    /** 摄像头类型 → 图标（完整映射对齐 Navi-Link CameraWarningView.getIconRes）。
+     *  重点：2/15=闯红灯拍照（红绿灯图标）；0=测速；1=监控；4=公交专用道。 */
+    private fun cameraIconRes(cameraType: Int): Int = when (cameraType) {
+        6, 20 -> R.drawable.camera_bicycle
+        4, 16 -> R.drawable.camera_bus
+        13, 1015 -> R.drawable.camera_byfoot
+        11, 1099 -> R.drawable.camera_etc
+        29, 1029 -> R.drawable.camera_hov
+        22, 1001 -> R.drawable.camera_lamp
+        2, 15 -> R.drawable.camera_light
+        21, 1017 -> R.drawable.camera_park
+        19, 1005 -> R.drawable.camera_phone
+        12, 1030 -> R.drawable.camera_press
+        26, 1024 -> R.drawable.camera_railway
+        30, 1012 -> R.drawable.camera_recycle
+        25, 1016 -> R.drawable.camera_reverse
+        18, 1002 -> R.drawable.camera_safe
+        24, 1021 -> R.drawable.camera_sonar
+        28, 1028 -> R.drawable.camera_space
+        5 -> R.drawable.camera_urgen
+        27, 1011 -> R.drawable.camera_tail
+        else -> R.drawable.camera_default
+    }
+
+    /** 电子眼（导航卡）：距离+限速/类型；有则显示黄色警示，无则隐藏 */
     private fun updateCamera(intent: Intent, view: ViewGroup?) {
         // 兼容两种类型：部分高德版本 CAMERA_DIST 是 int（实测），部分可能是字符串
         val camDistRaw = intent.extras?.get("CAMERA_DIST")
@@ -450,17 +565,10 @@ class NavInfoHost(
         val cameraSpeed = intent.getIntExtra("CAMERA_SPEED", 0)
         val cameraType = intent.getIntExtra("CAMERA_TYPE", 0)
         val icon = view?.findViewById<ImageView>(R.id.navInfoCameraIcon)
-            ?: view?.findViewById<ImageView>(R.id.cruiseCameraIcon)
         val text = view?.findViewById<TextView>(R.id.navInfoCameraText)
-            ?: view?.findViewById<TextView>(R.id.cruiseCameraText)
         if (cameraDist.isNotBlank()) {
-            // 摄像头类型图标（Navi-Link 同款资源；协议 CAMERA_TYPE：0=测速 1=监控 4=公交专用道）
-            val iconRes = when (cameraType) {
-                4 -> R.drawable.camera_bus
-                1 -> R.drawable.camera_light
-                else -> R.drawable.camera_default
-            }
-            icon?.setImageResource(iconRes)
+            // 摄像头类型图标（完整映射对齐 Navi-Link，见 cameraIconRes）
+            icon?.setImageResource(cameraIconRes(cameraType))
             val warn = buildString {
                 append(cameraDist.withSmallUnit())
                 when {

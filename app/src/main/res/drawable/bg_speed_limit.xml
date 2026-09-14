@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 标准限速图标：白底 + 红色圆环（中国限速标志样式），数字用黑色粗体 TextView 叠加 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="#FFFFFF" />
+    <stroke
+        android:width="4dp"
+        android:color="#E53935" />
+</shape>

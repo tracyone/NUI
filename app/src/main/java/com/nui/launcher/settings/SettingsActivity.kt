@@ -718,7 +718,9 @@ class SettingsActivity : AppCompatActivity() {
         val dp = resources.displayMetrics.density
         val pad = (16 * dp).toInt()
         val p = UiTheme.settingsPalette(this)
-        val fieldBg = RippleDrawable(
+        // 两个字段必须各自独立 RippleDrawable：共享同一实例时 state 联动，
+        // 点击上一行(keycode) ripple 会显示在下一行(操作)
+        fun fieldBg() = RippleDrawable(
             ColorStateList.valueOf(p.ripple), null,
             GradientDrawable().apply { setColor(p.btnBg); cornerRadius = 12 * dp },
         )
@@ -729,13 +731,13 @@ class SettingsActivity : AppCompatActivity() {
         val tvKey = TextView(this).apply {
             textSize = 18f
             setTextColor(p.label)
-            background = fieldBg
+            background = fieldBg()
             setPadding(pad, pad, pad, pad)
         }
         val tvAction = TextView(this).apply {
             textSize = 18f
             setTextColor(p.label)
-            background = fieldBg
+            background = fieldBg()
             setPadding(pad, pad, pad, pad)
         }
         fun refreshTexts() {
@@ -769,6 +771,11 @@ class SettingsActivity : AppCompatActivity() {
             .setView(root)
             .setPositiveButton(R.string.save) { _, _ ->
                 if (keyCode >= 0 && action != null) {
+                    // 编辑已有映射：先移除原记录（可能改了 keyCode，add 只按新 keyCode 去重，
+                    // 直接 add 会让旧 keyCode 记录残留 → 一条变两条）
+                    if (existing != null) {
+                        KeyMapConfig.remove(this, existing)
+                    }
                     KeyMapConfig.add(this, KeyMapRecord(keyCode, action!!))
                     render()
                 }

@@ -3,7 +3,7 @@ package com.nui.launcher
 import android.content.Context
 import android.content.res.Configuration
 
-/** 桌面深浅模式：跟随系统 / 深色 / 浅色 / 跟随地图，默认跟随系统 */
+/** 桌面深浅模式：跟随系统 / 深色 / 浅色 / 跟随地图，默认跟随地图 */
 object UiTheme {
     enum class Mode { SYSTEM, DARK, LIGHT, FOLLOW_MAP }
 
@@ -133,7 +133,7 @@ object UiTheme {
     }
 
     fun mode(ctx: Context): Mode = when (
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_MODE, 0)
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_MODE, 3)
     ) {
         1 -> Mode.DARK
         2 -> Mode.LIGHT
