@@ -9,6 +9,7 @@ import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.text.style.RelativeSizeSpan
+import android.os.SystemClock
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
@@ -64,6 +65,27 @@ class NavInfoHost(
     // 模式：NONE=普通桌面 / NAVI=导航 / CRUISE=巡航
     private enum class Mode { NONE, NAVI, CRUISE }
     private var mode = Mode.NONE
+
+    // ==================== 疲劳驾驶提醒 ====================
+    // 进入导航/巡航（驾驶态）开始计时：连续 90 分钟语音提醒注意休息，
+    // 共 3 次（每次间隔 2 分钟），3 次后重置计时进入下一轮。NAVI/CRUISE 都算驾驶。
+    private val FATIGUE_FIRST_MS = 90 * 60 * 1000L
+    private val FATIGUE_INTERVAL_MS = 2 * 60 * 1000L
+    private val FATIGUE_REMIND_TIMES = 3
+    private var drivingStartTime = 0L
+    private var fatigueRemindCount = 0
+    private val fatigueHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val fatigueRunnable = Runnable {
+        speakFatigueRemind()
+        fatigueRemindCount++
+        if (fatigueRemindCount >= FATIGUE_REMIND_TIMES) {
+            // 3 次提醒完成：重置计时，进入下一轮（重新 90 分钟）
+            drivingStartTime = SystemClock.elapsedRealtime()
+            fatigueRemindCount = 0
+            Log.i(TAG, "疲劳提醒：3 次完成，重置新一轮 90 分钟计时")
+        }
+        scheduleFatigueRemind()
+    }
 
     // 导航卡元素
     private var turnView: ImageView? = null
@@ -242,6 +264,16 @@ class NavInfoHost(
         Log.i(TAG, "模式: ${old.name} -> ${newMode.name}")
         val active = newMode != Mode.NONE
         applyVisibility()
+        // 疲劳提醒：进入驾驶态开始计时，退出驾驶态停止/重置
+        val wasDriving = old == Mode.NAVI || old == Mode.CRUISE
+        val nowDriving = newMode == Mode.NAVI || newMode == Mode.CRUISE
+        if (!wasDriving && nowDriving) {
+            drivingStartTime = SystemClock.elapsedRealtime()
+            fatigueRemindCount = 0
+            scheduleFatigueRemind()
+        } else if (wasDriving && !nowDriving) {
+            stopFatigueRemind()
+        }
         // 导航：按钮让位给导航卡（全屏信息）；巡航：保留三按钮（回家/公司/收藏，便于操作），巡航卡显示在其下方
         val curButtons = navButtonIds.mapNotNull { navButton(it) }
         curButtons.forEach { it.visibility = if (newMode == Mode.NAVI) View.GONE else View.VISIBLE }
@@ -267,6 +299,32 @@ class NavInfoHost(
 
     /** MainActivity 更新天气时调用：导航/巡航中返回 true 则不显示天气文字（区域被占用） */
     fun isNavActive(): Boolean = mode != Mode.NONE
+
+    // ==================== 疲劳驾驶提醒 ====================
+    private fun isDriving(): Boolean = mode == Mode.NAVI || mode == Mode.CRUISE
+
+    /** 安排下一次疲劳提醒：第一次 90 分钟，之后每次 +2 分钟（共 3 次） */
+    private fun scheduleFatigueRemind() {
+        fatigueHandler.removeCallbacks(fatigueRunnable)
+        if (!isDriving()) return
+        val target = drivingStartTime + FATIGUE_FIRST_MS + fatigueRemindCount * FATIGUE_INTERVAL_MS
+        val delay = (target - SystemClock.elapsedRealtime()).coerceAtLeast(0)
+        fatigueHandler.postDelayed(fatigueRunnable, delay)
+        Log.i(TAG, "疲劳提醒：${delay / 1000}s 后第 ${fatigueRemindCount + 1} 次提醒")
+    }
+
+    private fun stopFatigueRemind() {
+        fatigueHandler.removeCallbacks(fatigueRunnable)
+        fatigueRemindCount = 0
+        Log.i(TAG, "疲劳提醒：退出驾驶态，停止计时")
+    }
+
+    private fun speakFatigueRemind() {
+        Log.i(TAG, "疲劳提醒：已连续驾驶 ${FATIGUE_FIRST_MS / 60000} 分钟，语音提醒注意休息")
+        runCatching {
+            NuiTts(context).speak("主人，您已连续驾驶一个半小时，请注意休息")
+        }
+    }
 
     /** 看门狗：每次收到导航数据重置 15s 计时，超时自动恢复按钮区 */
     private val watchdog = Runnable {
