@@ -73,8 +73,6 @@ class NavInfoHost(
     private var exitView: TextView? = null
     private var tmcView: TextView? = null
     private var speedView: TextView? = null
-    private var sapaView: TextView? = null
-    private var sapaMoreView: TextView? = null
     private var navBlock: View? = null
 
     // 巡航卡元素
@@ -122,8 +120,6 @@ class NavInfoHost(
         exitView = overlay.findViewById(R.id.navInfoExit)
         tmcView = overlay.findViewById(R.id.navInfoTmc)
         speedView = overlay.findViewById(R.id.navInfoSpeed)
-        sapaView = overlay.findViewById(R.id.navInfoSapa)
-        sapaMoreView = overlay.findViewById(R.id.navInfoSapaMore)
         navBlock = overlay.findViewById(R.id.navInfoNavBlock)
         cruiseBlock = overlay.findViewById(R.id.navInfoCruiseBlock)
         cruiseSpeedView = overlay.findViewById(R.id.cruiseSpeed)
@@ -141,17 +137,27 @@ class NavInfoHost(
         Log.i(TAG, "导航/巡航信息显示已启动")
     }
 
-    /** 高德巡航播报临时静音：10047 EXTRA_CASUAL_MUTE（进巡航静音，退巡航/导航恢复） */
+    /** 高德巡航播报临时静音：10047 EXTRA_CASUAL_MUTE（进巡航静音，退巡航/导航恢复）。
+     *  对齐实测用法（CSDN/am 命令）：显式指定 AmapAutoBroadcastReceiver、只带 EXTRA_CASUAL_MUTE；
+     *  部分高德版本 receiver 类名可能不同，隐式 action 版本兜底双发（静音幂等，重复无害）。 */
     private fun setAmapCruiseMute(mute: Boolean) {
-        val q = Intent(ACTION_RECV).apply {
-            putExtra("KEY_TYPE", 10047)
-            // 兼容 1.x：MUTE 与 CASUAL_MUTE 同时发送（EXTRA_MUTE=0 不永久静音）；2.x 单独发送亦兼容
-            putExtra("EXTRA_MUTE", 0)
-            putExtra("EXTRA_CASUAL_MUTE", if (mute) 1 else 0)
-            putExtra("SOURCE_APP", context.packageName)
-        }
-        runCatching { context.sendBroadcast(q) }
-            .onSuccess { Log.i(TAG, if (mute) "高德巡航播报临时静音(10047)" else "高德巡航播报恢复(10047)") }
+        val v = if (mute) 1 else 0
+        val intents = listOf(
+            Intent().apply {
+                setClassName("com.autonavi.amapauto", "com.autonavi.amapauto.adapter.internal.AmapAutoBroadcastReceiver")
+                action = ACTION_RECV
+                putExtra("KEY_TYPE", 10047)
+                putExtra("EXTRA_CASUAL_MUTE", v)
+                putExtra("SOURCE_APP", context.packageName)
+            },
+            Intent(ACTION_RECV).apply {
+                putExtra("KEY_TYPE", 10047)
+                putExtra("EXTRA_CASUAL_MUTE", v)
+                putExtra("SOURCE_APP", context.packageName)
+            },
+        )
+        intents.forEach { q -> runCatching { context.sendBroadcast(q) } }
+        Log.i(TAG, if (mute) "高德巡航播报临时静音(10047 显式+隐式)" else "高德巡航播报恢复(10047 显式+隐式)")
     }
 
     /** 主动查询导航状态：12404 EXTRA_REQUEST_AUTO_STATE=1 → 高德回 10019 STATE=8/9 */
@@ -211,6 +217,21 @@ class NavInfoHost(
         }
     }
 
+    // 桌面页可见性：切到应用列表页（page1+）隐藏悬浮信息卡，回 page0 恢复。
+    // 与广播驱动的 setMode 叠加：两者都满足才显示 overlay。
+    private var pageVisible = true
+
+    /** 页面切换回调：0=桌面页（显示导航/巡航信息卡），其它页（应用列表等）隐藏 */
+    fun onPageChanged(page: Int) {
+        pageVisible = page == 0
+        applyVisibility()
+        Log.i(TAG, "onPageChanged page=$page pageVisible=$pageVisible overlay=vis${overlay.visibility}")
+    }
+
+    private fun applyVisibility() {
+        overlay.visibility = if (mode != Mode.NONE && pageVisible) View.VISIBLE else View.GONE
+    }
+
     private fun setMode(newMode: Mode) {
         if (mode == newMode) return
         val old = mode
@@ -220,7 +241,7 @@ class NavInfoHost(
         if (old == Mode.CRUISE && newMode != Mode.CRUISE) setAmapCruiseMute(false)
         Log.i(TAG, "模式: ${old.name} -> ${newMode.name}")
         val active = newMode != Mode.NONE
-        overlay.visibility = if (active) View.VISIBLE else View.GONE
+        applyVisibility()
         // 导航：按钮让位给导航卡（全屏信息）；巡航：保留三按钮（回家/公司/收藏，便于操作），巡航卡显示在其下方
         val curButtons = navButtonIds.mapNotNull { navButton(it) }
         curButtons.forEach { it.visibility = if (newMode == Mode.NAVI) View.GONE else View.VISIBLE }
@@ -315,8 +336,10 @@ class NavInfoHost(
         val remainDis = intent.getStringExtra("ROUTE_REMAIN_DIS_AUTO")
             ?: intent.getStringExtra("ROUTE_REMAIN_DIS") ?: ""
         destView?.text = dest.ifBlank { "导航中" }
+        // 到达时间 = 当前时间 + 剩余时长（ROUTE_REMAIN_TIME_AUTO 如"50分钟"/"1小时20分钟"）
+        val arriveTime = formatArriveTime(parseRemainMinutes(remainTime))
         val etaParts = listOf(
-            remainTime.ifBlank { intent.getStringExtra("ETA_TEXT")?.replace("预计", "")?.replace("到达", "") ?: "" },
+            arriveTime,
             remainDis,
         ).filter { it.isNotBlank() }
         etaView?.text = etaParts.joinToString(" · ").ifBlank { "导航中" }
@@ -337,27 +360,8 @@ class NavInfoHost(
         // 当前速度大字（含限速小字）
         renderNavSpeed(speedView, curSpeed, limitedSpeed)
 
-        // 服务区
-        val roadType = intent.getIntExtra("ROAD_TYPE", -1)
-        val sapaDist = intent.getStringExtra("SAPA_DIST_AUTO") ?: ""
-        val sapaName = intent.getStringExtra("SAPA_NAME") ?: ""
-        if (roadType == 0 && sapaDist.isNotBlank()) {
-            sapaView?.text = "${sapaName.ifBlank { "下一个服务区" }} · $sapaDist".withSmallUnit()
-            sapaView?.visibility = View.VISIBLE
-            val sapaNum = intent.getIntExtra("SAPA_NUM", 0)
-            if (sapaNum > 1) {
-                sapaMoreView?.text = "前方共 $sapaNum 个服务区"
-                sapaMoreView?.visibility = View.VISIBLE
-            } else {
-                sapaMoreView?.visibility = View.GONE
-            }
-        } else {
-            sapaView?.visibility = View.GONE
-            sapaMoreView?.visibility = View.GONE
-        }
-
         Log.i(TAG, "导航信息: 转向=$icon 终点=$dest 全程=${etaParts.joinToString("/")} " +
-            "出口=$exitName$exitDir 速度=${curSpeed}km/h 限速=$limitedSpeed 服务区=$sapaDist")
+            "出口=$exitName$exitDir 速度=${curSpeed}km/h 限速=$limitedSpeed")
     }
 
     /** 巡航卡更新：当前速度大字 + 最近测速 */
@@ -378,7 +382,13 @@ class NavInfoHost(
 
     /** 电子眼：距离+限速/类型；有则显示黄色警示，无则隐藏 */
     private fun updateCamera(intent: Intent, view: ViewGroup?) {
-        val cameraDist = intent.getStringExtra("CAMERA_DIST") ?: ""
+        // 兼容两种类型：部分高德版本 CAMERA_DIST 是 int（实测），部分可能是字符串
+        val camDistRaw = intent.extras?.get("CAMERA_DIST")
+        val cameraDist = when (camDistRaw) {
+            is Int -> if (camDistRaw > 0) "$camDistRaw" else ""
+            is String -> camDistRaw
+            else -> ""
+        }
         val cameraSpeed = intent.getIntExtra("CAMERA_SPEED", 0)
         val cameraType = intent.getIntExtra("CAMERA_TYPE", 0)
         val icon = view?.findViewById<ImageView>(R.id.navInfoCameraIcon)
@@ -416,15 +426,17 @@ class NavInfoHost(
      * 参考 Navi-Link TrafficLightView 样式，多个方向横排。
      */
     private fun handleTrafficLight(intent: Intent) {
-        if (mode != Mode.CRUISE) return
-        resetDataWatchdog()
-        val container = cruiseLightView ?: return
+        // 60073 红绿灯是巡航专属广播：高德发它说明正在巡航。若巡航检测（46/ICON=0）
+        // 因版本差异失败，收到有效红绿灯数据仍进入巡航显示，避免"有数据不显示"
         val lights = intent.getStringExtra("lightsData")
             ?: intent.getStringExtra("LIGHTS_DATA")
-        if (lights.isNullOrBlank()) {
-            container.visibility = View.GONE
+        if (mode == Mode.NAVI || lights.isNullOrBlank()) {
+            if (mode != Mode.NAVI) cruiseLightView?.visibility = View.GONE
             return
         }
+        if (mode != Mode.CRUISE) setMode(Mode.CRUISE)
+        resetDataWatchdog()
+        val container = cruiseLightView ?: return
         try {
             val array = JSONArray(lights)
             if (array.length() == 0) {
@@ -521,8 +533,8 @@ class NavInfoHost(
             }
             container.visibility = View.VISIBLE
 
-            // 变灯提醒：≤25km/h 时最近红灯倒计时 ≤3s 语音提醒（去重由本方法内状态控制，阈值按用户要求 ≤25）
-            if (curSpeed <= 25 && firstRedCountdown in 1..3) {
+            // 变灯提醒：巡航中最近红灯倒计时 ≤3s 语音提醒（不设速度条件，高德悬浮窗巡航即有红绿灯）
+            if (firstRedCountdown in 1..3) {
                 val text = if (firstRedCountdown <= 1) "绿灯即将亮起" else "${firstRedCountdown}秒后变绿"
                 tts?.speak(text)
                 Log.i(TAG, "变灯提醒(巡航): $text")
@@ -571,9 +583,14 @@ class NavInfoHost(
                 segSum += info.getJSONObject(i).optInt("tmc_segment_distance", 0)
             }
 
-            // 坐标系判定：段之和≈剩余路程 → 分段覆盖剩余路程（当前位置=段0 起点）；
-            // 否则按全程坐标系，用 finish_distance 定位当前段
-            val isResidualCoords = residualDistance > 0 &&
+            // 坐标系判定：真实广播为全程坐标系（段之和≈total_distance，段0=路线起点），
+            // 用 finish_distance(已行驶) 定位当前位置所在段，拥堵距离随行驶实时减小；
+            // 兼容旧版"剩余路程坐标系"（段之和≈residual 且不≈total，段0=当前位置）。
+            // 注意不能只用 segSum≈residual 判断：刚出发时剩余≈总路程会误判成剩余坐标系，
+            // 导致不减去已行驶里程、拥堵距离不实时变化。
+            val isTotalCoords = totalDistance > 0 &&
+                Math.abs(segSum - totalDistance) <= Math.max(100, totalDistance / 10)
+            val isResidualCoords = !isTotalCoords && residualDistance > 0 &&
                 Math.abs(segSum - residualDistance) <= Math.max(100, residualDistance / 10)
             val curOffset = if (isResidualCoords) 0 else finishDistance
 
@@ -709,6 +726,35 @@ class NavInfoHost(
             s.setSpan(RelativeSizeSpan(0.55f), unitStart, m.range.last + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
         return s
+    }
+
+    /** 解析高德剩余时长文本（"50分钟"/"1小时20分钟"）为分钟数；无法解析返回 -1 */
+    private fun parseRemainMinutes(raw: String): Int {
+        if (raw.isBlank()) return -1
+        var minutes = 0
+        Regex("(\\d+(?:\\.\\d+)?)\\s*小时").find(raw)?.let {
+            minutes += (it.groupValues[1].toDouble() * 60).toInt()
+        }
+        Regex("(\\d+(?:\\.\\d+)?)\\s*分钟").find(raw)?.let {
+            minutes += it.groupValues[1].toDouble().toInt()
+        }
+        if (minutes == 0) {
+            // 纯数字兜底（万一格式是"120"）
+            raw.trim().toIntOrNull()?.let { minutes = it }
+        }
+        return if (minutes > 0) minutes else -1
+    }
+
+    /** 到达时间 = 当前时间 + 剩余分钟，格式 HH:mm */
+    private fun formatArriveTime(minutes: Int): String {
+        if (minutes <= 0) return ""
+        val cal = java.util.Calendar.getInstance()
+        cal.add(java.util.Calendar.MINUTE, minutes)
+        return String.format(
+            "%02d:%02d",
+            cal.get(java.util.Calendar.HOUR_OF_DAY),
+            cal.get(java.util.Calendar.MINUTE),
+        )
     }
 
     /** 转向图标编号 → 资源（高德风格白色箭头） */

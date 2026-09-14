@@ -248,6 +248,8 @@ class MainActivity : AppCompatActivity() {
                 // 离开桌面时关闭高德浮窗；回到桌面时浮窗几何由 IDLE 回调刷新
                 // （滑动动画中 getLocationOnScreen 会取到过渡坐标，导致浮窗与 dock 重叠）
                 if (::mapHost.isInitialized && position != 0) mapHost.closeFloat()
+                // 离开桌面页时隐藏导航/巡航信息卡（page1+ 是应用列表，不显示悬浮信息）
+                navInfoHost?.onPageChanged(position)
                 syncWeatherLayer(position)
             }
 
@@ -257,6 +259,8 @@ class MainActivity : AppCompatActivity() {
                 if (state == ViewPager2.SCROLL_STATE_IDLE &&
                     binding.viewPager.currentItem == 0 && ::mapHost.isInitialized
                 ) {
+                    // 回桌面先恢复浮窗（closeFloat 已置隐藏态），再按新几何刷新
+                    mapHost.resumeFloat()
                     mapHost.refreshFloat()
                 }
             }
@@ -805,7 +809,7 @@ class MainActivity : AppCompatActivity() {
                 renderDock()
                 NuiToast.show(this, "已添加 ${app.label}", Toast.LENGTH_SHORT)
             },
-            onDismiss = { if (::mapHost.isInitialized) mapHost.showFloat() },
+            onDismiss = { if (::mapHost.isInitialized && binding.viewPager.currentItem == 0) mapHost.showFloat() },
         )
     }
 
@@ -822,7 +826,7 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("取消", null)
             .create()
-        d.setOnDismissListener { if (::mapHost.isInitialized) mapHost.showFloat() }
+        d.setOnDismissListener { if (::mapHost.isInitialized && binding.viewPager.currentItem == 0) mapHost.showFloat() }
         d.show()
         return true
     }
@@ -896,7 +900,7 @@ class MainActivity : AppCompatActivity() {
     private fun setupNav() {
         navHost = NavHost(this, desktopBtnNavHome!!, desktopBtnNavCompany!!)
         navHost.onHideFloat = { mapHost.closeFloat() }
-        navHost.onShowFloat = { mapHost.showFloat() }
+        navHost.onShowFloat = { if (binding.viewPager.currentItem == 0) mapHost.showFloat() }
         navHost.start()
         // 导航信息显示：导航中右上角按钮区切换为导航卡（转向/距离/时间/道路/速度）
         navInfoHost = com.nui.launcher.nav.NavInfoHost(
@@ -927,7 +931,7 @@ class MainActivity : AppCompatActivity() {
     private fun setupMusic() {
         musicHost = MusicHost(this, desktopMusicContainer!!)
         musicHost.onHideFloat = { mapHost.closeFloat() }
-        musicHost.onShowFloat = { mapHost.showFloat() }
+        musicHost.onShowFloat = { if (binding.viewPager.currentItem == 0) mapHost.showFloat() }
         musicHost.floatBoundsProvider = {
             if (::mapHost.isInitialized) mapHost.floatBounds() else null
         }
@@ -938,7 +942,7 @@ class MainActivity : AppCompatActivity() {
         wallpaper = WallpaperController(this, binding.root)
         wallpaper.applyOnStart()
         wallpaper.onHideFloat = { mapHost.closeFloat() }
-        wallpaper.onShowFloat = { mapHost.showFloat() }
+        wallpaper.onShowFloat = { if (binding.viewPager.currentItem == 0) mapHost.showFloat() }
     }
 
     private fun loadAppGrid() {
