@@ -309,38 +309,6 @@
                         android:textColor="#FFFFFF"
                         android:maxLines="1"
                         android:ellipsize="end" />
-
-                    <!-- 行6：服务区（仅高速公路显示；深绿指示牌风格，保留原样式） -->
-                    <TextView
-                        android:id="@+id/navInfoSapa"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:background="@drawable/bg_sapa_board"
-                        android:paddingStart="14dp"
-                        android:paddingEnd="14dp"
-                        android:paddingTop="5dp"
-                        android:paddingBottom="5dp"
-                        android:text="原阳服务区 · 8公里"
-                        android:textSize="16sp"
-                        android:textStyle="bold"
-                        android:textColor="#FFFFFF"
-                        android:maxLines="1"
-                        android:ellipsize="end"
-                        android:visibility="gone" />
-
-                    <!-- 服务区小行：前方服务区个数 -->
-                    <TextView
-                        android:id="@+id/navInfoSapaMore"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="前方共 2 个服务区"
-                        android:textSize="12sp"
-                        android:textColor="#C8D8EA"
-                        android:maxLines="1"
-                        android:ellipsize="end"
-                        android:visibility="gone" />
                 </LinearLayout>
 
                 <!-- ========== 巡航模式内容 ========== -->

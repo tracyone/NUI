@@ -145,6 +145,10 @@ class MapHost(
     }
 
     /** 外部（如 dock 形态切换）导致地图卡片位置变化后，刷新高德浮窗几何并重发显示广播 */
+    /** 是否允许显示悬浮窗（page0 允许；切到其它页 closeFloat 置 false，防止巡航等后台广播
+     *  引起布局变化时 refreshFloat 又把浮窗拉回来） */
+    private var floatEnabled = false
+
     fun refreshFloat() {
         // 等待布局完成后再取几何，否则 getLocationOnScreen / width 可能是旧值或过渡值
         // 用 OnLayoutChangeListener 确保在本次布局完成后取数；兜底 200ms 防止无布局变化时不触发
@@ -152,11 +156,13 @@ class MapHost(
             override fun onLayoutChange(v: android.view.View, left: Int, top: Int, right: Int, bottom: Int,
                                          oldLeft: Int, oldTop: Int, oldRight: Int, oldBottom: Int) {
                 v.removeOnLayoutChangeListener(this)
+                if (!floatEnabled) return
                 primeCache()
                 showFloat()
             }
         })
         mapPanel.postDelayed({
+            if (!floatEnabled) return@postDelayed
             primeCache()
             showFloat()
         }, 200)
@@ -404,11 +410,13 @@ class MapHost(
         else intArrayOf(cachedX, cachedY, cachedW, cachedH)
 
     fun closeFloat() {
+        floatEnabled = false
         val closeAction = current?.floatCloseAction ?: return
         runCatching { context.sendBroadcast(Intent(closeAction)) }
     }
 
     fun showFloat() {
+        floatEnabled = true
         current?.takeIf { it.type == MapSource.Type.EXTERNAL_FLOAT }
             ?.let { src ->
                 container.post {

@@ -21,3 +21,4 @@ pluginManagement {
 
 rootProject.name = "NUI"
 include(":app")
+include(":gpsmock")
