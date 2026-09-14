@@ -7,6 +7,7 @@ import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.LayoutInflater
@@ -1142,6 +1143,35 @@ class MainActivity : AppCompatActivity() {
         if (::mapHost.isInitialized) mapHost.setRightLimit(availableRight)
     }
 
+    /** 按配置应用系统栏显隐（状态栏/导航栏）。
+     *  API30+ 用 WindowInsetsController（应用退出回桌面后重设可靠，旧 systemUiVisibility 在
+     *  Android 11+ 已废弃、切回前台后可能不生效）；低版本用 systemUiVisibility。 */
+    private fun applySystemUi() {
+        val showStatus = UiTheme.showStatusBar(this)
+        val showDock = UiTheme.showSystemDock(this)
+        if (Build.VERSION.SDK_INT >= 30) {
+            val controller = window.insetsController ?: return
+            if (showStatus) controller.show(android.view.WindowInsets.Type.statusBars())
+            else controller.hide(android.view.WindowInsets.Type.statusBars())
+            if (showDock) controller.show(android.view.WindowInsets.Type.navigationBars())
+            else controller.hide(android.view.WindowInsets.Type.navigationBars())
+            // 手势滑动可临时唤出（等同 IMMERSIVE_STICKY），避免边缘滑出后永久显示
+            controller.systemBarsBehavior =
+                android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        } else {
+            var vis = 0
+            if (!showStatus) {
+                vis = vis or View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+            }
+            if (!showDock) {
+                vis = vis or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                    View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+            }
+            window.decorView.systemUiVisibility = vis
+        }
+    }
+
     /**
      * 系统栏显隐：顶部状态栏与底部系统 Dock（导航栏）两个独立开关组合生效。
      * - 状态栏开：显示顶部状态栏，内容顶部自动让位；关：隐藏，内容延伸铺满顶部。
@@ -1164,16 +1194,7 @@ class MainActivity : AppCompatActivity() {
             window.clearFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
         }
 
-        var vis = 0
-        if (!showStatus) {
-            vis = vis or View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-        }
-        if (!showDock) {
-            vis = vis or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
-                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-        }
-        window.decorView.systemUiVisibility = vis
+        applySystemUi()
 
         // 悬浮地图底部限制：按当前配置主动计算并下发（不依赖 insets 回调时序），
         // 修复切换系统 Dock 显隐后高德浮窗底边不恢复/不避让的问题
@@ -1237,17 +1258,19 @@ class MainActivity : AppCompatActivity() {
         return m.heightPixels
     }
 
-    /** 重新获得焦点时重设系统栏标志（部分设备焦点变化后会恢复系统栏） */
+    /** 重新获得焦点时按配置重设系统栏显隐：
+     *  启动系统应用期间其前台会显示系统栏（导航栏），应用退出回桌面后系统栏不会自动消失，
+     *  必须在此重设隐藏标志。注意：应用自行退出（非 HOME 键）时，窗口恢复早期 SystemUI
+     *  会忽略立即重设（HOME 时系统会主动重置导航栏所以看不出），需延迟到过渡结束后再设一次。
+     */
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus && !UiTheme.showStatusBar(this) && !UiTheme.showSystemDock(this)) {
-            window.decorView.systemUiVisibility =
-                View.SYSTEM_UI_FLAG_FULLSCREEN or
-                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
-                    View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
-                    View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+        if (hasFocus) {
+            applySystemUi()
+            binding.root.requestApplyInsets()
+            window.decorView.postDelayed({
+                applySystemUi()
+            }, 150)
         }
-        if (hasFocus) binding.root.requestApplyInsets()
     }
 }

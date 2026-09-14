@@ -33,26 +33,25 @@ object IconUtils {
     }
 
     /**
-     * 应用是否有自定义图标（区别于系统默认图标），两层判断：
+     * 应用是否有自定义图标（区别于系统默认图标），三层判断：
      * 1. activity / application 都未声明 icon（iconRes==0 && appIconRes==0）→ 系统默认图标 → false；
-     * 2. 有声明但实际显示的图标与系统默认应用图标（getDefaultActivityIcon）constantState 相同
-     *    （如显式引用 @android:drawable/sym_def_app_icon）→ false；
-     *    其余（声明了自己的图标资源）→ true。
-     *
-     * 不能只用 loadIcon 与 defaultActivityIcon 比较（第一版）：
-     * Android 8+ 对"完全无 icon 声明"的应用，loadIcon 返回 adaptive 包装的系统默认图标，
-     * constantState 与 getDefaultActivityIcon()（普通 drawable）不相等 → 全部误判"有图标"，
-     * 排序退化为字母序（车机反馈的问题）。
+     * 2. 显式引用系统默认应用图标资源 @android:drawable/sym_def_app_icon → false
+     *    （不能只靠 constantState 比较：Android 8+ 下 loadIcon 返回 adaptive 包装的默认图标，
+     *    constantState 与 defaultActivityIcon()（普通 drawable）不相等 → 误判"有图标"，排序退化为字母序）；
+     * 3. 声明了自己的图标资源且加载结果与系统默认图标 constantState 不同 → true；加载失败视为无图标。
      */
     fun hasCustomIcon(pm: PackageManager, ri: ResolveInfo): Boolean {
         val ai = ri.activityInfo ?: return false
         val iconRes = ai.icon
         val appIconRes = ai.applicationInfo?.icon ?: 0
         if (iconRes == 0 && appIconRes == 0) return false
+        if (iconRes == android.R.drawable.sym_def_app_icon ||
+            appIconRes == android.R.drawable.sym_def_app_icon
+        ) return false
         return try {
             ri.loadIcon(pm).constantState != pm.defaultActivityIcon.constantState
         } catch (e: Exception) {
-            true
+            false
         }
     }
 
