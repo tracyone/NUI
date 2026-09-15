@@ -98,7 +98,8 @@ class NavInfoHost(
     private var cameraView: ViewGroup? = null
     private var exitView: TextView? = null
     private var tmcView: TextView? = null
-    private var speedView: TextView? = null
+    private var speedView: TextView? = null        // 导航卡速度（黑底蓝圈）
+    private var navLimitCircleView: TextView? = null // 导航卡限速（红圈）
     private var navBlock: View? = null
 
     // 巡航卡元素
@@ -150,7 +151,8 @@ class NavInfoHost(
         cameraView = overlay.findViewById(R.id.navInfoCamera)
         exitView = overlay.findViewById(R.id.navInfoExit)
         tmcView = overlay.findViewById(R.id.navInfoTmc)
-        speedView = overlay.findViewById(R.id.navInfoSpeed)
+        speedView = overlay.findViewById(R.id.navSpeedCircle)
+        navLimitCircleView = overlay.findViewById(R.id.navLimitCircle)
         navBlock = overlay.findViewById(R.id.navInfoNavBlock)
         cruiseBlock = overlay.findViewById(R.id.navInfoCruiseBlock)
         cruiseSpeedView = overlay.findViewById(R.id.cruiseSpeed)
@@ -848,39 +850,26 @@ class NavInfoHost(
     }
 
     /**
-     * 导航卡当前速度大字渲染：数字 2.4x 加粗（无单位），
-     * 限速以" 限速80"小字灰蓝附加（可选），速度未知则只显示限速。
-     * 颜色随超速程度变亮：不超速白 / 超10%内黄 / 超20%内橙 / 超20%以上亮红。
+     * 导航卡当前速度圈渲染（与巡航卡样式对齐）：速度黑底蓝圈大字（无单位），
+     * 限速红圈白底黑字（可选）。超速时速度圈红字、限速圈红字；不超速白/黑字。
      */
     private fun renderNavSpeed(view: TextView?, speed: Int, limit: Int) {
         if (view == null) return
-        val ss = SpannableStringBuilder()
-        if (speed > 0) {
-            val num = "$speed"
-            ss.append(num)
-            ss.setSpan(RelativeSizeSpan(2.4f), 0, num.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            ss.setSpan(ForegroundColorSpan(speedColor(speed, limit)), 0, ss.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        }
+        view.text = if (speed > 0) "$speed" else "--"
         if (limit > 0) {
-            if (ss.isNotEmpty()) ss.append("  ")
-            val lt = "限速$limit"
-            ss.append(lt)
-            ss.setSpan(RelativeSizeSpan(0.75f), ss.length - lt.length, ss.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            ss.setSpan(ForegroundColorSpan(0xFFB0C4DE.toInt()), ss.length - lt.length, ss.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            navLimitCircleView?.apply {
+                text = "$limit"
+                visibility = View.VISIBLE
+            }
+        } else {
+            navLimitCircleView?.visibility = View.GONE
         }
-        view.text = ss
-    }
-
-    /** 速度颜色：不超速=白；超速≤10%=黄；≤20%=橙；>20%=亮红（越严重越亮） */
-    private fun speedColor(speed: Int, limit: Int): Int {
-        if (limit <= 0) return 0xFFFFFFFF.toInt()
-        val over = speed - limit
-        if (over <= 0) return 0xFFFFFFFF.toInt()
-        val pct = over * 100 / limit
-        return when {
-            pct <= 10 -> 0xFFFFD600.toInt() // 黄
-            pct <= 20 -> 0xFFFF9100.toInt() // 橙
-            else -> 0xFFFF1744.toInt()      // 亮红
+        if (limit > 0 && speed > limit) {
+            view.setTextColor(0xFFFF6B6B.toInt())
+            navLimitCircleView?.setTextColor(0xFFE53935.toInt())
+        } else {
+            view.setTextColor(0xFFFFFFFF.toInt())
+            navLimitCircleView?.setTextColor(0xFF1C1C1E.toInt())
         }
     }
 
