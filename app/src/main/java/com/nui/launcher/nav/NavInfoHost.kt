@@ -62,6 +62,8 @@ class NavInfoHost(
         private const val NAV_STATE_NAV_EXIT = 9
         // 10019 状态表（参考 Navi-Link 实测）：25=巡航结束（退出巡航界面）；46/47 实车不可靠，已弃用
         private const val NAV_STATE_CRUISE_END = 25
+        /** 昼夜外观轮询间隔（毫秒）：60 秒 */
+        private const val DAY_NIGHT_POLL_MS = 60_000L
     }
 
     // 模式：NONE=普通桌面 / NAVI=导航 / CRUISE=巡航
@@ -159,12 +161,26 @@ class NavInfoHost(
         weatherView = (overlay.parent as? ViewGroup)?.findViewById(R.id.weatherText)
         tts = NuiTts(context)
         context.registerReceiver(receiver, IntentFilter(ACTION_SEND))
+        val h = android.os.Handler(android.os.Looper.getMainLooper())
         // 启动 2s 后主动查询：12404 导航状态 + 13030 昼夜模式，结果都通过 10019 返回
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+        h.postDelayed({
             queryNavState()
             queryDayNight()
         }, 2000L)
+        // 昼夜外观周期轮询兜底：高德车机版会随位置/时间动态切换昼夜外观（进隧道、日出日落等），
+        // 被动广播（10019 37/38）可能漏发或时机错过（如启动时高德未运行），周期性主动查询保证
+        // FOLLOW_MAP 持续跟随。13030 查询轻量，60s 一次无压力。
+        h.postDelayed(dayNightPoller, DAY_NIGHT_POLL_MS)
         Log.i(TAG, "导航/巡航信息显示已启动")
+    }
+
+    /** 周期查询高德昼夜外观（13030），保证 FOLLOW_MAP 持续跟随高德外观变化 */
+    private val dayNightPoller = object : Runnable {
+        override fun run() {
+            queryDayNight()
+            android.os.Handler(android.os.Looper.getMainLooper())
+                .postDelayed(this, DAY_NIGHT_POLL_MS)
+        }
     }
 
     /** 高德巡航播报临时静音：10047 EXTRA_CASUAL_MUTE（进巡航静音，退巡航/导航恢复）。
@@ -483,7 +499,8 @@ class NavInfoHost(
         }
     }
 
-    /** 限速摄像头三阶段语音：首次发现播报限速 → 距离<200m 提醒临近 → 通过后"登"一声。
+    /** 限速摄像头语音提醒：发现摄像头即播"前方XX米有限速摄像头，限速XX"（提前警示，不限超速），
+     *  距离 <200m 再提醒一次；通过后"登"一声。超速提醒由 checkOverspeed 负责（有摄像头超 10%、无摄像头超 20%）。
      *  camDist<=0 视为通过（重置状态）；距离回跳（如 100→400）视为进入下一个摄像头，重新播报。 */
     private fun checkCameraVoice(camDist: Int, camSpeed: Int) {
         if (camDist > 0) {
@@ -500,14 +517,15 @@ class NavInfoHost(
             }
             if (!camAnnouncedFirst) {
                 camAnnouncedFirst = true
-                val text = if (camSpeed > 0) "前方限速$camSpeed" else "前方测速摄像头"
+                val text = "前方${camDist}米有限速摄像头，限速${camSpeed}"
                 tts?.speak(text)
-                Log.i(TAG, "限速摄像头首次提醒: $text (${camDist}米)")
+                Log.i(TAG, "限速摄像头首次提醒: $text")
             }
             if (!camAnnouncedNear && camDist < 200) {
                 camAnnouncedNear = true
-                tts?.speak("前方200米限速摄像头")
-                Log.i(TAG, "限速摄像头临近提醒: ${camDist}米")
+                val text = "前方${camDist}米有限速摄像头，限速${camSpeed}"
+                tts?.speak(text)
+                Log.i(TAG, "限速摄像头临近提醒: $text")
             }
         } else {
             if (camTracked) {
@@ -866,17 +884,22 @@ class NavInfoHost(
         }
     }
 
-    /** 超速检测：巡航下速度>限速 时语音提醒一次（回落后再超速会再提醒） */
+    /** 超速检测语音（仅巡航模式；导航模式高德软件自己播报，NUI 不重复）：
+     *  - 巡航 + 跟踪限速摄像头：超限速 10% 播"您已超速，当前限速XX"；
+     *  - 巡航 + 无限速摄像头：超限速 20% 才播。 */
     private fun checkOverspeed() {
+        if (mode != Mode.CRUISE) return
         if (curSpeed <= 0) return
-        // 巡航限速用测速点（cruiseLimit），导航用 LIMITED_SPEED（导航下真实）
-        val limit = if (mode == Mode.CRUISE) cruiseLimit else limitedSpeed
+        // 巡航限速只认测速点 CAMERA_SPEED（cruiseLimit）
+        val limit = cruiseLimit
         if (limit <= 0) return
-        if (curSpeed > limit) {
+        // 没有摄像头跟踪 → 超 20%；跟踪摄像头中 → 超 10%
+        val threshold = if (!camTracked) limit * 12 / 10 else limit * 11 / 10
+        if (curSpeed > threshold) {
             if (!overspeedAlerted) {
                 overspeedAlerted = true
                 tts?.speak("您已超速，当前限速${limit}")
-                Log.i(TAG, "超速提醒: ${curSpeed}km/h > 限速${limit}km/h")
+                Log.i(TAG, "超速提醒: ${curSpeed}km/h > 限速${limit}km/h (超${if (!camTracked) 20 else 10}%)")
             }
         } else {
             overspeedAlerted = false

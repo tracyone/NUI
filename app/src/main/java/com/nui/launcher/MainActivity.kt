@@ -361,6 +361,11 @@ class MainActivity : AppCompatActivity() {
 
     /** 高德自动返回桌面完成：播报暂存的天气 / 问候 */
     private fun flushPendingWeatherVoice() {
+        // 高德已启动并返回：此时主动查询昼夜/导航状态必然有响应。
+        // 修复 FOLLOW_MAP 无法跟随外观：启动时（第2s）的查询早于高德启动（第5s）失败后
+        // 没有重试，被动广播又只在高德昼夜切换时才发 → 卡在初始外观；直到下次 onResume（如打开设置）才恢复。
+        navInfoHost?.queryDayNight()
+        navInfoHost?.queryNavState()
         android.util.Log.d("WeatherVoice", "高德已返回桌面，flush 暂存播报")
         pendingFirstWeather?.let {
             pendingFirstWeather = null
@@ -531,8 +536,17 @@ class MainActivity : AppCompatActivity() {
             musicHost.setFloatAreaVisible(true)
         }
         // 设置页可能改了应用列表图标比例，返回时刷新：仅重绑应用页（桌面页 ViewHolder 复用）
+        // 延后一帧执行：返回时 ViewPager2 正在 relayout，立即 notify 会在页面宽度未就绪时
+        // 重建网格 → 应用图标瞬时靠右、左边留白（先等布局稳定再重绑）
         (binding.viewPager.adapter as? PagerAdapter)?.let { pa ->
-            if (pa.appPages.isNotEmpty()) pa.notifyItemRangeChanged(1, pa.appPages.size)
+            if (pa.appPages.isNotEmpty()) {
+                binding.viewPager.post {
+                    if (isDestroyed || isFinishing) return@post
+                    (binding.viewPager.adapter as? PagerAdapter)?.let { p ->
+                        if (p.appPages.isNotEmpty()) p.notifyItemRangeChanged(1, p.appPages.size)
+                    }
+                }
+            }
         }
         // 从系统卸载页返回：重载应用网格（被卸载的应用消失）
         if (pendingReloadOnResume) {

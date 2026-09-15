@@ -779,7 +779,8 @@ class SettingsDialog(context: Context) : Dialog(context) {
         val dp = context.resources.displayMetrics.density
         val pad = (16 * dp).toInt()
         val p = UiTheme.settingsPalette(context)
-        val fieldBg = RippleDrawable(
+        // 每行独立 RippleDrawable 实例：共享同一实例会导致点击波纹状态互相串（点 keycode 行效果显示在操作行）
+        fun fieldBg() = RippleDrawable(
             ColorStateList.valueOf(p.ripple), null,
             GradientDrawable().apply { setColor(p.btnBg); cornerRadius = 12 * dp },
         )
@@ -790,13 +791,13 @@ class SettingsDialog(context: Context) : Dialog(context) {
         val tvKey = TextView(context).apply {
             textSize = 18f
             setTextColor(p.label)
-            background = fieldBg
+            background = fieldBg()
             setPadding(pad, pad, pad, pad)
         }
         val tvAction = TextView(context).apply {
             textSize = 18f
             setTextColor(p.label)
-            background = fieldBg
+            background = fieldBg()
             setPadding(pad, pad, pad, pad)
         }
         fun refreshTexts() {

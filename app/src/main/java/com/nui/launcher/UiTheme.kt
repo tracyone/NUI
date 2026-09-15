@@ -129,7 +129,18 @@ object UiTheme {
         Mode.DARK -> true
         Mode.LIGHT -> false
         Mode.SYSTEM -> isSystemDark(ctx)
-        Mode.FOLLOW_MAP -> mapDark(ctx)
+        Mode.FOLLOW_MAP -> followMapDark(ctx)
+    }
+
+    /** FOLLOW_MAP 实际深浅：高德昼夜数据未收到前（KEY_MAP_DARK 从未写入）先用系统深浅兜底，
+     *  避免启动即浅色突兀（车机系统常为深色）；收到高德广播（setMapDark）后跟随地图。 */
+    private fun followMapDark(ctx: Context): Boolean {
+        val sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return if (sp.contains(KEY_MAP_DARK)) {
+            sp.getBoolean(KEY_MAP_DARK, false)
+        } else {
+            isSystemDark(ctx)
+        }
     }
 
     fun mode(ctx: Context): Mode = when (
@@ -172,7 +183,17 @@ object UiTheme {
         Mode.DARK -> true
         Mode.LIGHT -> false
         Mode.SYSTEM -> isSystemDark(config)
-        Mode.FOLLOW_MAP -> mapDark(ctx)
+        Mode.FOLLOW_MAP -> followMapDark(ctx, config)
+    }
+
+    /** FOLLOW_MAP 实际深浅（config 版本）：高德数据未收到前用系统深浅兜底 */
+    private fun followMapDark(ctx: Context, config: Configuration): Boolean {
+        val sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return if (sp.contains(KEY_MAP_DARK)) {
+            sp.getBoolean(KEY_MAP_DARK, false)
+        } else {
+            isSystemDark(config)
+        }
     }
 
     /** 配色集 */
