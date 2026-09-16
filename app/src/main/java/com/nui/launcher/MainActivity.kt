@@ -537,6 +537,9 @@ class MainActivity : AppCompatActivity() {
         // 设置页可能改了 Dock 形态/图标比例，返回时刷新
         applyDockStyle()
         renderDock()
+        // 强制窗口重排+重绘（外观跟随修复：后台期间 View 属性变更未重绘，恢复前台时补一次）
+        binding.root.requestLayout()
+        binding.root.invalidate()
         if (::mapHost.isInitialized) {
             mapHost.onResume()
             // 根据当前 page 决定悬浮地图显示状态
@@ -638,6 +641,10 @@ class MainActivity : AppCompatActivity() {
         if (::wallpaper.isInitialized) wallpaper.applyForAppearance(UiTheme.isDark(this))
         if (::musicHost.isInitialized) musicHost.refresh()
         navInfoHost?.applyTheme()
+        // 强制整个窗口重排+重绘：高德外观广播期间窗口未 relayout 时，
+        // 仅改 View 属性（background/color）不会触发屏幕更新（此现象已复现）。
+        binding.root.requestLayout()
+        binding.root.invalidate()
     }
 
     private fun applyTheme(dark: Boolean) {
@@ -1296,6 +1303,10 @@ class MainActivity : AppCompatActivity() {
             binding.root.requestApplyInsets()
             window.decorView.postDelayed({
                 applySystemUi()
+                // 修复：后台收到高德外观广播时 invalidate 被丢弃（窗口不可见），恢复前台后
+                // 不强制重绘会一直显示缓存旧帧（dock 不变直到打开设置触发 relayout）。
+                // 窗口过渡结束后强制刷新一次主题，dock/右侧面板立即跟随高德外观。
+                refreshForThemeChange()
             }, 150)
         }
     }
