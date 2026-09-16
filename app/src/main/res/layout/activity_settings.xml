@@ -216,6 +216,7 @@
                 android:background="@color/settings_divider" />
 
             <TextView
+                android:id="@+id/tvMusicStyleTitle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="8dp"

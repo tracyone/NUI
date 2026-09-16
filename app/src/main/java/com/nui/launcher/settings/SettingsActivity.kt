@@ -474,6 +474,7 @@ class SettingsActivity : AppCompatActivity() {
             setColor(p.card); cornerRadius = 14 * dp
         }
         findViewById<TextView>(R.id.groupTitleMusic).setTextColor(p.value)
+        findViewById<TextView>(R.id.tvMusicStyleTitle).setTextColor(p.value)
         findViewById<TextView>(R.id.groupTitleSteering).setTextColor(p.value)
         findViewById<TextView>(R.id.groupTitleAppearance).setTextColor(p.value)
         findViewById<View>(R.id.dividerMusic).setBackgroundColor(p.divider)
