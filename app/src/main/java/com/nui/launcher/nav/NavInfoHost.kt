@@ -451,13 +451,13 @@ class NavInfoHost(
     /** 巡航卡更新：当前速度大字 + 最近测速 */
     private fun updateCruise(intent: Intent) {
         val speedText = if (curSpeed > 0) "$curSpeed" else "--"
-        cruiseSpeedView?.text = speedText
+        adjustCircleText(cruiseSpeedView, speedText)
         // 巡航限速：只认测速点 CAMERA_SPEED（LIMITED_SPEED 巡航下恒 50 不可信）
         val camSpeed = intent.getIntExtra("CAMERA_SPEED", 0)
         if (camSpeed > 0) {
             cruiseLimit = camSpeed
             cruiseLimitView?.apply {
-                text = "$cruiseLimit"
+                adjustCircleText(this, "$cruiseLimit")
                 visibility = View.VISIBLE
             }
         } else {
@@ -850,15 +850,25 @@ class NavInfoHost(
     }
 
     /**
+     * 速度/限速圆圈文字渲染：1-2 位保持 36sp 大字，3 位（≥100）自动缩到 26sp，
+     * 避免"100/120"溢出 64dp 圆圈显示不全（巡航卡与导航卡统一）。
+     */
+    private fun adjustCircleText(view: TextView?, text: String) {
+        if (view == null) return
+        view.text = text
+        view.textSize = if (text.length >= 3) 26f else 36f
+    }
+
+    /**
      * 导航卡当前速度圈渲染（与巡航卡样式对齐）：速度黑底蓝圈大字（无单位），
      * 限速红圈白底黑字（可选）。超速时速度圈红字、限速圈红字；不超速白/黑字。
      */
     private fun renderNavSpeed(view: TextView?, speed: Int, limit: Int) {
         if (view == null) return
-        view.text = if (speed > 0) "$speed" else "--"
+        adjustCircleText(view, if (speed > 0) "$speed" else "--")
         if (limit > 0) {
             navLimitCircleView?.apply {
-                text = "$limit"
+                adjustCircleText(this, "$limit")
                 visibility = View.VISIBLE
             }
         } else {

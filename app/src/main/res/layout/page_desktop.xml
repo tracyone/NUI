@@ -262,7 +262,7 @@
                             android:layout_height="wrap_content"
                             android:layout_marginStart="6dp"
                             android:text="300米测速 限速60"
-                            android:textSize="18sp"
+                            android:textSize="24sp"
                             android:textStyle="bold"
                             android:textColor="#FFD54F"
                             android:maxLines="1"

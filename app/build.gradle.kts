@@ -13,7 +13,7 @@ android {
         minSdk = 21
         targetSdk = 34
         versionCode = 30
-        versionName = "0.0.30"
+        versionName = "0.0.31"
         // ABI 由 productFlavors 拆分（arm32 / arm64），见下
     }
 
