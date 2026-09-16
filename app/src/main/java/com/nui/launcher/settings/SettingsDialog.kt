@@ -333,6 +333,16 @@ class SettingsDialog(context: Context) : Dialog(context) {
                 override fun onStopTrackingTouch(seekBar: SeekBar?) {}
             })
         }
+        // 音乐外观：经典 / 黑胶唱片
+        findViewById<View>(R.id.optMusicClassic).setOnClickListener {
+            MusicHost.setMusicStyle(context, MusicHost.MusicStyle.CLASSIC)
+            renderMusicStyle()
+        }
+        findViewById<View>(R.id.optMusicVinyl).setOnClickListener {
+            MusicHost.setMusicStyle(context, MusicHost.MusicStyle.VINYL)
+            renderMusicStyle()
+        }
+        renderMusicStyle()
         render()
     }
 
@@ -554,6 +564,10 @@ class SettingsDialog(context: Context) : Dialog(context) {
         findViewById<TextView>(R.id.tvLyricAlphaValue).setTextColor(p.value)
         findViewById<TextView>(R.id.lyricHint).setTextColor(p.value)
         tvLyricTitle.setTextColor(p.label)
+        findViewById<TextView>(R.id.tvOptMusicClassic).setTextColor(p.label)
+        findViewById<TextView>(R.id.tvOptMusicVinyl).setTextColor(p.label)
+        findViewById<TextView>(R.id.checkMusicClassic).setTextColor(p.accent)
+        findViewById<TextView>(R.id.checkMusicVinyl).setTextColor(p.accent)
         tvOptSystem.setTextColor(p.label)
         tvOptDark.setTextColor(p.label)
         tvOptLight.setTextColor(p.label)
@@ -656,6 +670,14 @@ class SettingsDialog(context: Context) : Dialog(context) {
         val g = NuiTts.voiceGender(context)
         checkVoiceFemale.visibility = if (g == NuiTts.VOICE_FEMALE) View.VISIBLE else View.GONE
         checkVoiceMale.visibility = if (g == NuiTts.VOICE_MALE) View.VISIBLE else View.GONE
+    }
+
+    private fun renderMusicStyle() {
+        val s = MusicHost.musicStyle(context)
+        findViewById<View>(R.id.checkMusicClassic).visibility =
+            if (s == MusicHost.MusicStyle.CLASSIC) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.checkMusicVinyl).visibility =
+            if (s == MusicHost.MusicStyle.VINYL) View.VISIBLE else View.GONE
     }
 
     /** 男声能力检测：系统 TTS 无男声音色时置灰不可点；若当前已选男声则回退女声（不播报）。

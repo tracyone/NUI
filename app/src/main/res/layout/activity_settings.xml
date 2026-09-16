@@ -216,6 +216,88 @@
                 android:background="@color/settings_divider" />
 
             <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                android:text="@string/music_style"
+                android:textColor="@color/settings_label"
+                android:textSize="17sp" />
+
+            <!-- 外观：经典 -->
+            <LinearLayout
+                android:id="@+id/optMusicClassic"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="@drawable/bg_settings_row_ripple"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
+
+                <TextView
+                    android:id="@+id/tvOptMusicClassic"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/music_style_classic"
+                    android:textColor="@color/settings_label"
+                    android:textSize="17sp" />
+
+                <TextView
+                    android:id="@+id/checkMusicClassic"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="✓"
+                    android:textColor="@color/settings_btn_text"
+                    android:textSize="20sp"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/settings_divider" />
+
+            <!-- 外观：黑胶唱片 -->
+            <LinearLayout
+                android:id="@+id/optMusicVinyl"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="@drawable/bg_settings_row_ripple"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
+
+                <TextView
+                    android:id="@+id/tvOptMusicVinyl"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/music_style_vinyl"
+                    android:textColor="@color/settings_label"
+                    android:textSize="17sp" />
+
+                <TextView
+                    android:id="@+id/checkMusicVinyl"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="✓"
+                    android:textColor="@color/settings_btn_text"
+                    android:textSize="20sp"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/settings_divider" />
+
+            <TextView
                 android:id="@+id/tvLyricTitle"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"

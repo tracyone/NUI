@@ -327,6 +327,16 @@ class SettingsActivity : AppCompatActivity() {
                 override fun onStopTrackingTouch(seekBar: SeekBar?) {}
             })
         }
+        // 音乐外观：经典 / 黑胶唱片
+        findViewById<View>(R.id.optMusicClassic).setOnClickListener {
+            MusicHost.setMusicStyle(this, MusicHost.MusicStyle.CLASSIC)
+            renderMusicStyle()
+        }
+        findViewById<View>(R.id.optMusicVinyl).setOnClickListener {
+            MusicHost.setMusicStyle(this, MusicHost.MusicStyle.VINYL)
+            renderMusicStyle()
+        }
+        renderMusicStyle()
     }
 
     /** 切换分类：0=音乐，1=方向盘，2=外观 */
@@ -471,6 +481,10 @@ class SettingsActivity : AppCompatActivity() {
         findViewById<View>(R.id.dividerAdd).setBackgroundColor(p.divider)
         findViewById<View>(R.id.dividerAppearance).setBackgroundColor(p.divider)
         findViewById<TextView>(R.id.tvLyricAlphaValue).setTextColor(p.value)
+        findViewById<TextView>(R.id.tvOptMusicClassic).setTextColor(p.label)
+        findViewById<TextView>(R.id.tvOptMusicVinyl).setTextColor(p.label)
+        findViewById<TextView>(R.id.checkMusicClassic).setTextColor(p.accent)
+        findViewById<TextView>(R.id.checkMusicVinyl).setTextColor(p.accent)
         findViewById<TextView>(R.id.lyricHint).setTextColor(p.value)
         tvLyricTitle.setTextColor(p.label)
         tvOptSystem.setTextColor(p.label)
@@ -583,6 +597,15 @@ class SettingsActivity : AppCompatActivity() {
         val g = NuiTts.voiceGender(this)
         checkVoiceFemale.visibility = if (g == NuiTts.VOICE_FEMALE) View.VISIBLE else View.GONE
         checkVoiceMale.visibility = if (g == NuiTts.VOICE_MALE) View.VISIBLE else View.GONE
+    }
+
+    /** 按当前音乐外观刷新勾选 */
+    private fun renderMusicStyle() {
+        val s = MusicHost.musicStyle(this)
+        findViewById<View>(R.id.checkMusicClassic).visibility =
+            if (s == MusicHost.MusicStyle.CLASSIC) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.checkMusicVinyl).visibility =
+            if (s == MusicHost.MusicStyle.VINYL) View.VISIBLE else View.GONE
     }
 
     /** 男声能力检测：系统 TTS 无男声音色时置灰不可点；若当前已选男声则回退女声（不播报）。

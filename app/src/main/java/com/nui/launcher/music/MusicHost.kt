@@ -68,6 +68,9 @@ class MusicHost(
     private val context: Context,
     private val container: FrameLayout,
 ) {
+    /** 音乐外观：经典（小矩形卡片，歌名+歌手+播放/上下首按钮）/ 黑胶唱片（唱碟+唱臂+旋转） */
+    enum class MusicStyle { CLASSIC, VINYL }
+
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val sessionManager =
         context.getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
@@ -294,10 +297,10 @@ class MusicHost(
         } else {
             container.background = null
         }
-        // 无封面且已过封面缓冲期（切歌后 metadata 封面可能滞后到达，缓冲期内维持大布局避免上下首之间来回跳）：
-        // 缩小播放界面，只显示歌名 + 歌手 + 播放/上一首/下一首按钮
-        val inCoverGrace = android.os.SystemClock.elapsedRealtime() - lastCoverSetAt < COVER_GRACE_MS
-        if (art == null && !inCoverGrace) {
+        // 外观设置（不再按封面有无自动切换，避免不稳定）：
+        //   - 经典：固定小矩形卡片（歌名 + 歌手 + 播放/上一首/下一首按钮）
+        //   - 黑胶唱片：固定唱碟大布局（黑胶 + 封面 + 唱臂），无封面时显示纯黑胶盘面
+        if (musicStyle(context) == MusicStyle.CLASSIC) {
             renderCompactNoCover(title, artist, controller, playing = isPlaying(controller.playbackState), p)
             return
         }
@@ -509,12 +512,11 @@ class MusicHost(
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
         }
-        row.addView(ctrlBtn(android.R.drawable.ic_media_previous, p.textPrimary) {
+        row.addView(ctrlBtn(android.R.drawable.ic_media_previous) {
             safe { controller.transportControls.skipToPrevious() }
-        }, LinearLayout.LayoutParams(dp(44), dp(44)))
-        row.addView(ctrlBtn(
+        }, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(4); marginEnd = dp(4) })
+        row.addView(playBtn(
             if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
-            p.textPrimary,
         ) {
             safe {
                 if (isPlaying(controller.playbackState)) {
@@ -527,10 +529,10 @@ class MusicHost(
                     controller.transportControls.play()
                 }
             }
-        }, LinearLayout.LayoutParams(dp(48), dp(48)))
-        row.addView(ctrlBtn(android.R.drawable.ic_media_next, p.textPrimary) {
+        }, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(4); marginEnd = dp(4) })
+        row.addView(ctrlBtn(android.R.drawable.ic_media_next) {
             safe { controller.transportControls.skipToNext() }
-        }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        }, LinearLayout.LayoutParams(dp(44), dp(44)).apply { marginStart = dp(4); marginEnd = dp(4) })
         col.addView(row, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
         ).apply { topMargin = dp(6) })
@@ -555,13 +557,28 @@ class MusicHost(
         refreshLyric()
     }
 
-    private fun ctrlBtn(icon: Int, tint: Int, onClick: () -> Unit): View =
+    private fun ctrlBtn(icon: Int, onClick: () -> Unit): View =
         ImageButton(context).apply {
             setImageResource(icon)
-            background = null
-            setColorFilter(tint)
+            // 参考主流车机/音乐 App 控件：半透明深色圆形底 + 细白描边 + 白色图标，
+            // 在封面/壁纸/深浅主题任意背景下都清晰
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(0x66000000.toInt())
+                setStroke(dp(1), 0x4DFFFFFF.toInt())
+            }
+            setColorFilter(0xFFFFFFFF.toInt())
             setOnClickListener { onClick() }
             setPadding(dp(10), dp(10), dp(10), dp(10))
+        }
+
+    /** 播放/暂停键：绿色实心圆（Apple Music 风格），比上下首更醒目 */
+    private fun playBtn(icon: Int, onClick: () -> Unit): View =
+        ctrlBtn(icon, onClick).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(0xFF34C759.toInt())
+            }
         }
 
     /** 把 bitmap 裁剪成圆形 */
@@ -1076,11 +1093,24 @@ class MusicHost(
         private const val PREFS = "nui_music"
         private const val KEY_APP = "music_app"
         private const val KEY_LYRIC_BG_ALPHA = "lyric_bg_alpha"
+        private const val KEY_STYLE = "music_style"
         /** 切歌后封面缓冲期：metadata 封面滞后到达时，缓冲期内维持大布局避免上下首之间来回跳 */
         private const val COVER_GRACE_MS = 2500L
         /** 已预热过的音乐应用包名（首次播放前启动一次，确保进程在运行、metadata/歌词可用） */
         private var primedPackage: String? = null
         const val DEFAULT_LYRIC_BG_ALPHA = 20
+
+        /** 读取音乐外观，默认经典 */
+        fun musicStyle(context: Context): MusicStyle =
+            if (context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .getString(KEY_STYLE, "classic") == "vinyl"
+            ) MusicStyle.VINYL else MusicStyle.CLASSIC
+
+        /** 保存音乐外观 */
+        fun setMusicStyle(context: Context, style: MusicStyle) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putString(KEY_STYLE, if (style == MusicStyle.VINYL) "vinyl" else "classic").apply()
+        }
 
         /** 读取悬浮歌词背景不透明度（0-100，默认 80） */
         fun lyricBgAlpha(context: Context): Int =

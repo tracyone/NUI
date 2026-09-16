@@ -12,8 +12,8 @@ android {
         applicationId = "com.nui.launcher"
         minSdk = 21
         targetSdk = 34
-        versionCode = 32
-        versionName = "0.0.33"
+        versionCode = 33
+        versionName = "0.0.34"
         // ABI 由 productFlavors 拆分（arm32 / arm64），见下
     }
 
