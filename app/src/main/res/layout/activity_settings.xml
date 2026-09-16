@@ -1236,6 +1236,7 @@
                 android:paddingEnd="8dp">
 
                 <TextView
+                    android:id="@+id/tvAboutAuthorLabel"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
@@ -1267,6 +1268,7 @@
                 android:paddingEnd="8dp">
 
                 <TextView
+                    android:id="@+id/tvAboutVersionLabel"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"

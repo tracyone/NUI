@@ -589,6 +589,8 @@ class SettingsDialog(context: Context) : Dialog(context) {
         // 关于
         findViewById<TextView>(R.id.groupTitleAbout).setTextColor(p.value)
         findViewById<View>(R.id.dividerAbout).setBackgroundColor(p.divider)
+        findViewById<TextView>(R.id.tvAboutAuthorLabel).setTextColor(p.label)
+        findViewById<TextView>(R.id.tvAboutVersionLabel).setTextColor(p.label)
         findViewById<TextView>(R.id.tvAboutAuthor).setTextColor(p.value)
         findViewById<TextView>(R.id.tvAboutVersion).setTextColor(p.value)
         findViewById<TextView>(R.id.tvOptRestart).setTextColor(p.label)
