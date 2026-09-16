@@ -44,6 +44,7 @@ or **BlueStacks emulator** (`adb -s 127.0.0.1:5555`). Mark each item `[PASS] / [
   - NUI starts; **at ~5 s** AmapAuto launches automatically (config `地图` → 启动第 5 秒).
   - AmapAuto stays foreground ~5 s, then **returns to desktop at ~10 s** (config 返回第 10 秒; 10 s is absolute time, not "5 s after launch").
   - After return, NUI desktop + map float window are visible again.
+- **Emulator note (2026-09-16 verified)**: on BlueStacks the AUTO_BACK mechanism works (logcat: `EXTRA_AUTO_BACK, keep page 0` → AmapAuto returns, NUI stays on page 0), but AmapAuto's Splash 加载慢 shifts the actual return time by ~5-12 s (observed return at +15-22 s instead of +10 s). This is emulator AmapAuto loading latency, not a logic failure; expect accurate timing on the car (AmapAuto 常驻/快).
 
 ---
 
@@ -80,6 +81,7 @@ or **BlueStacks emulator** (`adb -s 127.0.0.1:5555`). Mark each item `[PASS] / [
   - Only one engine voice; no "正在切换…" then long gap (performance dependent — see T08).
   - No "均为离线内置" hint text (removed).
   - **No system TTS engine (e.g. emulator)**: female (小雅) checked by default, male (超文) **greyed out & unclickable** — this is expected (voice availability check), NOT a bug. Verify on car only after confirming a TTS engine exists.
+- **Operation hint (2026-09-16 verified)**: settings panel category items start at x=248 (320dpi; OCR x≈143 is the text's left edge only). Clicking x≈166 lands OUTSIDE the dialog and closes it. Click category center instead: 声音=(488,580), 外观=(488,460), 地图=(488,700), 应用=(488,820), 关于=(488,940). Confirmed: tapping (488,580) opens the voice panel; tapping (166,535) dismisses the dialog.
 
 **T07 - Voice generality**
 - Steps: check voice is used by weather, navigation, cruise alerts, key-map announcements, music notices.
@@ -108,12 +110,18 @@ or **BlueStacks emulator** (`adb -s 127.0.0.1:5555`). Mark each item `[PASS] / [
 **T11 - Follow-map appearance (默认跟随地图)**
 - Steps:
   1. 外观 mode = 跟随地图 (default).
-  2. Start AmapAuto; toggle its day/night (day/night switch in map, or drive through a tunnel / change location).
+  2. Start AmapAuto; toggle its day/night via 协议 10048（EXTRA_DAY_NIGHT_MODE: 0=自动 / 1=白天 / 2=黑夜）.
+  3. 复杂场景：在巡航进入 / 巡航中 / 巡航退出、导航进入 / 导航中 / 导航退出各阶段重复切换 10048 白天/黑夜，确认 NUI 全程跟随.
 - Expected:
-  - NUI appearance follows AmapAuto's day/night state.
-  - On first boot before any map data: NUI uses system dark/light as fallback (does NOT flash light).
-  - After returning to desktop from settings, still follows map (no flip-flop).
-  - If map data missing, NUI keeps its current state (does not jump).
+  - NUI appearance follows AmapAuto's day/night state（10019 EXTRA_STATE=37 白天→浅色 / 38 夜晚→深色）.
+  - 模式切换（巡航卡/导航卡）与外观切换互不干扰：切外观不丢失模式卡，切模式不打断外观跟随.
+  - 判据：dock 背景 RGB 采样（深色 ~50、浅色 ~210）；巡航卡/导航卡存在且内容正常.
+- 工具与命令：
+  - 切外观: `adb shell am broadcast -a AUTONAVI_STANDARD_BROADCAST_RECV --ei KEY_TYPE 10048 --ei EXTRA_DAY_NIGHT_MODE 1`（2=黑夜, 0=自动）
+  - 结束导航: `adb shell am broadcast -a AUTONAVI_STANDARD_BROADCAST_RECV --ei KEY_TYPE 10010`
+  - GPS 模拟: `test/gps_sim.sh move <lat> <lon> <heading> <speed>` / `stop` / `navi`
+  - 导航启动：高德 UI 点「回家/去公司」→ 蓝色按钮开始导航（route scheme 后需真实确认）
+  - 注意：10048/10010 是高德官方控制接口（真实切换高德状态），非伪造广播数据。
 
 ---
 
@@ -130,6 +138,7 @@ or **BlueStacks emulator** (`adb -s 127.0.0.1:5555`). Mark each item `[PASS] / [
 
 **T13 - Map bind / collection / home / company**
 - Steps: 桌面设置 → 地图 → bind AmapAuto; use 收藏/回家/公司 buttons on right info area.
+- **Operation hint (2026-09-16 verified)**: 收藏/回家/公司 buttons are part of the NUI overlay on **page 0** (right info area, 320dpi bounds ≈ 回家[747,52][812,190] / 公司[827,52][892,190] / 收藏[907,52][972,190]; centers ≈ (780,120)/(860,120)/(940,120)). On page 1+ (app grid) these buttons are NOT present — clicking that area hits an app icon instead. Always return to page 0 first (swipe left) before testing these buttons.
 - Expected:
   - Bind saves as preferred map app.
   - 收藏 opens AmapAuto favorites (via URL/广播; falls back to launching map).
@@ -299,7 +308,7 @@ Use `./test/cruise_start.sh` (emulator) or drive on car.
 **T38 - DPI adaptation**
 - Steps: change system DPI (e.g. `adb shell wm density 240`; restore with `wm density 320`).
 - Expected: settings / key-map popup text readable and not oversized; car layout recalculates icon counts per page.
-- **Verified on emulator**: at 240dpi page1 recalculates to 4 icons/row (was 6 at 320dpi) with no overflow; settings panel text readable. **Known emulator issue**: after density change the 桌面设置 icon click did not open settings — needs confirmation on real car (may be BlueStacks input quirk).
+- **Verified on emulator (2026-09-16)**: at 240dpi page1 recalculates to 4 icons/row (was 6 at 320dpi) with no overflow; settings panel text readable; opening settings works by tapping the **item center** (240dpi 桌面设置 item ≈ [162,200][232,270], center ≈ (197,235)); the earlier "240dpi 桌面设置 click didn't work" was a wrong-coordinate tap (x≈144 is the dock edge + padding start, not the item), not a real input failure.
 
 **T39 - System dock & status bar**
 - Steps: 外观 → toggle 显示状态栏 / 显示系统 Dock.
@@ -320,6 +329,22 @@ Use `./test/cruise_start.sh` (emulator) or drive on car.
 
 ---
 
+## 13. App grid left-align regression (new, fixed 2026-09-16)
+
+**T41 - page1 first column must stay flush against dock after settings round-trip**
+- Steps (240dpi, the user-reported density):
+  1. `adb shell wm density 240`, fresh install, open page1 (app grid).
+  2. Record first-column item left edge (uiautomator dump).
+  3. Open 桌面设置 panel, then BACK to page1.
+  4. Record first-column left edge again.
+- Expected:
+  - First column starts at dock right edge + 12dp spacing (240dpi: dock bg right ≈144px → first item x≈162px; 320dpi: dock ≈192px → item x≈216px).
+  - After the settings round-trip the first column does NOT shift right (regression was double left-padding stacking in `applyDockStyle` + container padding).
+  - Also check default (no touch) view is flush, and dock shape switch (edge→float or reverse) keeps the same offset.
+- **Verified on emulator (2026-09-16)**: 240dpi page1 first item "桌面设置" [162,…] before AND after settings round-trip (uiautomator: [250,186]→[358,222] area unchanged pre/post); 320dpi first item starts 216px. Fixed in `MainActivity.kt` (container padding 0 + single source `appGridLeftPadDp()` + immediate setPadding on bind).
+
+---
+
 ## Regression Checklist (quick pass after each release)
 
 - [ ] Fresh install → default layout (T01)
@@ -328,6 +353,7 @@ Use `./test/cruise_start.sh` (emulator) or drive on car.
 - [ ] Cruise: speed camera voice + ding (T17), overspeed 10/20% (T17/T18), traffic light (T19)
 - [ ] Nav: card icons aligned (T22), arrive time (T23)
 - [ ] App list icon-first sorting (T26)
+- [ ] App grid left-align regression (T41)
 - [ ] Music bind + NetEase lyrics + Kuwo background resume (T30/T31/T32)
 - [ ] Key-map add/edit no duplicate (T34)
 - [ ] System dock/status bar independent (T39)
