@@ -155,16 +155,34 @@ adb shell getprop ro.product.cpu.abi
 
 ## 🔨 从源码构建
 
+前置条件：
 
+* JDK 17
+* Android SDK（在 `local.properties` 中配置 `sdk.dir`，或设置 `ANDROID_HOME` 环境变量）
 
+**一键编译所有架构**（arm32 / arm64 × debug / release，共 4 个 APK）：
+
+```bash
+# macOS / Linux
+./build.sh
+
+# Windows
+build.bat
 ```
-\# 64 位车机 Release（混淆 + 资源压缩 + 仅含真机原生库，体积最小）
 
-./gradlew :app:assembleArm64Release
+等价于 Gradle 聚合任务：
 
-\# 32 位车机 Release
+```bash
+./gradlew assembleAll
+```
 
-./gradlew :app:assembleArm32Release
+按需单架构 / 单变体：
+
+```bash
+./gradlew :app:assembleArm64Release   # 64 位车机 Release（混淆 + 资源压缩 + 仅含真机原生库，体积最小）
+./gradlew :app:assembleArm32Release   # 32 位车机 Release
+./build.sh arm64                      # build.sh 简写：arm64 debug+release
+./build.sh arm32 debug                # build.sh 简写：arm32 debug
 ```
 
 产物路径：
