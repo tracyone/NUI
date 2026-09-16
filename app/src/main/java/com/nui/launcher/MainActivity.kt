@@ -145,8 +145,10 @@ class MainActivity : AppCompatActivity() {
                             ViewGroup.LayoutParams.MATCH_PARENT,
                         )
                         val dp = resources.displayMetrics.density
+                        // 左侧让位由 applyDockStyle 按 dock 形态统一设置在 RecyclerView 上
+                        // （edge=108dp / 悬浮=116dp），容器只保留上/右/下 padding，避免双重叠加
                         setPadding(
-                            (116 * dp).toInt(),
+                            0,
                             (32 * dp).toInt(),
                             (32 * dp).toInt(),
                             (48 * dp).toInt(),
@@ -162,6 +164,13 @@ class MainActivity : AppCompatActivity() {
                 else -> bindAppPage(holder.itemView as ViewGroup, position - 1)
             }
         }
+    }
+
+    /** 应用网格左侧让位宽度（dp）：dock 宽 96dp + 12dp 间距；悬浮形态再 +8dp 左边距 */
+    private fun appGridLeftPadDp(): Float {
+        val edge = UiTheme.dockStyle(this) == UiTheme.DockStyle.EDGE
+        val dockW = 96f
+        return if (edge) dockW + 12 else 8 + dockW + 12
     }
 
     /** 应用页：往容器里放一个静态 6 列网格（不参与滚动，翻页由外层 ViewPager2 驱动） */
@@ -189,6 +198,9 @@ class MainActivity : AppCompatActivity() {
                 rowHeightDp = pa.appRowHeightDp,
             )
         }
+        // 立即按当前 dock 形态设置左侧让位（与 applyDockStyle 同一口径），避免首次显示贴住 dock
+        val dp = resources.displayMetrics.density
+        rv.setPadding((appGridLeftPadDp() * dp).toInt(), 0, 0, 0)
         appPageViews[pageIndex] = rv
         // 同一 ViewHolder 可能被多次 re-bind（图标比例/数据变化时 notifyItemRangeChanged），先清空再挂
         container.removeAllViews()
@@ -727,7 +739,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
         // 应用网格：dock 右侧留出 12dp 统一间距（参考氢桌面比例），各应用页同步
-        val leftPad = if (edge) dockW + 12 else 8 + dockW + 12
+        val leftPad = appGridLeftPadDp()
         for (rv in appPageViews.values) {
             rv.setPadding((leftPad * dp.toFloat()).toInt(), rv.paddingTop, rv.paddingEnd, rv.paddingBottom)
         }
