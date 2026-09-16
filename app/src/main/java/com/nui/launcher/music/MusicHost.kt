@@ -164,16 +164,23 @@ class MusicHost(
 
     /** 元数据/播放状态变化回调：切歌时刷新封面等信息 */
     private var lastRenderState: Int = PlaybackState.STATE_NONE
+    /** 用户主动暂停标记：NUI 按钮 pause 置 true（自动恢复不干预）；播放/切歌后重置 */
+    private var userPaused = false
+    /** 最近一次自动恢复播放时间：防抖，10s 内只自动恢复一次（避免状态抖动循环） */
+    private var lastAutoResumeAt = 0L
     private val metadataCallback = object : MediaController.Callback() {
         override fun onMetadataChanged(metadata: MediaMetadata?) { refresh() }
         override fun onPlaybackStateChanged(s: PlaybackState?) {
             // 位置/进度每几百毫秒就变化一次：**不重建面板**，避免反复清高亮、推延 lyricTick。
             // 仅当播放/暂停状态真正切换时才重建（保证播放/暂停按钮图标同步）。
             val st = s?.state ?: PlaybackState.STATE_NONE
+            if (st == PlaybackState.STATE_PLAYING) userPaused = false
             if (st != lastRenderState) {
                 lastRenderState = st
                 refresh()
             }
+            // 酷我车机版等退后台会自动暂停播放：非用户主动暂停且绑定 App 不在前台 → 延迟自动恢复
+            if (st == PlaybackState.STATE_PAUSED) maybeAutoResume()
         }
     }
 
@@ -406,12 +413,14 @@ class MusicHost(
         discWrap.setOnClickListener {
             safe {
                 if (isPlaying(controller.playbackState)) {
+                    userPaused = true
                     controller.transportControls.pause()
                 } else {
                     // 首次播放该应用：先预热（启动进程确保 metadata/歌词可用），返回后自动播放
                     if (primedPackage != controller.packageName) {
                         primeAndPlay(controller)
                     } else {
+                        userPaused = false
                         controller.transportControls.play()
                     }
                 }
@@ -509,10 +518,12 @@ class MusicHost(
         ) {
             safe {
                 if (isPlaying(controller.playbackState)) {
+                    userPaused = true
                     controller.transportControls.pause()
                 } else if (primedPackage != controller.packageName) {
                     primeAndPlay(controller)   // 首次播放该应用：先预热（与唱碟点击一致）
                 } else {
+                    userPaused = false
                     controller.transportControls.play()
                 }
             }
@@ -569,6 +580,32 @@ class MusicHost(
     private fun safe(block: () -> Unit) {
         runCatching { block() }
             .onFailure { NuiToast.show(context, "该 App 不支持此操作", Toast.LENGTH_SHORT) }
+    }
+
+    /** 酷我车机 6.0 等车机版音乐 App 退后台会自动暂停播放：
+     *  检测到"非用户主动暂停 + 绑定 App 不在前台"时，延迟约 800ms 自动恢复播放。
+     *  10s 内只自动恢复一次（防状态抖动循环）；用户主动暂停（NUI 按钮）不干预。 */
+    private fun maybeAutoResume() {
+        if (userPaused) return
+        val now = System.currentTimeMillis()
+        if (now - lastAutoResumeAt < 10_000L) return
+        val preferred = prefs.getString(KEY_APP, null) ?: return
+        val controller = currentController ?: return
+        if (controller.packageName != preferred) return
+        if (isAppForeground(preferred)) return
+        lastAutoResumeAt = now
+        android.util.Log.i("NUI.MusicHost", "检测到$preferred 退后台被暂停，自动恢复播放")
+        handler.postDelayed({
+            if (!userPaused) safe { controller.transportControls.play() }
+        }, 800L)
+    }
+
+    /** 判断 App 是否在前台（Android 9 车机 getRunningTasks 可用；高版本受限时保守返回 false 即"不在前台"） */
+    private fun isAppForeground(pkg: String): Boolean = try {
+        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        am.getRunningTasks(1).firstOrNull()?.topActivity?.packageName == pkg
+    } catch (e: Exception) {
+        false
     }
 
     /** 无会话/无权限：启动卡，点击拉起首选音乐 App */
