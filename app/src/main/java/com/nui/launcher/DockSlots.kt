@@ -21,8 +21,10 @@ object DockSlots {
         result.add(mapPkg?.let { pkgToModel(context, it) })
         // slot 1: 绑定的音乐
         result.add(musicPkg?.let { pkgToModel(context, it) })
-        // slot 2: 最近打开的程序（排除地图和音乐）
-        val exclude = setOfNotNull(mapPkg, musicPkg)
+        // slot 2: 最近打开的程序（排除地图、音乐及用户自定义槽位中已显示的应用，
+        // 避免最近槽与固定/自定义槽重复显示同一个应用）
+        val exclude = setOfNotNull(mapPkg, musicPkg) +
+            DockConfig.loadApps(context).mapNotNull { it?.packageName }
         result.add(RecentApps.getRecent(context, exclude))
         // slot 3+: 用户配置
         result.addAll(DockConfig.loadApps(context))
