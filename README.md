@@ -28,6 +28,10 @@ CarPlay 式布局・高德地图深度联动・导航 / 巡航信息 HUD・天�
 
 
 
+![悬浮地图嵌入桌面](docs/images/float-map.jpg)
+
+
+
 ***
 
 ## ✨ 特性
