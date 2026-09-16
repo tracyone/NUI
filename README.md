@@ -28,10 +28,6 @@ CarPlay 式布局・高德地图深度联动・导航 / 巡航信息 HUD・天�
 
 
 
-![NUI 桌面主页](docs/images/home.jpg)
-
-
-
 ***
 
 ## ✨ 特性
