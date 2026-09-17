@@ -170,32 +170,38 @@ adb shell getprop ro.product.cpu.abi
 build.bat
 ```
 
-等价于 Gradle 聚合任务：
+等价于 Gradle 聚合任务：`./gradlew assembleAll`
+
+**build.sh 用法**：
 
 ```bash
-./gradlew assembleAll
+./build.sh                              # 默认：编译全部架构（arm32/arm64 × debug/release）
+./build.sh arm64                        # 仅 arm64（debug + release）
+./build.sh arm32 release                # 仅 arm32 release
+./build.sh arm64 debug -o ~/Desktop     # 编译 arm64 debug，并把 APK 复制到 ~/Desktop
+./build.sh -h                           # 查看帮助
 ```
 
-按需单架构 / 单变体：
+参数说明：
 
-```bash
-./gradlew :app:assembleArm64Release   # 64 位车机 Release（混淆 + 资源压缩 + 仅含真机原生库，体积最小）
-./gradlew :app:assembleArm32Release   # 32 位车机 Release
-./build.sh arm64                      # build.sh 简写：arm64 debug+release
-./build.sh arm32 debug                # build.sh 简写：arm32 debug
-```
+| 参数 | 取值 | 说明 |
+|---|---|---|
+| `ARCH` | `all` \| `arm32` \| `arm64` | 默认 `all`（不传参数即全架构） |
+| `TYPE` | `debug` \| `release` | 默认同时编译两种 |
+| `-o DIR` | 目录路径 | 构建完成后把产物 APK 复制到指定目录（自动创建） |
+
+构建结束后自动打印产物清单（路径 / 大小 / md5），便于核对与分发。
 
 产物路径：
 
-
-
 ```
 app/build/outputs/apk/arm64/release/app-arm64-release.apk
-
 app/build/outputs/apk/arm32/release/app-arm32-release.apk
+app/build/outputs/apk/arm64/debug/app-arm64-debug.apk
+app/build/outputs/apk/arm32/debug/app-arm32-debug.apk
 ```
 
-Debug 包额外包含 x86 /x86\_64 原生库，便于在 Android 模拟器上调试。
+Debug 包额外包含 x86 /x86\_64 原生库，便于在 Android 模拟器上调试；Release 包仅含对应真机架构（arm64-v8a / armeabi-v7a）原生库，体积更小。
 
 ## 📚 文档与测试
 
