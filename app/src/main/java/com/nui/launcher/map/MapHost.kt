@@ -259,15 +259,17 @@ class MapHost(
         return true
     }
 
-    /** 回桌面：复用已有 MainActivity（singleTask + SINGLE_TOP，走 onNewIntent）。
-     *  不要发 CATEGORY_HOME 广播——NUI 是默认桌面时，HOME 意图会在新 task 重建实例，
-     *  导致重复初始化（天气/语音二次播报、重复 setupMap）。
+    /** 回桌面：发 HOME intent 把已有的 home task（singleTask 的 MainActivity）带到前台，走 onNewIntent。
+     *  不能用显式 Intent(context, MainActivity::class) + NEW_TASK——从高德等外部 task 启动时，
+     *  系统在 standard task 重建新实例（singleTask 只在同 affinity task 内复用），反复自动返回会
+     *  堆积僵尸实例；这些不可见实例仍注册广播、初始化天气/语音，还会抢先写状态导致可见桌面外观不跟随。
      *  Intent 带 [EXTRA_AUTO_BACK] 标记，让 MainActivity.onNewIntent 识别为"地图自动返回"，
      *  只保持当前 page，不触发桌面内 HOME 的 page0/page1 切换逻辑。 */
     private fun goBackToNui(src: MapSource, restoreFloat: Boolean) {
         Log.d(TAG, "goBackToNui restoreFloat=$restoreFloat")
-        val back = Intent(context, com.nui.launcher.MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        val back = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_HOME)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             putExtra(EXTRA_AUTO_BACK, true)
         }
         runCatching { context.startActivity(back) }

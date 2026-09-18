@@ -63,23 +63,32 @@ class MainActivity : AppCompatActivity() {
     private val weatherLayerShowMs = 20_000L
     private val mapSources by lazy { MapSources.build(this) }
 
+    /**
+     * 本实例已应用的地图昼夜状态（实例级去重）。
+     * 动态注册的广播接收器在每个 Activity 实例都会触发；权限请求等流程可能在 standard task
+     * 留下不可见的僵尸 MainActivity 实例。若用全局 SP 状态去重，僵尸实例先收到广播写入 SP 后，
+     * 可见的桌面实例会误判"无需刷新"而不更新屏幕（表现为切高德外观 NUI 不跟随）。
+     * 因此每个实例只和自己上一次应用的状态比较，独立刷新自己的 View。
+     */
+    private var appliedMapDark: Boolean? = null
+
     // 高德地图昼夜模式广播接收器（FOLLOW_MAP 模式下同步桌面深浅外观）
     private val amapDayNightReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
             val keyType = intent?.getIntExtra("KEY_TYPE", -1) ?: return
             if (keyType != 10019) return
             val state = intent.getIntExtra("EXTRA_STATE", -1)
-            // 只处理文档标准昼夜模式值：37=白天，38=夜晚
-            // 10019 广播还携带其他类型信息（state=0/3/15/20/40/49/50/2001/3025 等），全部忽略保持不动
-            val isDark = when (state) {
-                37 -> false   // 白天
-                38 -> true    // 夜晚
+            val mapDark = when (state) {
+                37 -> false
+                38 -> true
                 else -> return
             }
-            if (UiTheme.mode(this@MainActivity) == UiTheme.Mode.FOLLOW_MAP &&
-                UiTheme.mapDark(this@MainActivity) != isDark
-            ) {
-                UiTheme.setMapDark(this@MainActivity, isDark)
+            if (UiTheme.mode(this@MainActivity) != UiTheme.Mode.FOLLOW_MAP) return
+            // 写入全局状态（供新启动实例/其他组件读取）
+            UiTheme.setMapDark(this@MainActivity, mapDark)
+            // 本实例 UI 与目标状态不一致才刷新（实例级判断，不受其他实例影响）
+            if (appliedMapDark != mapDark) {
+                appliedMapDark = mapDark
                 refreshForThemeChange()
             }
         }
@@ -244,7 +253,9 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
         applySystemDock()
 
-        // 临时测试：监听高德昼夜模式广播
+        // 初始化本实例已应用的地图昼夜状态（FOLLOW_MAP 下即当前外观），作为广播去重基准
+        appliedMapDark = UiTheme.isDark(this)
+        // 监听高德昼夜模式广播
         registerReceiver(amapDayNightReceiver, android.content.IntentFilter("AUTONAVI_STANDARD_BROADCAST_SEND"))
 
         // 红绿灯监控已并入 NavInfoHost（巡航 ICON=0 数据驱动，比 10019 STATE=24 更可靠），
@@ -537,7 +548,7 @@ class MainActivity : AppCompatActivity() {
         // 设置页可能改了 Dock 形态/图标比例，返回时刷新
         applyDockStyle()
         renderDock()
-        // 强制窗口重排+重绘（外观跟随修复：后台期间 View 属性变更未重绘，恢复前台时补一次）
+        // 强制窗口重排+重绘（后台期间 View 属性可能变更，恢复前台时补一次）
         binding.root.requestLayout()
         binding.root.invalidate()
         if (::mapHost.isInitialized) {
@@ -1303,10 +1314,6 @@ class MainActivity : AppCompatActivity() {
             binding.root.requestApplyInsets()
             window.decorView.postDelayed({
                 applySystemUi()
-                // 修复：后台收到高德外观广播时 invalidate 被丢弃（窗口不可见），恢复前台后
-                // 不强制重绘会一直显示缓存旧帧（dock 不变直到打开设置触发 relayout）。
-                // 窗口过渡结束后强制刷新一次主题，dock/右侧面板立即跟随高德外观。
-                refreshForThemeChange()
             }, 150)
         }
     }
