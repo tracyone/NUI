@@ -108,7 +108,10 @@ class MusicHost(
     private val notifyReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: android.content.Context, i: android.content.Intent) {
             val pkg = i.getStringExtra(MusicListenerService.EXTRA_PKG) ?: return
-            // 只兜底当前播放的音乐（按包名匹配，避免覆盖正在播放的其他 App）
+            // 硬绑定：设置了绑定 App 时，其它音乐 App 的通知一律不接收，避免抢占面板/歌词
+            val boundApp = prefs.getString(KEY_APP, null)
+            if (boundApp != null && pkg != boundApp) return
+            // 未绑定时只兜底当前播放的音乐（按包名匹配，避免覆盖正在播放的其他 App）
             if (currentController?.packageName != null && currentController!!.packageName != pkg) return
             val title = i.getStringExtra(MusicListenerService.EXTRA_TITLE)
             val artist = i.getStringExtra(MusicListenerService.EXTRA_ARTIST)
@@ -206,22 +209,29 @@ class MusicHost(
     }
 
     /**
-     * 刷新：优先展示"首选音乐 App"的会话（若在播放），其次任意正在播放的，再次首选 App 的会话；
-     * 都没有则显示启动卡。这样把首选 App 从 QQ 切到酷我后，面板会跟随展示酷我的播放状态。
+     * 刷新选择要展示的媒体会话。
+     *
+     * 硬绑定策略：一旦用户在"选择音乐 App"里绑定了某个 App（[KEY_APP]），桌面音乐卡就**只认它**——
+     * 无论它正在播放还是暂停都展示它的会话；它没有活跃会话（未运行）时显示启动卡，
+     * **不会**因为其它音乐 App（如酷我）正在播放就抢占面板。要控制别的 App 需长按重新绑定。
+     *
+     * 仅当用户**从未绑定**时，才回退为"跟随当前播放源"：优先正在播放的会话，其次最后一个会话。
      */
     fun refresh() {
         try {
             val controllers = sessionManager.getActiveSessions(notificationListener)
             hasPermission = true
-            if (controllers.isEmpty()) { renderEmpty(); return }
             val preferred = prefs.getString(KEY_APP, null)
-            val playing = controllers.filter { isPlaying(it.playbackState) }
-            val chosen = when {
-                playing.any { it.packageName == preferred } -> playing.first { it.packageName == preferred }
-                playing.isNotEmpty() -> playing.first()
-                controllers.any { it.packageName == preferred } -> controllers.first { it.packageName == preferred }
-                else -> controllers.last()
+            if (preferred != null) {
+                // 已绑定：只展示绑定 App 的会话（播放/暂停都算）；它没运行就显示启动卡，不跟随其它 App
+                val bound = controllers.firstOrNull { it.packageName == preferred }
+                if (bound != null) renderPlaying(bound) else renderEmpty()
+                return
             }
+            // 未绑定：跟随当前播放源——优先正在播放的会话，其次最后一个会话
+            if (controllers.isEmpty()) { renderEmpty(); return }
+            val playing = controllers.filter { isPlaying(it.playbackState) }
+            val chosen = playing.firstOrNull() ?: controllers.last()
             renderPlaying(chosen)
         } catch (e: SecurityException) {
             hasPermission = false

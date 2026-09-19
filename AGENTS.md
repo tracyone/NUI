@@ -189,6 +189,7 @@ adb shell getprop ro.product.cpu.abi
 - 另有 `MusicHost.MUSIC_PACKAGES`（精确包名集合）用于**启动卡/Dock 绑定的候选列表**，和模糊识别是两套。
 - **新增支持音乐 App**：① AndroidManifest `<queries>` 加包名（当前 12 个）；② 需要被模糊识别就加关键词、要进绑定候选列表就加 `MUSIC_PACKAGES`。
 - 歌词：`music/LyricFetcher.kt` 统一走网易云公开接口（`music.163.com`），按"歌名+歌手"搜索抓 LRC；QQ/酷狗/酷我等也都用这个源。
+- **绑定是硬绑定（重要，别改回"谁在播放就跟谁"）**：绑定存在 SharedPreferences `nui_music` 的 `music_app`（`KEY_APP`），长按音乐卡/区 → `pickPreferredApp()` 设置。`MusicHost.refresh()` 选会话时：**只要设了绑定就只展示绑定 App 的会话（播放/暂停都算），绑定 App 没有活跃会话就显示启动卡（`renderEmpty()`），绝不因其它音乐 App（如酷我）正在播放而抢占面板**；只有从未绑定时才"跟随当前播放源"。`notifyReceiver` 同样按绑定包名白名单过滤非绑定 App 的通知。
 
 ### 5.4 主题 / 壁纸
 
@@ -253,6 +254,7 @@ chore: 删除无引用死代码
 9. 改高德广播处理前，必须对照 `docs/amap_auto_protocol.md` 与代码注释（文档个别处滞后于代码，以代码为准）。
 10. `weather-screen/` 不是 Gradle 模块，别 `include` 进 settings.gradle。
 11. 新增音乐 App 只改关键词不够，Manifest `<queries>` 也要加（Android 11+ 包可见性限制）。
+12. **音乐卡是硬绑定**：设了绑定 App 就只显示它，别的音乐 App 在播放也不许抢占（见 5.3）。不要把 `refresh()` 改回"任意 App 在播放就跟随"的软逻辑。
 
 ---
 
