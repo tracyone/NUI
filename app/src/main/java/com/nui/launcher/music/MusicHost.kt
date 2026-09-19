@@ -110,7 +110,10 @@ class MusicHost(
             val pkg = i.getStringExtra(MusicListenerService.EXTRA_PKG) ?: return
             // 硬绑定：设置了绑定 App 时，其它音乐 App 的通知一律不接收，避免抢占面板/歌词
             val boundApp = prefs.getString(KEY_APP, null)
-            if (boundApp != null && pkg != boundApp) return
+            if (boundApp != null && pkg != boundApp) {
+                Log.d(TAG, "notify[硬绑定] 忽略非绑定 App 通知: pkg=$pkg, 绑定=$boundApp")
+                return
+            }
             // 未绑定时只兜底当前播放的音乐（按包名匹配，避免覆盖正在播放的其他 App）
             if (currentController?.packageName != null && currentController!!.packageName != pkg) return
             val title = i.getStringExtra(MusicListenerService.EXTRA_TITLE)
@@ -225,6 +228,7 @@ class MusicHost(
             if (preferred != null) {
                 // 已绑定：只展示绑定 App 的会话（播放/暂停都算）；它没运行就显示启动卡，不跟随其它 App
                 val bound = controllers.firstOrNull { it.packageName == preferred }
+                Log.d(TAG, "refresh[硬绑定] preferred=$preferred, 会话=${controllers.map { it.packageName }}, 选中=${bound?.packageName ?: "无会话→启动卡"}")
                 if (bound != null) renderPlaying(bound) else renderEmpty()
                 return
             }
@@ -232,6 +236,7 @@ class MusicHost(
             if (controllers.isEmpty()) { renderEmpty(); return }
             val playing = controllers.filter { isPlaying(it.playbackState) }
             val chosen = playing.firstOrNull() ?: controllers.last()
+            Log.d(TAG, "refresh[未绑定] 会话=${controllers.map { it.packageName }}, 选中=${chosen.packageName}")
             renderPlaying(chosen)
         } catch (e: SecurityException) {
             hasPermission = false
@@ -647,6 +652,8 @@ class MusicHost(
         handler.removeCallbacks(lyricTick)
         hideLyricFloat()
 
+        // 清掉上一首铺在容器上的封面背景，避免启动卡还残留旧专辑图
+        container.background = null
         container.removeAllViews()
         val p = UiTheme.palette(context)
         val v = LinearLayout(context).apply {
