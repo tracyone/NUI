@@ -1,33 +1,54 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:orientation="vertical"
-    android:gravity="center"
-    android:padding="12dp">
+    android:layout_height="wrap_content">
 
-    <ImageView
-        android:id="@+id/appIcon"
-        android:layout_width="72dp"
-        android:layout_height="72dp"
-        android:scaleType="centerInside"
-        android:contentDescription="@string/app_icon" />
-
-    <TextView
-        android:id="@+id/appLabel"
-        android:layout_width="wrap_content"
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:background="@drawable/bg_app_label"
-        android:paddingStart="8dp"
-        android:paddingEnd="8dp"
-        android:paddingTop="2dp"
-        android:paddingBottom="2dp"
+        android:orientation="vertical"
         android:gravity="center"
-        android:singleLine="true"
-        android:ellipsize="end"
-        android:textColor="@color/text_primary"
-        android:textSize="14sp"
+        android:padding="12dp">
+
+        <ImageView
+            android:id="@+id/appIcon"
+            android:layout_width="72dp"
+            android:layout_height="72dp"
+            android:scaleType="centerInside"
+            android:contentDescription="@string/app_icon" />
+
+        <TextView
+            android:id="@+id/appLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_app_label"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp"
+            android:gravity="center"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp"
+            tools:ignore="HardcodedText" />
+    </LinearLayout>
+
+    <!-- 多选模式选中角标：右上角圆底白勾，仅多选且该项被选中时可见（圆底在适配器中设置） -->
+    <TextView
+        android:id="@+id/checkMark"
+        android:layout_width="26dp"
+        android:layout_height="26dp"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="4dp"
+        android:layout_marginEnd="8dp"
+        android:gravity="center"
+        android:text="✓"
+        android:textColor="#FFFFFF"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:visibility="gone"
         tools:ignore="HardcodedText" />
-</LinearLayout>
+</FrameLayout>

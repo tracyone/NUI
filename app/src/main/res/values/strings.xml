@@ -85,4 +85,17 @@
     <string name="restore_confirm_title">恢复 %1$s？</string>
     <string name="restore_done">已恢复 %1$s</string>
     <string name="cannot_uninstall_system_app">系统应用无法卸载</string>
+
+    <!-- 应用多选 / 批量隐藏 -->
+    <string name="multi_select_entry">多选</string>
+    <string name="multi_cancel">取消</string>
+    <string name="multi_select_all">全部</string>
+    <string name="multi_deselect_all">取消全部</string>
+    <string name="multi_select_page">本页</string>
+    <string name="multi_deselect_page">取消本页</string>
+    <string name="multi_selected_count">已选 %1$d 个</string>
+    <string name="multi_hide_n">隐藏（%1$d）</string>
+    <string name="multi_hide_confirm_title">隐藏选中的 %1$d 个应用？</string>
+    <string name="multi_hide_confirm_msg">隐藏后这些应用将不在应用列表和桌面网格中显示，可在 桌面设置 → 应用 → 管理隐藏应用 中恢复。</string>
+    <string name="multi_hide_done">已隐藏 %1$d 个应用</string>
 </resources>

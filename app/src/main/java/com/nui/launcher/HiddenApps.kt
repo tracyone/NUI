@@ -28,4 +28,12 @@ object HiddenApps {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putStringSet(KEY, set).apply()
     }
+
+    /** 批量隐藏：一次性合并写入（多选模式用），避免逐个 apply 反复刷盘；空集合直接忽略 */
+    fun hideAll(context: Context, pkgs: Collection<String>) {
+        if (pkgs.isEmpty()) return
+        val set = hiddenSet(context).toMutableSet().apply { addAll(pkgs) }
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putStringSet(KEY, set).apply()
+    }
 }

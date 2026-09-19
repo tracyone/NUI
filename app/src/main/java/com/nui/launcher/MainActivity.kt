@@ -114,6 +114,10 @@ class MainActivity : AppCompatActivity() {
     private var pendingReloadOnResume = false
     /** 分页应用网格：外层 ViewPager2 每页一个 6 列 RecyclerView；key=页索引(0..N) */
     private val appPageViews = mutableMapOf<Int, RecyclerView>()
+    /** 分页应用网格每页对应的适配器（多选批量隐藏时统一刷新角标）；key=页索引 */
+    private val appPageAdapters = mutableMapOf<Int, AppListAdapter>()
+    /** 应用网格多选（批量隐藏）共享状态，跨页共用同一实例 */
+    private val multiState = MultiSelectState()
     /** 是否从桌面启动了外部 app——按 home 回来时恢复到启动前的 page */
     private var launchedExternalApp = false
     /** 启动外部 app 前所在的 page */
@@ -187,6 +191,17 @@ class MainActivity : AppCompatActivity() {
         val pa = binding.viewPager.adapter as? PagerAdapter ?: return
         val pages = pa.appPages
         if (pageIndex < 0 || pageIndex >= pages.size) return
+        val gridAdapter = AppListAdapter(
+            context = this@MainActivity,
+            apps = pages[pageIndex],
+            onClick = { app ->
+                if (app.onClick != null) app.onClick.invoke()
+                else startActivity(app.launchIntent)
+            },
+            onLongClick = { app -> if (app.onClick == null) showAppMenu(app) },
+            rowHeightDp = pa.appRowHeightDp,
+            multi = multiState,
+        )
         val rv = RecyclerView(this).apply {
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -196,17 +211,9 @@ class MainActivity : AppCompatActivity() {
             setHasFixedSize(true)
             itemAnimator = null
             isNestedScrollingEnabled = false
-            adapter = AppListAdapter(
-                context = this@MainActivity,
-                apps = pages[pageIndex],
-                onClick = { app ->
-                    if (app.onClick != null) app.onClick.invoke()
-                    else startActivity(app.launchIntent)
-                },
-                onLongClick = { app -> if (app.onClick == null) showAppMenu(app) },
-                rowHeightDp = pa.appRowHeightDp,
-            )
+            adapter = gridAdapter
         }
+        appPageAdapters[pageIndex] = gridAdapter
         // 立即按当前 dock 形态设置左侧让位（与 applyDockStyle 同一口径），避免首次显示贴住 dock
         val dp = resources.displayMetrics.density
         rv.setPadding((appGridLeftPadDp() * dp).toInt(), 0, 0, 0)
@@ -293,6 +300,7 @@ class MainActivity : AppCompatActivity() {
         setupDock()
         applyDockStyle()
         setupPageIndicator(1)
+        setupMultiSelectBar()
 
         // 桌面全屏透明天气动画层 + 语音播报
         setupWeatherLayer()
@@ -511,6 +519,11 @@ class MainActivity : AppCompatActivity() {
             intent?.component?.packageName?.let { RecentApps.noteLaunch(this, it) }
             android.util.Log.d("NUI.Main", "startActivity external: ${intent?.component?.packageName} page=$pageBeforeLaunch")
         }
+    }
+
+    override fun onBackPressed() {
+        // 多选模式下返回先退出多选，不离开当前页；否则走默认行为
+        if (multiState.mode) exitMultiSelect() else super.onBackPressed()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -1087,11 +1100,12 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    /** 长按应用网格中的应用：卸载 / 隐藏（需确认）；设置入口本身不响应长按 */
+    /** 长按应用网格中的应用：卸载 / 隐藏（单个，需确认）/ 多选（批量隐藏入口）；设置入口不响应长按 */
     private fun showAppMenu(app: AppModel) {
         val items = arrayOf(
             getString(R.string.uninstall),
             getString(R.string.hide_app),
+            getString(R.string.multi_select_entry),
         )
         android.app.AlertDialog.Builder(this)
             .setTitle(app.label)
@@ -1099,6 +1113,7 @@ class MainActivity : AppCompatActivity() {
                 when (which) {
                     0 -> confirmUninstall(app)
                     1 -> confirmHide(app)
+                    2 -> enterMultiSelect(app)
                 }
             }
             .show()
@@ -1136,6 +1151,118 @@ class MainActivity : AppCompatActivity() {
                 HiddenApps.hide(this, app.packageName)
                 NuiToast.show(this, getString(R.string.hide_done, app.label), Toast.LENGTH_SHORT)
                 // 重新加载应用网格（隐藏项消失），保留"桌面设置"入口
+                appGridLoaded = false
+                // 应用页 ViewHolder 复用，无需 clear（loadAppGrid 增量更新时会重新 bind）
+                loadAppGrid()
+            }
+            .setNegativeButton(R.string.back, null)
+            .show()
+    }
+
+    private fun dpPx(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    /** 多选操作条"隐藏(N)"按钮圆角底：可按=品牌橙，不可按=灰 */
+    private fun multiHideBtnBg(enabled: Boolean) = GradientDrawable().apply {
+        cornerRadius = dpPx(10).toFloat()
+        setColor(if (enabled) 0xFFFF7043.toInt() else 0xFF7A7A7A.toInt())
+    }
+
+    /** 绑定应用网格多选顶部操作条：取消 / 已选 N 个 / 全选 / 隐藏(N) */
+    private fun setupMultiSelectBar() {
+        multiState.onChanged = { updateMultiSelectBar() }
+        val ripple = android.util.TypedValue()
+        theme.resolveAttribute(android.R.attr.selectableItemBackground, ripple, true)
+        binding.btnCancel.setBackgroundResource(ripple.resourceId)
+        binding.btnSelectAll.setBackgroundResource(ripple.resourceId)
+        binding.btnSelectPage.setBackgroundResource(ripple.resourceId)
+        binding.btnCancel.setOnClickListener { exitMultiSelect() }
+        binding.btnSelectAll.setOnClickListener {
+            val selectable = selectableApps()
+            if (multiState.isAllSelected(selectable.size)) multiState.clearSelection()
+            else multiState.selectAll(selectable.map { it.packageName })
+            appPageAdapters.values.forEach { it.refreshMultiSelect() }
+        }
+        binding.btnSelectPage.setOnClickListener {
+            multiState.applyPageSelection(currentPageSelectable().map { it.packageName })
+            appPageAdapters.values.forEach { it.refreshMultiSelect() }
+        }
+        binding.btnHideSelected.setOnClickListener { confirmHideSelected() }
+        updateMultiSelectBar()
+    }
+
+    /** 当前应用网格中可被勾选/隐藏的应用（排除"桌面设置"等 onClick 非空的内置入口） */
+    private fun selectableApps(): List<AppModel> =
+        (binding.viewPager.adapter as? PagerAdapter)?.appPages
+            ?.flatten()
+            ?.filter { it.onClick == null }
+            ?: emptyList()
+
+    /** 当前所在应用页（page0 为桌面，故减 1）内可被勾选/隐藏的应用，用于"本页全选" */
+    private fun currentPageSelectable(): List<AppModel> {
+        val pa = binding.viewPager.adapter as? PagerAdapter ?: return emptyList()
+        val idx = binding.viewPager.currentItem - 1
+        if (idx < 0 || idx >= pa.appPages.size) return emptyList()
+        return pa.appPages[idx].filter { it.onClick == null }
+    }
+
+    /** 长按应用进入多选：预先勾选被按的应用，顶部显示操作条，网格整体下移让出操作条 */
+    private fun enterMultiSelect(initial: AppModel) {
+        multiState.enter(initial.packageName)
+        binding.multiBar.visibility = View.VISIBLE
+        appPageAdapters.values.forEach { it.refreshMultiSelect() }
+        updateMultiSelectBar()
+        // 网格顶部让出操作条：给应用页"容器"加顶部 padding（容器是 FrameLayout，setPadding 会
+        // 重新布局 MATCH_PARENT 的网格 rv，必定带动整页下移；直接改 rv.paddingTop 在固定行高
+        // 撑满的 GridLayoutManager 上实测不重排、不生效）。容器原始上 padding=32dp。
+        val extra = dpPx(72)
+        appPageViews.values.forEach { rv ->
+            (rv.parent as? View)?.let { c ->
+                c.setPadding(c.paddingLeft, dpPx(32) + extra, c.paddingRight, dpPx(48))
+            }
+        }
+    }
+
+    private fun exitMultiSelect() {
+        multiState.exit()
+        binding.multiBar.visibility = View.GONE
+        // 还原应用页容器上 padding（32dp）
+        appPageViews.values.forEach { rv ->
+            (rv.parent as? View)?.let { c ->
+                c.setPadding(c.paddingLeft, dpPx(32), c.paddingRight, dpPx(48))
+            }
+        }
+        appPageAdapters.values.forEach { it.refreshMultiSelect() }
+    }
+
+    /** 同步多选操作条文案 / 按钮状态（勾选变化时由 [MultiSelectState.onChanged] 触发） */
+    private fun updateMultiSelectBar() {
+        val n = multiState.count()
+        binding.multiTitle.text = getString(R.string.multi_selected_count, n)
+        binding.btnHideSelected.text = getString(R.string.multi_hide_n, n)
+        binding.btnHideSelected.isEnabled = n > 0
+        binding.btnHideSelected.background = multiHideBtnBg(n > 0)
+        binding.btnSelectAll.text = getString(
+            if (multiState.isAllSelected(selectableApps().size)) R.string.multi_deselect_all
+            else R.string.multi_select_all
+        )
+        val pagePkgs = currentPageSelectable().map { it.packageName }
+        val pageAll = pagePkgs.isNotEmpty() && pagePkgs.all { it in multiState.selected }
+        binding.btnSelectPage.text = getString(
+            if (pageAll) R.string.multi_deselect_page else R.string.multi_select_page
+        )
+    }
+
+    /** 批量隐藏确认：确认后一次性写入并重建网格 */
+    private fun confirmHideSelected() {
+        val pkgs = multiState.selected.toList()
+        if (pkgs.isEmpty()) return
+        android.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.multi_hide_confirm_title, pkgs.size))
+            .setMessage(R.string.multi_hide_confirm_msg)
+            .setPositiveButton(R.string.hide_app) { _, _ ->
+                HiddenApps.hideAll(this, pkgs)
+                NuiToast.show(this, getString(R.string.multi_hide_done, pkgs.size), Toast.LENGTH_SHORT)
+                exitMultiSelect()
                 appGridLoaded = false
                 // 应用页 ViewHolder 复用，无需 clear（loadAppGrid 增量更新时会重新 bind）
                 loadAppGrid()
