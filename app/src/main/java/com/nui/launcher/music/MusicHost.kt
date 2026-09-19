@@ -480,8 +480,8 @@ class MusicHost(
         val lyricView = TextView(context)  // 占位，保持 tag 兼容
 
         container.addView(col)
-        // 单击：启动当前绑定的音乐 App（先 hideFloat 关外部地图浮窗，回 NUI 后 showFloat 恢复）
-        col.setOnClickListener { launchPreferredApp() }
+        // 单击封面/卡片非按钮区：进入绑定的音乐 App 并停留在 App 内（用户要操作，不自动回桌面）
+        col.setOnClickListener { launchPreferredApp(autoReturn = false) }
         // 长按：弹"选择音乐 App"对话框，把 QQ 音乐换成酷我等；选完直接启动新 App
         col.setOnLongClickListener {
             pickPreferredApp(onPickedLaunch = true)
@@ -553,8 +553,8 @@ class MusicHost(
         ).apply { topMargin = dp(6) })
 
         container.addView(col)
-        // 单击：启动当前绑定的音乐 App；长按：弹"选择音乐 App"对话框（与大布局一致）
-        col.setOnClickListener { launchPreferredApp() }
+        // 单击封面/卡片非按钮区：进入绑定的音乐 App 并停留（不自动回桌面）；长按：弹"选择音乐 App"对话框（与大布局一致）
+        col.setOnClickListener { launchPreferredApp(autoReturn = false) }
         col.setOnLongClickListener {
             pickPreferredApp(onPickedLaunch = true)
             true
@@ -733,7 +733,15 @@ class MusicHost(
         }, 3000L)
     }
 
-    private fun launchPreferredApp() {
+    /**
+     * 启动已绑定的音乐 App。
+     * @param autoReturn true＝启动后延迟 3 秒自动回到桌面（用于启动卡"点击打开音乐"、长按切换 App：
+     *                   起播后回桌面用卡片控制）；
+     *                   false＝只把 App 打开并**停留在 App 内**（用于播放中点击封面/卡片非按钮区：
+     *                   用户是要进 App 选歌/操作，不应被强制拉回桌面）。
+     *                   不自动返回时，地图/歌词浮窗的恢复交给 MainActivity.onResume() 的 resumeFloat()。
+     */
+    private fun launchPreferredApp(autoReturn: Boolean = true) {
         val pkg = prefs.getString(KEY_APP, null)
         if (pkg != null) {
             // 车机版音乐 App（如酷我车机版）可能没有 LAUNCHER activity，getLaunchIntentForPackage 返回 null，
@@ -747,6 +755,9 @@ class MusicHost(
                 i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 onHideFloat?.invoke()
                 runCatching { context.startActivity(i) }
+                primedPackage = pkg
+                // 用户主动进入 App：停留，不自动回桌面（浮窗随 onResume 恢复）
+                if (!autoReturn) return
                 // 延迟返回 NUI
                 handler.postDelayed({
                     val back = Intent().apply {
@@ -754,7 +765,6 @@ class MusicHost(
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
                     }
                     runCatching { context.startActivity(back) }
-                    primedPackage = pkg
                     // 回 NUI 后再恢复地图浮窗（错开酷我自有关闭窗口的动画窗口）
                     handler.postDelayed({ onShowFloat?.invoke() }, 900L)
                 }, 3000L)
