@@ -296,6 +296,8 @@ class MusicHost(
         val title = if (lastTitle.isNotBlank()) lastTitle else "未知歌曲"
         val artist = if (lastArtist.isNotBlank()) lastArtist else "未知艺术家"
         val art = lastCover
+        // 同步负一屏音乐区（歌名/歌手/封面/播放状态）
+        onMinusMusic?.invoke(title, artist, art, isPlaying(controller.playbackState))
         // 歌词内容变化（切歌/重新抓词）才重置高亮；同歌词的重复渲染保留当前高亮，避免闪烁回 ♪
         val recomputed = parseLrc(lastLyricRaw)
         if (recomputed != lyrics) lyricHighlight = -1
@@ -674,6 +676,9 @@ class MusicHost(
         v.setOnClickListener { if (hasPermission) launchPreferredApp() else requestPermission() }
         v.setOnLongClickListener { pickPreferredApp(); true }
         container.addView(v)
+        // 清空负一屏音乐区
+        onMinusMusic?.invoke("", "", null, false)
+        onMinusLyric?.invoke("", "")
     }
 
     /** 所有绑定音乐统一走网易云歌词：切歌后总是触发（播放器自带歌词仅作网易云结果到达前的临时显示），
@@ -802,6 +807,25 @@ class MusicHost(
     private var floatH = -1
     /** 提供悬浮地图几何（边界格式 x1,y1,x2,y2），用于默认位置 */
     var floatBoundsProvider: (() -> IntArray?)? = null
+
+    /** 负一屏音乐区回调：render 时把歌名/歌手/封面/播放状态同步给负一屏横条 */
+    var onMinusMusic: ((title: String, artist: String, cover: Bitmap?, playing: Boolean) -> Unit)? = null
+    /** 负一屏歌词回调：每 100ms 把当前行/下一行歌词同步给负一屏横条中间 */
+    var onMinusLyric: ((current: String, next: String) -> Unit)? = null
+
+    /** 负一屏横条播放/暂停按钮：切换当前控制器播放状态 */
+    fun togglePlay() {
+        val c = currentController ?: return
+        safe {
+            if (isPlaying(c.playbackState)) {
+                userPaused = true
+                c.transportControls.pause()
+            } else {
+                userPaused = false
+                c.transportControls.play()
+            }
+        }
+    }
 
     /** 重新 addView 把歌词窗提到最上层（盖住高德浮窗） */
     fun bringLyricFloatToFront() {
@@ -1098,7 +1122,7 @@ class MusicHost(
     private fun refreshLyric() {
         val controller = currentController
         playingNow = controller?.playbackState?.state == PlaybackState.STATE_PLAYING
-        if (lyrics.isEmpty()) { hideLyricFloat(); return }
+        if (lyrics.isEmpty()) { hideLyricFloat(); onMinusLyric?.invoke("", ""); return }
         val pos = controller?.playbackState?.position ?: -1L
         if (pos < 0L) { updateLyricFloat(); return }
 
@@ -1110,6 +1134,12 @@ class MusicHost(
         if (idx < 0 && lyrics.isNotEmpty()) idx = 0
         if (idx >= 0 && idx != lyricHighlight) lyricHighlight = idx
         updateLyricFloat()
+        // 同步负一屏横条歌词（当前行 + 下一行）
+        val i = lyricHighlight.coerceAtLeast(0)
+        onMinusLyric?.invoke(
+            lyrics.getOrNull(i)?.second ?: "",
+            lyrics.getOrNull(i + 1)?.second ?: "",
+        )
     }
 
     private fun dp(v: Int): Int =

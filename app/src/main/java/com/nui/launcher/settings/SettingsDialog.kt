@@ -92,15 +92,34 @@ class SettingsDialog(context: Context) : Dialog(context) {
     private var voiceSupportRetries = 0
     private lateinit var optWallpaperDay: View
     private lateinit var optWallpaperNight: View
+    private lateinit var optWallpaperMinus: View
     private lateinit var tvWallpaperDayStatus: TextView
     private lateinit var tvWallpaperNightStatus: TextView
+    private lateinit var tvWallpaperMinusStatus: TextView
     private lateinit var tvWallpaperHint: TextView
+
+    // 负一屏分组：大号时钟开关、闲置自动进入开关、闲置等待时间
+    private lateinit var optMinusBigClock: View
+    private lateinit var checkMinusBigClock: View
+    private lateinit var optAutoMinus: View
+    private lateinit var checkAutoMinus: View
+    private lateinit var optAutoMinusMinutes: View
+    private lateinit var tvAutoMinusMinutesValue: TextView
+
+    /** 负一屏偏好（大号时钟 / 闲置自动进入 / 等待时间）变化后，由宿主刷新负一屏与空闲计时 */
+    var onMinusPrefsChanged: (() -> Unit)? = null
 
     /** 壁纸槽位是否已设置（由 MainActivity 注入，读 WallpaperController 状态） */
     var wallpaperHasCustom: ((com.nui.launcher.WallpaperController.Slot) -> Boolean)? = null
 
     /** 点击壁纸槽位（由 MainActivity 注入，弹出该槽位的壁纸菜单） */
     var onWallpaperPick: ((com.nui.launcher.WallpaperController.Slot) -> Unit)? = null
+
+    /** 点击负一屏壁纸项（由 MainActivity 注入，弹出负一屏壁纸菜单） */
+    var onMinusWallpaperPick: (() -> Unit)? = null
+
+    /** 负一屏壁纸当前状态文字（由 MainActivity 注入，"跟随桌面/静态图片/动态视频"） */
+    var minusWallpaperStatus: (() -> String)? = null
 
     private var currentTab = 0
 
@@ -171,11 +190,13 @@ class SettingsDialog(context: Context) : Dialog(context) {
         checkVoiceFemale = findViewById(R.id.checkVoiceFemale)
         tvOptVoiceMale = findViewById(R.id.tvOptVoiceMale)
         checkVoiceMale = findViewById(R.id.checkVoiceMale)
-        // 外观 → 壁纸（白天 / 晚上）
+        // 外观 → 壁纸（白天 / 晚上 / 负一屏）
         optWallpaperDay = findViewById(R.id.optWallpaperDay)
         optWallpaperNight = findViewById(R.id.optWallpaperNight)
+        optWallpaperMinus = findViewById(R.id.optWallpaperMinus)
         tvWallpaperDayStatus = findViewById(R.id.tvWallpaperDayStatus)
         tvWallpaperNightStatus = findViewById(R.id.tvWallpaperNightStatus)
+        tvWallpaperMinusStatus = findViewById(R.id.tvWallpaperMinusStatus)
         tvWallpaperHint = findViewById(R.id.tvWallpaperHint)
         findViewById<View>(R.id.optHiddenApps).setOnClickListener { showHiddenAppsDialog() }
 
@@ -262,6 +283,41 @@ class SettingsDialog(context: Context) : Dialog(context) {
         // 外观 → 壁纸：白天 / 晚上（点击弹菜单，由宿主接管选图）
         optWallpaperDay.setOnClickListener { onWallpaperPick?.invoke(com.nui.launcher.WallpaperController.Slot.DAY) }
         optWallpaperNight.setOnClickListener { onWallpaperPick?.invoke(com.nui.launcher.WallpaperController.Slot.NIGHT) }
+        optWallpaperMinus.setOnClickListener { onMinusWallpaperPick?.invoke() }
+        // 负一屏分组：大号时钟 / 闲置自动进入 / 等待时间
+        optMinusBigClock = findViewById(R.id.optMinusBigClock)
+        checkMinusBigClock = findViewById(R.id.checkMinusBigClock)
+        optAutoMinus = findViewById(R.id.optAutoMinus)
+        checkAutoMinus = findViewById(R.id.checkAutoMinus)
+        optAutoMinusMinutes = findViewById(R.id.optAutoMinusMinutes)
+        tvAutoMinusMinutesValue = findViewById(R.id.tvAutoMinusMinutesValue)
+        optMinusBigClock.setOnClickListener {
+            UiTheme.setMinusBigClock(context, !UiTheme.minusBigClock(context))
+            renderMinus()
+            onMinusPrefsChanged?.invoke()
+        }
+        optAutoMinus.setOnClickListener {
+            UiTheme.setAutoMinus(context, !UiTheme.autoMinus(context))
+            renderMinus()
+            onMinusPrefsChanged?.invoke()
+        }
+        optAutoMinusMinutes.setOnClickListener {
+            if (!UiTheme.autoMinus(context)) return@setOnClickListener
+            val options = intArrayOf(1, 2, 3, 5, 10, 15)
+            val names = options.map { "$it 分钟" }.toTypedArray()
+            val checked = options.indexOf(UiTheme.autoMinusMinutes(context)).coerceAtLeast(0)
+            AlertDialog.Builder(context)
+                .setTitle("闲置等待时间")
+                .setSingleChoiceItems(names, checked) { d, which ->
+                    UiTheme.setAutoMinusMinutes(context, options[which])
+                    renderMinus()
+                    onMinusPrefsChanged?.invoke()
+                    d.dismiss()
+                }
+                .setNegativeButton("取消", null)
+                .show()
+        }
+        renderMinus()
         refreshWallpaper()
         tvDockIconValue.text = "${(UiTheme.dockIconScale(context) * 100).toInt()}%"
         seekDockIcon.apply {
@@ -360,6 +416,9 @@ class SettingsDialog(context: Context) : Dialog(context) {
         // 系统栏策略与主桌面一致：状态栏 / 系统 Dock 分别跟随设置开关，
         // 否则打开设置弹窗时系统栏（含车机底部 Dock）总是显示出来
         applySystemDock()
+        // 状态回调由宿主在构造后、show() 前赋值；构造 init 内的首次刷新拿不到负一屏状态。
+        // 这里在视图 attach 完成后再 post 刷新一次，保证每次打开（含退出后重进）都显示真实壁纸状态。
+        window?.decorView?.post { refreshWallpaper() }
     }
 
     /** 按 UiTheme 两个开关设置弹窗窗口的系统栏显隐；系统栏显示时根布局让位（保留原有 24dp padding） */
@@ -628,9 +687,23 @@ class SettingsDialog(context: Context) : Dialog(context) {
         findViewById<View>(R.id.dividerWallpaper).setBackgroundColor(p.divider)
         findViewById<TextView>(R.id.tvOptWallpaperDay).setTextColor(p.label)
         findViewById<TextView>(R.id.tvOptWallpaperNight).setTextColor(p.label)
+        findViewById<TextView>(R.id.tvOptWallpaperMinus).setTextColor(p.label)
         tvWallpaperDayStatus.setTextColor(p.value)
         tvWallpaperNightStatus.setTextColor(p.value)
+        tvWallpaperMinusStatus.setTextColor(p.value)
         tvWallpaperHint.setTextColor(p.value)
+        // 负一屏分组（新增项：大号时钟 / 闲置自动进入 / 等待时间）
+        findViewById<TextView>(R.id.groupTitleMinus).setTextColor(p.value)
+        findViewById<View>(R.id.dividerMinus1).setBackgroundColor(p.divider)
+        findViewById<TextView>(R.id.tvOptMinusBigClock).setTextColor(p.label)
+        findViewById<TextView>(R.id.checkMinusBigClock).setTextColor(p.accent)
+        findViewById<View>(R.id.dividerMinus2).setBackgroundColor(p.divider)
+        findViewById<TextView>(R.id.tvOptAutoMinus).setTextColor(p.label)
+        findViewById<TextView>(R.id.checkAutoMinus).setTextColor(p.accent)
+        findViewById<View>(R.id.dividerMinus3).setBackgroundColor(p.divider)
+        findViewById<TextView>(R.id.tvOptIdleMinutes).setTextColor(p.label)
+        findViewById<TextView>(R.id.tvAutoMinusMinutesValue).setTextColor(p.value)
+        findViewById<TextView>(R.id.tvMinusIdleHint).setTextColor(p.value)
         checkVoiceFemale.setTextColor(p.accent)
         checkVoiceMale.setTextColor(p.accent)
         checkSystem.setTextColor(p.accent)
@@ -742,11 +815,25 @@ class SettingsDialog(context: Context) : Dialog(context) {
     }
 
     /** 刷新壁纸槽位状态文字（默认/已设置），宿主选图返回后调用 */
+    /** 刷新负一屏分组：大号时钟 / 闲置自动进入勾选态、等待时间值与可点态 */
+    private fun renderMinus() {
+        if (!::optMinusBigClock.isInitialized) return
+        checkMinusBigClock.visibility =
+            if (UiTheme.minusBigClock(context)) View.VISIBLE else View.GONE
+        checkAutoMinus.visibility =
+            if (UiTheme.autoMinus(context)) View.VISIBLE else View.GONE
+        tvAutoMinusMinutesValue.text = "${UiTheme.autoMinusMinutes(context)} 分钟"
+        val enabled = UiTheme.autoMinus(context)
+        optAutoMinusMinutes.isEnabled = enabled
+        optAutoMinusMinutes.alpha = if (enabled) 1f else 0.4f
+    }
+
     fun refreshWallpaper() {
         val daySet = wallpaperHasCustom?.invoke(com.nui.launcher.WallpaperController.Slot.DAY) ?: false
         val nightSet = wallpaperHasCustom?.invoke(com.nui.launcher.WallpaperController.Slot.NIGHT) ?: false
         tvWallpaperDayStatus.text = if (daySet) context.getString(R.string.wallpaper_set) else context.getString(R.string.wallpaper_default)
         tvWallpaperNightStatus.text = if (nightSet) context.getString(R.string.wallpaper_set) else context.getString(R.string.wallpaper_default)
+        tvWallpaperMinusStatus.text = minusWallpaperStatus?.invoke() ?: "跟随桌面"
     }
 
     private fun render() = render(UiTheme.isDark(context))

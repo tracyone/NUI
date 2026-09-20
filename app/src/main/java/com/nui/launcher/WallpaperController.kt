@@ -39,6 +39,23 @@ class WallpaperController(
         NIGHT("wallpaper_night.jpg"),
     }
 
+    /** 负一屏壁纸模式：FOLLOW=跟随桌面（默认）/ IMAGE=独立静态图 / VIDEO=独立动态视频 */
+    enum class MinusMode { FOLLOW, IMAGE, VIDEO }
+
+    companion object {
+        private const val TAG = "WallpaperController"
+        const val REQ_PICK = 0x1011
+        const val REQ_PICK_MINUS_IMAGE = 0x1012
+        const val REQ_PICK_MINUS_VIDEO = 0x1013
+        private const val PREFS = "nui_wallpaper"
+        private const val KEY_MINUS_MODE = "minus_mode"
+        private const val MINUS_IMAGE_FILE = "minus_image.jpg"
+        private const val MINUS_VIDEO_FILE = "minus_video.mp4"
+    }
+
+    /** 负一屏壁纸变更回调（选完图片/视频后通知 MainActivity 重新应用） */
+    var onMinusWallpaperChanged: (() -> Unit)? = null
+
     /** 弹菜单/选图前隐藏悬浮地图，关闭后恢复（由外部注入，同 NavHost/MusicHost 模式） */
     var onHideFloat: (() -> Unit)? = null
     var onShowFloat: (() -> Unit)? = null
@@ -136,7 +153,138 @@ class WallpaperController(
         d.show()
     }
 
-    /** 旧版单壁纸 wallpaper.jpg → 白天壁纸（若白天槽位尚未设置） */
+    // ==================== 负一屏壁纸 ====================
+
+    private fun minusPrefs() =
+        activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    /** 当前负一屏壁纸模式（默认跟随桌面）。 */
+    fun minusWallpaperMode(): MinusMode = try {
+        MinusMode.valueOf(minusPrefs().getString(KEY_MINUS_MODE, MinusMode.FOLLOW.name)!!)
+    } catch (e: Exception) { MinusMode.FOLLOW }
+
+    /** 负一屏视频壁纸绝对路径（VIDEO 模式且文件存在时）。 */
+    fun minusWallpaperPath(): String? {
+        if (minusWallpaperMode() != MinusMode.VIDEO) return null
+        val f = File(activity.filesDir, MINUS_VIDEO_FILE)
+        return if (f.exists()) f.absolutePath else null
+    }
+
+    /** 负一屏静态壁纸 Bitmap（IMAGE 模式且文件存在时，居中裁剪到屏幕尺寸）。 */
+    fun minusWallpaperBitmap(): Bitmap? {
+        if (minusWallpaperMode() != MinusMode.IMAGE) return null
+        val file = File(activity.filesDir, MINUS_IMAGE_FILE)
+        if (!file.exists()) return null
+        return try {
+            val sw = activity.resources.displayMetrics.widthPixels
+            val sh = activity.resources.displayMetrics.heightPixels
+            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(file.absolutePath, opts)
+            val sample = calcSample(opts.outWidth, opts.outHeight, sw, sh)
+            val decode = BitmapFactory.Options().apply { inSampleSize = sample }
+            val bmp = BitmapFactory.decodeFile(file.absolutePath, decode) ?: return null
+            centerCrop(bmp, sw, sh)
+        } catch (e: Exception) {
+            Log.e(TAG, "minus bitmap failed", e); null
+        }
+    }
+
+    /** 弹负一屏壁纸菜单：跟随桌面 / 选择图片 / 选择视频 / （有图或视频时）恢复跟随。 */
+    fun showMinusMenu() {
+        val mode = minusWallpaperMode()
+        val items = mutableListOf("跟随桌面壁纸", "选择静态图片", "选择动态视频")
+        onHideFloat?.invoke()
+        followUpPending = false
+        val d = AlertDialog.Builder(activity)
+            .setTitle("负一屏壁纸（当前：${minusModeLabel(mode)}）")
+            .setItems(items.toTypedArray()) { _, which ->
+                when (which) {
+                    0 -> setMinusMode(MinusMode.FOLLOW)
+                    1 -> { followUpPending = true; pickMinusImage() }
+                    2 -> { followUpPending = true; pickMinusVideo() }
+                }
+            }.create()
+        d.setOnDismissListener { if (!followUpPending) onShowFloat?.invoke() }
+        d.show()
+    }
+
+    private fun minusModeLabel(m: MinusMode) = when (m) {
+        MinusMode.FOLLOW -> "跟随桌面"
+        MinusMode.IMAGE -> "静态图片"
+        MinusMode.VIDEO -> "动态视频"
+    }
+
+    private fun setMinusMode(m: MinusMode) {
+        minusPrefs().edit().putString(KEY_MINUS_MODE, m.name).apply()
+        NuiToast.show(activity, "负一屏壁纸：${minusModeLabel(m)}", Toast.LENGTH_SHORT)
+        onMinusWallpaperChanged?.invoke()
+        onShowFloat?.invoke()
+    }
+
+    private fun pickMinusImage() {
+        val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "image/*"
+        }
+        runCatching {
+            activity.startActivityForResult(Intent.createChooser(intent, "选择负一屏壁纸"), REQ_PICK_MINUS_IMAGE)
+        }.onFailure { Log.e(TAG, "pick minus image failed", it) }
+    }
+
+    private fun pickMinusVideo() {
+        val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "video/*"
+        }
+        runCatching {
+            activity.startActivityForResult(Intent.createChooser(intent, "选择负一屏动态壁纸"), REQ_PICK_MINUS_VIDEO)
+        }.onFailure { Log.e(TAG, "pick minus video failed", it) }
+    }
+
+    /** 处理负一屏选图/选视频结果（MainActivity.onActivityResult 转发）。 */
+    fun onMinusActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode != REQ_PICK_MINUS_IMAGE && requestCode != REQ_PICK_MINUS_VIDEO) return
+        onShowFloat?.invoke()
+        if (resultCode != Activity.RESULT_OK || data == null) return
+        val uri = data.data ?: return
+        val targetName = if (requestCode == REQ_PICK_MINUS_IMAGE) MINUS_IMAGE_FILE else MINUS_VIDEO_FILE
+        val target = File(activity.filesDir, targetName)
+        try {
+            activity.contentResolver.openInputStream(uri)?.use { input ->
+                target.outputStream().use { output -> input.copyTo(output) }
+            } ?: return
+            // 切换模式并通知重绘
+            val newMode = if (requestCode == REQ_PICK_MINUS_IMAGE) MinusMode.IMAGE else MinusMode.VIDEO
+            minusPrefs().edit().putString(KEY_MINUS_MODE, newMode.name).apply()
+            NuiToast.show(activity, "负一屏壁纸：${minusModeLabel(newMode)}", Toast.LENGTH_SHORT)
+            // 视频分辨率明显超过屏幕（像素总量 > 屏幕 2 倍）时，软解设备可能卡顿，温和提示但不阻止
+            if (newMode == MinusMode.VIDEO) warnIfVideoOversized(target)
+            onMinusWallpaperChanged?.invoke()
+        } catch (e: Exception) {
+            Log.e(TAG, "copy minus failed", e)
+            NuiToast.show(activity, "负一屏壁纸设置失败", Toast.LENGTH_SHORT)
+        }
+    }
+    /** 探测视频分辨率，仅当视频明显超出屏幕（单边 2 倍以上，如 4K 在 1080p 屏）才提示软解可能卡顿。 */
+    private fun warnIfVideoOversized(file: File) {
+        runCatching {
+            val mmr = android.media.MediaMetadataRetriever()
+            mmr.setDataSource(file.absolutePath)
+            val vw = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+            val vh = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+            mmr.release()
+            val dm = activity.resources.displayMetrics
+            // 视频单边超过屏幕对应边 2 倍才可能在软解设备上卡顿；1080p 视频在 720p/1080p 屏均不提示
+            if (vw > 0 && vh > 0 && (vw > dm.widthPixels * 2 || vh > dm.heightPixels * 2)) {
+                NuiToast.show(
+                    activity,
+                    "视频分辨率 ${vw}×${vh} 较高，若播放卡顿建议使用不超过 1080p 的视频",
+                    Toast.LENGTH_LONG,
+                )
+            }
+        }
+    }
+
     private fun migrateLegacy() {
         val legacy = File(activity.filesDir, "wallpaper.jpg")
         val day = File(activity.filesDir, Slot.DAY.fileName)
@@ -208,10 +356,5 @@ class WallpaperController(
         val cw = tw.coerceAtMost(scaled.width - x)
         val ch = th.coerceAtMost(scaled.height - y)
         return Bitmap.createBitmap(scaled, x, y, cw, ch)
-    }
-
-    companion object {
-        private const val TAG = "WallpaperController"
-        const val REQ_PICK = 0x1011
     }
 }

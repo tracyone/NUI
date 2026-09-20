@@ -108,6 +108,20 @@ class MainActivity : AppCompatActivity() {
     private var desktopBtnNavFavorite: View? = null
     private var desktopNavInfoOverlay: View? = null
     private var navInfoHost: com.nui.launcher.nav.NavInfoHost? = null
+    // 负一屏（最左页）view 引用
+    private var minusVideo: VideoWallpaperView? = null
+    private var ivMinusWallpaper: ImageView? = null
+    private var minusSong: TextView? = null
+    private var minusArtist: TextView? = null
+    private var minusCover: ImageView? = null
+    private var minusBar: LinearLayout? = null
+    private var minusBtnPlay: ImageView? = null
+    private var minusRoot: View? = null
+    private var minusBigClock: View? = null
+    private var minusNavOverlay: View? = null
+    // 闲置自动进入负一屏（类似屏保）：用户无操作达设定分钟后切到负一屏
+    private val autoMinusHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var autoMinusRunnable: Runnable? = null
     private var page0Ready = false
     private var appGridLoaded = false
     /** 从系统卸载页返回后需重载应用网格 */
@@ -143,12 +157,18 @@ class MainActivity : AppCompatActivity() {
 
         override fun getItemId(position: Int): Long = position.toLong()
 
-        override fun getItemCount() = 1 + appPages.size
-        override fun getItemViewType(position: Int) = if (position == 0) 0 else 1
+        // 分页：0=负一屏（最左，动态壁纸+底部快捷横条），1=桌面（地图），2..N=应用各页
+        override fun getItemCount() = 2 + appPages.size
+        override fun getItemViewType(position: Int) = when (position) {
+            0 -> 0    // 负一屏
+            1 -> 1    // 桌面
+            else -> 2 // 应用页
+        }
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
             val inflater = LayoutInflater.from(parent.context)
             val v = when (viewType) {
-                0 -> inflater.inflate(R.layout.page_desktop, parent, false)
+                0 -> inflater.inflate(R.layout.page_minus_one, parent, false)
+                1 -> inflater.inflate(R.layout.page_desktop, parent, false)
                 else -> {
                     // 应用页容器：必须 MATCH_PARENT（ViewPager2 要求页面占满），
                     // 带与桌面一致的 padding（dock 让位），内容为单页 6 列网格
@@ -172,9 +192,10 @@ class MainActivity : AppCompatActivity() {
             return object : RecyclerView.ViewHolder(v) {}
         }
         override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
-            when {
-                position == 0 -> bindDesktop(holder.itemView)
-                else -> bindAppPage(holder.itemView as ViewGroup, position - 1)
+            when (position) {
+                0 -> bindMinusOne(holder.itemView)
+                1 -> bindDesktop(holder.itemView)
+                else -> bindAppPage(holder.itemView as ViewGroup, position - 2)
             }
         }
     }
@@ -221,6 +242,186 @@ class MainActivity : AppCompatActivity() {
         // 同一 ViewHolder 可能被多次 re-bind（图标比例/数据变化时 notifyItemRangeChanged），先清空再挂
         container.removeAllViews()
         container.addView(rv)
+    }
+
+    /** 负一屏（最左页）：全屏动态/静态壁纸 + 底部半透横条（快捷入口/音乐/歌词/时间天气）。
+     *  音乐区/歌词/天气数据由 setupMusic/天气回调接入；壁纸由 applyMinusWallpaper 应用。 */
+    private fun bindMinusOne(v: View) {
+        minusRoot = v
+        minusVideo = v.findViewById(R.id.mvWallpaper)
+        minusSong = v.findViewById(R.id.minusSong)
+        minusArtist = v.findViewById(R.id.minusArtist)
+        minusCover = v.findViewById(R.id.minusCover)
+        ivMinusWallpaper = v.findViewById(R.id.ivMinusWallpaper)
+        minusBar = v.findViewById(R.id.minusBar)
+        minusBtnPlay = v.findViewById(R.id.btnMinusPlay)
+        minusBigClock = v.findViewById(R.id.minusBigClock)
+        minusNavOverlay = v.findViewById(R.id.navInfoOverlayMinus)
+        // 导航/巡航卡接入 NavInfoHost（host 可能尚未创建，缓存后由 setupNav 补附加）
+        navInfoHost?.attachMinus(minusNavOverlay)
+        // 音乐控制按钮
+        v.findViewById<View>(R.id.btnMinusPrev).setOnClickListener {
+            if (::musicHost.isInitialized) musicHost.prev()
+        }
+        v.findViewById<View>(R.id.btnMinusNext).setOnClickListener {
+            if (::musicHost.isInitialized) musicHost.next()
+        }
+        minusBtnPlay?.setOnClickListener {
+            if (::musicHost.isInitialized) musicHost.togglePlay()
+        }
+        // 快捷入口：回家/公司/收藏，复用桌面导航按钮逻辑
+        v.findViewById<View>(R.id.shortcutNavHome).setOnClickListener {
+            desktopBtnNavHome?.performClick()
+        }
+        v.findViewById<View>(R.id.shortcutNavCompany).setOnClickListener {
+            desktopBtnNavCompany?.performClick()
+        }
+        v.findViewById<View>(R.id.shortcutNavFavorite).setOnClickListener {
+            desktopBtnNavFavorite?.performClick()
+        }
+        // 应用负一屏壁纸（静态图或视频）
+        applyMinusWallpaper()
+        applyMinusTheme()
+        // 若 musicHost 已就绪，立即同步一次当前音乐到负一屏横条
+        if (::musicHost.isInitialized) musicHost.refresh()
+        // 大号时钟等负一屏偏好
+        applyMinusPrefs()
+    }
+
+    /** 负一屏壁纸：follow=跟随桌面（root 壁纸透出，根背景透明）/ image=独立静态图 / video=独立视频。
+     *  未设置时默认跟随桌面（root 壁纸透过负一屏显示）。 */
+    private fun applyMinusWallpaper() {
+        val root = minusRoot ?: run { android.util.Log.w("NUI.Main", "applyMinusWallpaper: minusRoot=null"); return }
+        val video = minusVideo
+        // onBindViewHolder 可能在 wallpaper 初始化前就绑定负一屏（ViewPager2 预加载），做保护
+        if (!::wallpaper.isInitialized) { root.background = null; video?.visibility = View.GONE; android.util.Log.w("NUI.Main", "applyMinusWallpaper: wallpaper not initialized"); return }
+        val mode = wallpaper.minusWallpaperMode()
+        android.util.Log.i("NUI.Main", "applyMinusWallpaper: mode=$mode video=$video path=${wallpaper.minusWallpaperPath()}")
+        when (mode) {
+            com.nui.launcher.WallpaperController.MinusMode.VIDEO -> {
+                val path = wallpaper.minusWallpaperPath()
+                if (!path.isNullOrBlank() && video != null) {
+                    root.background = null
+                    ivMinusWallpaper?.visibility = View.GONE
+                    video.visibility = View.VISIBLE
+                    // 播放失败时明确提示（不再静默回退默认）；首帧渲染确认成功
+                    video.onError = { what, extra ->
+                        android.widget.Toast.makeText(
+                            this@MainActivity,
+                            "视频壁纸播放失败（code=$what/$extra），已回退桌面壁纸",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                        video.visibility = View.GONE
+                        root.background = null
+                    }
+                    video.onFirstFrame = {
+                        android.util.Log.d("NUI.Main", "minus video first frame rendered")
+                    }
+                    video.setVideo(path)   // centerCrop 铺满、静音循环
+                } else {
+                    // 视频路径无效：回退跟随桌面
+                    video?.visibility = View.GONE
+                    root.background = null
+                }
+            }
+            com.nui.launcher.WallpaperController.MinusMode.IMAGE -> {
+                video?.release()
+                video?.visibility = View.GONE
+                ivMinusWallpaper?.visibility = View.VISIBLE
+                root.background = null
+                val bmp = wallpaper.minusWallpaperBitmap()
+                ivMinusWallpaper?.setImageBitmap(bmp)   // centerCrop 铺满
+                if (bmp == null) ivMinusWallpaper?.visibility = View.GONE
+            }
+            else -> { // FOLLOW
+                video?.release()
+                video?.visibility = View.GONE
+                ivMinusWallpaper?.setImageDrawable(null)
+                ivMinusWallpaper?.visibility = View.GONE
+                root.background = null       // 透明，透出 root 壁纸
+            }
+        }
+    }
+
+    /** 负一屏底部横条：背景与字体颜色随外观（与 dock 一致）。扁横条内导航只显彩色圆。 */
+    private fun applyMinusTheme() {
+        val pal = UiTheme.palette(this)
+        minusBar?.setBackgroundColor(pal.dockBg)
+        minusSong?.setTextColor(pal.textPrimary)
+        minusArtist?.setTextColor(pal.textSecondary)
+        minusRoot?.findViewById<TextView>(R.id.minusTime)?.setTextColor(pal.textPrimary)
+        minusRoot?.findViewById<TextView>(R.id.minusDate)?.setTextColor(pal.textSecondary)
+        // 三颗导航彩色圆内的图标：与 page0 运行时一致染 dockIconTint
+        val tint = ColorStateList.valueOf(pal.dockIconTint)
+        for (id in intArrayOf(R.id.shortcutNavHome, R.id.shortcutNavCompany, R.id.shortcutNavFavorite)) {
+            minusRoot?.findViewById<ImageView>(id)?.imageTintList = tint
+        }
+        // 音乐控制键：播放键为绿色实心圆、上下曲为深色半透圆，图标固定白色（与桌面音乐卡一致），不随 dock 染色
+        val whiteTint = ColorStateList.valueOf(0xFFFFFFFF.toInt())
+        minusRoot?.findViewById<ImageView>(R.id.btnMinusPrev)?.imageTintList = whiteTint
+        minusRoot?.findViewById<ImageView>(R.id.btnMinusPlay)?.imageTintList = whiteTint
+        minusRoot?.findViewById<ImageView>(R.id.btnMinusNext)?.imageTintList = whiteTint
+    }
+
+    /** 应用负一屏偏好：大号时钟显隐 + 重置闲置自动进入计时 */
+    private fun applyMinusPrefs() {
+        minusBigClock?.visibility = if (UiTheme.minusBigClock(this)) View.VISIBLE else View.GONE
+        applyBigClockGlass()
+        setupAutoMinusTimer()
+    }
+
+    /** 大号时钟 iOS 26 式玻璃效果：文字半透明 + 不透明描边（边缘清晰）+ 强阴影。 */
+    private fun applyBigClockGlass() {
+        val timeTv = minusBigClock?.findViewById<TextView>(R.id.minusBigTime)
+        val dateTv = minusBigClock?.findViewById<TextView>(R.id.minusBigDate)
+        for (tv in listOfNotNull(timeTv, dateTv)) {
+            val p: android.graphics.Paint = tv.paint
+            p.strokeWidth = if (tv === timeTv) 3.5f else 2f
+            p.style = android.graphics.Paint.Style.FILL_AND_STROKE
+            p.color = if (tv === timeTv) 0x99FFFFFF.toInt() else 0xCCFFFFFF.toInt()  // fill 半透明
+            // 描边颜色单独设（stroke 用 setStrokeColor）
+            try {
+                val m = android.graphics.Paint::class.java.getMethod("setStrokeColor", Int::class.javaPrimitiveType)
+                m.invoke(p, if (tv === timeTv) 0xF0FFFFFF else 0xE6FFFFFF)
+            } catch (_: Exception) {}
+            tv.invalidate()
+        }
+    }
+
+    /** （重新）安排闲置自动进入负一屏；开关关或已在负一屏时不安排 */
+    private fun setupAutoMinusTimer() {
+        autoMinusHandler.removeCallbacksAndMessages(null)
+        autoMinusRunnable = null
+        if (!UiTheme.autoMinus(this)) return
+        if (binding.viewPager.currentItem == 0) return
+        val delayMs = UiTheme.autoMinusMinutes(this) * 60_000L
+        val r = Runnable {
+            if (!isFinishing && !isDestroyed && UiTheme.autoMinus(this) &&
+                binding.viewPager.currentItem != 0
+            ) {
+                binding.viewPager.setCurrentItem(0, true)
+            }
+        }
+        autoMinusRunnable = r
+        autoMinusHandler.postDelayed(r, delayMs)
+    }
+
+    /** 用户产生操作（触摸/翻页）：重置闲置计时 */
+    private fun onUserActive() {
+        if (UiTheme.autoMinus(this)) setupAutoMinusTimer()
+    }
+
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        if (ev.actionMasked == android.view.MotionEvent.ACTION_DOWN) onUserActive()
+        return super.dispatchTouchEvent(ev)
+    }
+
+    /** 启动高德车机（负一屏导航快捷入口） */
+    private fun launchAmap() {
+        runCatching {
+            val i = packageManager.getLaunchIntentForPackage("com.autonavi.amapauto")
+            if (i != null) { i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); startActivity(i) }
+        }
     }
 
     private fun bindDesktop(v: View) {
@@ -272,23 +473,46 @@ class MainActivity : AppCompatActivity() {
 
         binding.viewPager.adapter = PagerAdapter()
         binding.viewPager.isUserInputEnabled = true
+        // 等首帧 layout 后再跳到桌面(position 1)：初始同步 setCurrentItem 会让负一屏(0)
+        // 的不透明近黑背景错位盖住全屏、dock 被误判为负一屏而隐藏
+        binding.viewPager.postDelayed({ binding.viewPager.setCurrentItem(1, false) }, 300)
         binding.viewPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
-                // 指示器：点索引 = 外层页索引（0=桌面，1..N=应用各页）
+                // 指示器：点索引 = 外层页索引（0=负一屏，1=桌面，2..N=应用各页）
                 updatePageIndicator(position)
+                // 翻页属于用户活动，重置闲置自动进入计时
+                onUserActive()
+                // 负一屏无 dock 栏；其它页（桌面/应用列表）恢复 dock
+                binding.dockBar.visibility = if (position == 0) View.GONE else View.VISIBLE
                 // 离开桌面时关闭高德浮窗；回到桌面时浮窗几何由 IDLE 回调刷新
                 // （滑动动画中 getLocationOnScreen 会取到过渡坐标，导致浮窗与 dock 重叠）
-                if (::mapHost.isInitialized && position != 0) mapHost.closeFloat()
-                // 离开桌面页时隐藏导航/巡航信息卡（page1+ 是应用列表，不显示悬浮信息）
+                if (::mapHost.isInitialized && position != 1) mapHost.closeFloat()
+                // 离开桌面页时隐藏导航/巡航信息卡（负一屏/应用列表不显示悬浮信息）
                 navInfoHost?.onPageChanged(position)
                 syncWeatherLayer(position)
+                // 悬浮歌词（全局窗）：负一屏(0)与桌面(1)都显示，应用列表(2+)隐藏
+                if (::musicHost.isInitialized) {
+                    musicHost.setFloatAreaVisible(position == 0 || position == 1)
+                }
+                // 负一屏动态壁纸：滑到本页才确保起播（离屏预加载时 TextureView 可能拿不到 surface），
+                // 离开本页暂停解码省电。post 一帧等页面 layout 到位、view 有尺寸。
+                if (position == 0) {
+                    binding.viewPager.post {
+                        if (!isDestroyed && !isFinishing && binding.viewPager.currentItem == 0) {
+                            if (::wallpaper.isInitialized) applyMinusWallpaper()
+                            minusVideo?.resume()
+                        }
+                    }
+                } else {
+                    minusVideo?.pause()
+                }
             }
 
             override fun onPageScrollStateChanged(state: Int) {
                 // 页面完全静止后再刷新浮窗几何：HOME/应用列表按钮/滑动回桌面统一走这里，
                 // 保证取数时机一致（非滑动切换与滑动结束都触发 SCROLL_STATE_IDLE）
                 if (state == ViewPager2.SCROLL_STATE_IDLE &&
-                    binding.viewPager.currentItem == 0 && ::mapHost.isInitialized
+                    binding.viewPager.currentItem == 1 && ::mapHost.isInitialized
                 ) {
                     // 回桌面先恢复浮窗（closeFloat 已置隐藏态），再按新几何刷新
                     mapHost.resumeFloat()
@@ -299,7 +523,8 @@ class MainActivity : AppCompatActivity() {
 
         setupDock()
         applyDockStyle()
-        setupPageIndicator(1)
+        setupPageIndicator(2)
+        updatePageIndicator(1)
         setupMultiSelectBar()
 
         // 桌面全屏透明天气动画层 + 语音播报
@@ -429,7 +654,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun syncWeatherLayer(position: Int) {
         if (!::weatherLayer.isInitialized) return
-        if (position != 0) {
+        if (position != 1) {
             // 切到应用列表页：取消展示任务并隐藏动画
             weatherLayer.removeCallbacks(weatherLayerFadeRunnable)
             weatherLayer.animate().cancel()
@@ -442,7 +667,7 @@ class MainActivity : AppCompatActivity() {
     /** 天气动画短暂展示：显示一段时间后淡出隐藏，不常驻 */
     private fun showWeatherLayerBriefly() {
         if (!::weatherLayer.isInitialized) return
-        if (binding.viewPager.currentItem != 0) return
+        if (binding.viewPager.currentItem != 1) return
         weatherLayer.removeCallbacks(weatherLayerFadeRunnable)
         weatherLayer.animate().cancel()
         weatherLayer.alpha = 1f
@@ -504,8 +729,11 @@ class MainActivity : AppCompatActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         wallpaper.onActivityResult(requestCode, resultCode, data)
+        wallpaper.onMinusActivityResult(requestCode, resultCode, data)
         // 从图库选壁纸返回后，刷新设置面板中壁纸的状态文字
-        if (requestCode == com.nui.launcher.WallpaperController.REQ_PICK) {
+        if (requestCode == com.nui.launcher.WallpaperController.REQ_PICK ||
+            requestCode == com.nui.launcher.WallpaperController.REQ_PICK_MINUS_IMAGE ||
+            requestCode == com.nui.launcher.WallpaperController.REQ_PICK_MINUS_VIDEO) {
             settingsDialog?.refreshWallpaper()
         }
     }
@@ -541,9 +769,9 @@ class MainActivity : AppCompatActivity() {
             launchedExternalApp = false
             android.util.Log.d("NUI.Main", "onNewIntent: back from external -> page $pageBeforeLaunch")
         } else {
-            // 在桌面内按 home：在 page0（桌面）和 page1（应用列表）之间切换
-            if (binding.viewPager.currentItem == 0) binding.viewPager.currentItem = 1
-            else binding.viewPager.currentItem = 0
+            // 在桌面内按 home：桌面(1) <-> 应用第一页(2)；负一屏(0)按 home 回桌面(1)
+            if (binding.viewPager.currentItem == 1) binding.viewPager.currentItem = 2
+            else binding.viewPager.currentItem = 1
             android.util.Log.d("NUI.Main", "onNewIntent: home-in-desktop -> page ${binding.viewPager.currentItem}")
         }
     }
@@ -558,6 +786,8 @@ class MainActivity : AppCompatActivity() {
         // 回到前台时主动向高德查询导航状态，校准导航卡显示（防止被动广播错过）
         navInfoHost?.queryNavState()
         navInfoHost?.queryDayNight()
+        // 回前台重启闲置自动进入负一屏计时
+        setupAutoMinusTimer()
         // 设置页可能改了 Dock 形态/图标比例，返回时刷新
         applyDockStyle()
         renderDock()
@@ -566,13 +796,16 @@ class MainActivity : AppCompatActivity() {
         binding.root.invalidate()
         if (::mapHost.isInitialized) {
             mapHost.onResume()
-            // 根据当前 page 决定悬浮地图显示状态
-            if (binding.viewPager.currentItem == 0) mapHost.resumeFloat()
+            // 根据当前 page 决定悬浮地图显示状态（仅桌面显示浮窗）
+            if (binding.viewPager.currentItem == 1) mapHost.resumeFloat()
             else mapHost.closeFloat()
         }
         if (::musicHost.isInitialized) {
             musicHost.refresh()
-            musicHost.setFloatAreaVisible(true)
+            // 悬浮歌词：负一屏(0)/桌面(1)显示，应用列表隐藏
+            musicHost.setFloatAreaVisible(
+                binding.viewPager.currentItem == 0 || binding.viewPager.currentItem == 1
+            )
         }
         // 设置页可能改了应用列表图标比例，返回时刷新：仅重绑应用页（桌面页 ViewHolder 复用）
         // 延后一帧执行：返回时 ViewPager2 正在 relayout，立即 notify 会在页面宽度未就绪时
@@ -582,7 +815,7 @@ class MainActivity : AppCompatActivity() {
                 binding.viewPager.post {
                     if (isDestroyed || isFinishing) return@post
                     (binding.viewPager.adapter as? PagerAdapter)?.let { p ->
-                        if (p.appPages.isNotEmpty()) p.notifyItemRangeChanged(1, p.appPages.size)
+                        if (p.appPages.isNotEmpty()) p.notifyItemRangeChanged(2, p.appPages.size)
                     }
                 }
             }
@@ -619,6 +852,8 @@ class MainActivity : AppCompatActivity() {
             mapHost.cancelPendingShow()
         }
         if (::musicHost.isInitialized) musicHost.setFloatAreaVisible(false)
+        // 退到后台暂停闲置计时（回前台 onResume 重启）
+        autoMinusHandler.removeCallbacksAndMessages(null)
     }
 
     override fun onDestroy() {
@@ -634,18 +869,19 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupDock() {
         binding.dockApps.setOnClickListener {
-            if (binding.viewPager.currentItem == 0) binding.viewPager.currentItem = 1
-            else binding.viewPager.currentItem = 0
+            // 桌面(1) -> 应用第一页(2)；其它页（含负一屏）-> 回桌面(1)
+            if (binding.viewPager.currentItem == 1) binding.viewPager.currentItem = 2
+            else binding.viewPager.currentItem = 1
         }
         binding.dockApps.setOnLongClickListener {
-            if (binding.viewPager.currentItem == 0 && ::mapHost.isInitialized) {
+            if (binding.viewPager.currentItem == 1 && ::mapHost.isInitialized) {
                 mapHost.toggleAdjust()
             }
             true
         }
         binding.dockBar.isClickable = true
         binding.dockBar.setOnLongClickListener {
-            if (binding.viewPager.currentItem == 0 && ::mapHost.isInitialized) {
+            if (binding.viewPager.currentItem == 1 && ::mapHost.isInitialized) {
                 mapHost.toggleAdjust()
             }
             true
@@ -677,6 +913,7 @@ class MainActivity : AppCompatActivity() {
 
         // Dock 栏：半透明背景 + 时钟/图标色（圆角随 Dock 形态：贴边矩形 / 悬浮圆角）
         applyDockVisual(dark)
+        applyMinusTheme()
         binding.dockClock.setTextColor(p.textPrimary)
         // dockApps 用现代N标彩色图标，不做 tint 染色
         val itemBg = RippleDrawable(
@@ -867,7 +1104,7 @@ class MainActivity : AppCompatActivity() {
                 renderDock()
                 NuiToast.show(this, "已添加 ${app.label}", Toast.LENGTH_SHORT)
             },
-            onDismiss = { if (::mapHost.isInitialized && binding.viewPager.currentItem == 0) mapHost.showFloat() },
+            onDismiss = { if (::mapHost.isInitialized && binding.viewPager.currentItem == 1) mapHost.showFloat() },
         )
     }
 
@@ -884,7 +1121,7 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("取消", null)
             .create()
-        d.setOnDismissListener { if (::mapHost.isInitialized && binding.viewPager.currentItem == 0) mapHost.showFloat() }
+        d.setOnDismissListener { if (::mapHost.isInitialized && binding.viewPager.currentItem == 1) mapHost.showFloat() }
         d.show()
         return true
     }
@@ -958,13 +1195,17 @@ class MainActivity : AppCompatActivity() {
     private fun setupNav() {
         navHost = NavHost(this, desktopBtnNavHome!!, desktopBtnNavCompany!!)
         navHost.onHideFloat = { mapHost.closeFloat() }
-        navHost.onShowFloat = { if (binding.viewPager.currentItem == 0) mapHost.showFloat() }
+        navHost.onShowFloat = { if (binding.viewPager.currentItem == 1) mapHost.showFloat() }
         navHost.start()
         // 导航信息显示：导航中右上角按钮区切换为导航卡（转向/距离/时间/道路/速度）
         navInfoHost = com.nui.launcher.nav.NavInfoHost(
             this,
             desktopNavInfoOverlay!!,
         )
+        // 负一屏视图可能已先绑定（ViewPager2 预加载）：交给 host 在 start 时一并附加
+        navInfoHost?.pendingMinusRoot = minusNavOverlay
+        // 导航/巡航激活时重置闲置计时（发导航、巡航开始不算闲置）
+        navInfoHost?.onNavActive = { onUserActive() }
         navInfoHost?.start()
         bindNavFavoriteClick()
     }
@@ -989,10 +1230,26 @@ class MainActivity : AppCompatActivity() {
     private fun setupMusic() {
         musicHost = MusicHost(this, desktopMusicContainer!!)
         musicHost.onHideFloat = { mapHost.closeFloat() }
-        musicHost.onShowFloat = { if (binding.viewPager.currentItem == 0) mapHost.showFloat() }
+        musicHost.onShowFloat = { if (binding.viewPager.currentItem == 1) mapHost.showFloat() }
         musicHost.floatBoundsProvider = {
             if (::mapHost.isInitialized) mapHost.floatBounds() else null
         }
+        // 负一屏横条音乐区：同步歌名/歌手/封面/播放状态
+        musicHost.onMinusMusic = { title, artist, cover, playing ->
+            minusSong?.text = title.ifEmpty { "点击打开音乐" }
+            minusArtist?.text = artist
+            if (cover != null) {
+                minusCover?.setImageBitmap(cover)
+                minusCover?.visibility = View.VISIBLE
+            } else {
+                minusCover?.setImageDrawable(null)
+                minusCover?.visibility = View.GONE
+            }
+            minusBtnPlay?.setImageResource(
+                if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+            )
+        }
+        // 负一屏横条歌词：当前行（下一行并入）
         musicHost.start()
     }
 
@@ -1000,7 +1257,16 @@ class MainActivity : AppCompatActivity() {
         wallpaper = WallpaperController(this, binding.root)
         wallpaper.applyOnStart()
         wallpaper.onHideFloat = { mapHost.closeFloat() }
-        wallpaper.onShowFloat = { if (binding.viewPager.currentItem == 0) mapHost.showFloat() }
+        wallpaper.onShowFloat = { if (binding.viewPager.currentItem == 1) mapHost.showFloat() }
+        // 负一屏壁纸选完图片/视频后重新应用，并刷新设置面板状态
+        wallpaper.onMinusWallpaperChanged = {
+            applyMinusWallpaper()
+            settingsDialog?.refreshWallpaper()
+        }
+        // 负一屏 ViewHolder 在 wallpaper 初始化前就被 ViewPager2 预加载绑定，
+        // 当时 applyMinusWallpaper 因 lateinit 未就绪直接 return，这里 wallpaper 就绪后补应用一次
+        applyMinusWallpaper()
+        applyMinusTheme()
     }
 
     private fun loadAppGrid() {
@@ -1059,6 +1325,16 @@ class MainActivity : AppCompatActivity() {
                     val dlg = com.nui.launcher.settings.SettingsDialog(this)
                     dlg.wallpaperHasCustom = { slot -> wallpaper.hasCustom(slot) }
                     dlg.onWallpaperPick = { slot -> wallpaper.showMenu(slot) }
+                    dlg.onMinusWallpaperPick = { wallpaper.showMinusMenu() }
+                    dlg.minusWallpaperStatus = {
+                        when (wallpaper.minusWallpaperMode()) {
+                            com.nui.launcher.WallpaperController.MinusMode.IMAGE -> "静态图片"
+                            com.nui.launcher.WallpaperController.MinusMode.VIDEO -> "动态视频"
+                            else -> "跟随桌面"
+                        }
+                    }
+                    // 负一屏偏好（大号时钟 / 闲置自动进入 / 等待时间）变化即时生效
+                    dlg.onMinusPrefsChanged = { applyMinusPrefs() }
                     // 设置面板关闭时刷新桌面主题/dock/音乐栏/应用列表（Dialog 关闭不触发 onResume）
                     dlg.setOnDismissListener {
                         settingsDialog = null
@@ -1074,6 +1350,8 @@ class MainActivity : AppCompatActivity() {
                     }
                     settingsDialog = dlg
                     dlg.show()
+                    // 回调在构造后才赋值，构造内的首次 refreshWallpaper 拿不到负一屏状态，show 后补刷一次
+                    dlg.refreshWallpaper()
                 },
             )
             val allApps = listOf(settingsEntry) + apps
@@ -1088,14 +1366,14 @@ class MainActivity : AppCompatActivity() {
                 pa.appRowHeightDp = rowHeightDp
                 when {
                     oldAppCount < pages.size ->
-                        pa.notifyItemRangeInserted(1 + oldAppCount, pages.size - oldAppCount)
+                        pa.notifyItemRangeInserted(2 + oldAppCount, pages.size - oldAppCount)
                     oldAppCount > pages.size ->
-                        pa.notifyItemRangeRemoved(1 + pages.size, oldAppCount - pages.size)
+                        pa.notifyItemRangeRemoved(2 + pages.size, oldAppCount - pages.size)
                 }
                 if (minOf(oldAppCount, pages.size) > 0) {
-                    pa.notifyItemRangeChanged(1, minOf(oldAppCount, pages.size))
+                    pa.notifyItemRangeChanged(2, minOf(oldAppCount, pages.size))
                 }
-                setupPageIndicator(1 + pages.size)
+                setupPageIndicator(2 + pages.size)
             }
         }.start()
     }
@@ -1197,10 +1475,10 @@ class MainActivity : AppCompatActivity() {
             ?.filter { it.onClick == null }
             ?: emptyList()
 
-    /** 当前所在应用页（page0 为桌面，故减 1）内可被勾选/隐藏的应用，用于"本页全选" */
+    /** 当前所在应用页（负一屏=0/桌面=1，故应用页从 2 起，减 2）内可被勾选/隐藏的应用，用于"本页全选" */
     private fun currentPageSelectable(): List<AppModel> {
         val pa = binding.viewPager.adapter as? PagerAdapter ?: return emptyList()
-        val idx = binding.viewPager.currentItem - 1
+        val idx = binding.viewPager.currentItem - 2
         if (idx < 0 || idx >= pa.appPages.size) return emptyList()
         return pa.appPages[idx].filter { it.onClick == null }
     }

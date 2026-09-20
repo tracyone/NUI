@@ -21,6 +21,9 @@ object UiTheme {
     private const val KEY_MAP_LAUNCH_DELAY_SEC = "map_launch_delay_sec"
     private const val KEY_MAP_RETURN_DELAY_SEC = "map_return_delay_sec"
     private const val KEY_UI_DPI = "ui_dpi"
+    private const val KEY_MINUS_BIG_CLOCK = "minus_big_clock"
+    private const val KEY_AUTO_MINUS = "auto_minus"
+    private const val KEY_AUTO_MINUS_MINUTES = "auto_minus_minutes"
 
     /** 界面 DPI（应用内覆盖，0=跟随系统）。车机 ROM 常报 240dpi 导致 NUI 界面文字偏大/放不下，
      *  通过降低 dpi 让所有 dp/sp 按更小比例渲染，等效"显示缩放"，从根本上解决文字过大。 */
@@ -30,6 +33,33 @@ object UiTheme {
     fun setUiDpi(ctx: Context, dpi: Int) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putInt(KEY_UI_DPI, dpi.coerceIn(0, 360)).apply()
+    }
+
+    /** 负一屏是否在底栏之外显示大号时钟（时间+日期）。默认关闭 */
+    fun minusBigClock(ctx: Context): Boolean =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_MINUS_BIG_CLOCK, false)
+
+    fun setMinusBigClock(ctx: Context, on: Boolean) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_MINUS_BIG_CLOCK, on).apply()
+    }
+
+    /** 闲置一段时间后是否自动进入负一屏（类似屏保）。默认关闭 */
+    fun autoMinus(ctx: Context): Boolean =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_AUTO_MINUS, false)
+
+    fun setAutoMinus(ctx: Context, on: Boolean) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_AUTO_MINUS, on).apply()
+    }
+
+    /** 自动进入负一屏的闲置等待分钟数（1~60，默认 3 分钟） */
+    fun autoMinusMinutes(ctx: Context): Int =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_AUTO_MINUS_MINUTES, 3)
+
+    fun setAutoMinusMinutes(ctx: Context, minutes: Int) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putInt(KEY_AUTO_MINUS_MINUTES, minutes.coerceIn(1, 60)).apply()
     }
 
     /**

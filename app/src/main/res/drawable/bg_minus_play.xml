@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 负一屏音乐播放/暂停键：绿色实心圆（与桌面音乐卡 playBtn 一致，Apple Music 风格），白色图标由代码 tint -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="#33FFFFFF">
+    <item android:id="@android:id/mask">
+        <shape android:shape="oval">
+            <solid android:color="@android:color/white" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="#34C759" />
+        </shape>
+    </item>
+</ripple>

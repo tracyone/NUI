@@ -1,0 +1,250 @@
+<?xml version="1.0"?>
+<!--
+  负一屏（最左一页，position 0）：
+  - 底层全屏壁纸：静态图（ivMinusWallpaper centerCrop）或动态视频（VideoWallpaperView 静音循环 centerCrop 铺满，无黑边）。
+  - 上层信息（尽量透明、少占壁纸）：
+      · 可选大号时钟（minusBigClock，底栏之外、屏幕上方居中，设置开关控制）；
+      · 导航/巡航信息卡（navInfoOverlayMinus，复用 view_nav_info，仅高德导航/巡航中出现，悬浮于横条上方居中）；
+      · 底部一条扁平横条（minusBar，背景跟随 dock 深浅色）：
+          左=回家/公司/收藏三颗纯彩色圆（与 page0 同色，扁横条内只显圆不显文字）；
+          中=音乐卡（封面+歌名歌手+上一首/绿色播放键/下一首，与桌面音乐卡控件一致）；
+          右=时间+日期（不显示天气，天气请看桌面/大时钟）。
+  - 不显示歌词（桌面已有悬浮歌词）。
+  - 本页无 dock 栏（由 MainActivity 在 position==0 时隐藏 dockBar）。
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- 静态壁纸（IMAGE 模式显示，centerCrop 铺满无黑边；FOLLOW/VIDEO 模式隐藏） -->
+    <ImageView
+        android:id="@+id/ivMinusWallpaper"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:visibility="gone"
+        tools:visibility="gone" />
+
+    <!-- 动态视频壁纸（VIDEO 模式显示；centerCrop 铺满无黑边） -->
+    <com.nui.launcher.VideoWallpaperView
+        android:id="@+id/mvWallpaper"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- 可选大号时钟：底栏之外、屏幕上方居中（默认隐藏，设置开关控制）。
+         白色字+黑色阴影，保证在任意壁纸上清晰。 -->
+    <LinearLayout
+        android:id="@+id/minusBigClock"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="110dp"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:visibility="gone"
+        tools:visibility="gone">
+
+        <TextClock
+            android:id="@+id/minusBigTime"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:format12Hour="HH:mm"
+            android:format24Hour="HH:mm"
+            android:textColor="#99FFFFFF"
+            android:textSize="120sp"
+            android:textStyle="bold"
+            android:shadowColor="#4D000000"
+            android:shadowRadius="22"
+            android:shadowDy="4" />
+
+        <TextClock
+            android:id="@+id/minusBigDate"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:format12Hour="M月d日 EEEE"
+            android:format24Hour="M月d日 EEEE"
+            android:textColor="#CCFFFFFF"
+            android:textSize="30sp"
+            android:shadowColor="#4D000000"
+            android:shadowRadius="12"
+            android:shadowDy="2" />
+    </LinearLayout>
+
+    <!-- 导航/巡航信息卡（复用 view_nav_info；wrap_content 居中悬浮于横条上方，仅导航/巡航中显示） -->
+    <include
+        android:id="@+id/navInfoOverlayMinus"
+        layout="@layout/view_nav_info"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="96dp" />
+
+    <!-- 底部扁平横条：背景色/字体色由代码按外观设置（与 dock 一致） -->
+    <LinearLayout
+        android:id="@+id/minusBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="18dp"
+        android:paddingEnd="18dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp">
+
+        <!-- 左：回家/公司/收藏三颗纯彩色圆（扁横条内不显文字，颜色与 page0 一致） -->
+        <LinearLayout
+            android:id="@+id/minusShortcuts"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginEnd="14dp">
+
+            <ImageView
+                android:id="@+id/shortcutNavHome"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginEnd="8dp"
+                android:padding="9dp"
+                android:background="@drawable/bg_nav_home_circle"
+                android:contentDescription="回家"
+                android:scaleType="centerInside"
+                android:tint="#FFFFFF"
+                android:src="@drawable/ic_nav_home" />
+
+            <ImageView
+                android:id="@+id/shortcutNavCompany"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginEnd="8dp"
+                android:padding="9dp"
+                android:background="@drawable/bg_nav_company_circle"
+                android:contentDescription="公司"
+                android:scaleType="centerInside"
+                android:tint="#FFFFFF"
+                android:src="@drawable/ic_nav_company" />
+
+            <ImageView
+                android:id="@+id/shortcutNavFavorite"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:padding="9dp"
+                android:background="@drawable/bg_nav_favorite_circle"
+                android:contentDescription="收藏"
+                android:scaleType="centerInside"
+                android:tint="#FFFFFF"
+                android:src="@drawable/ic_nav_favorite" />
+        </LinearLayout>
+
+        <!-- 中：音乐卡（小封面 + 歌名歌手 + 上一首/绿色播放键/下一首，与桌面音乐卡一致） -->
+        <LinearLayout
+            android:id="@+id/minusMusicArea"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginEnd="14dp">
+
+            <ImageView
+                android:id="@+id/minusCover"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginEnd="10dp"
+                android:background="#22FFFFFF"
+                android:scaleType="centerCrop"
+                android:contentDescription="封面" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:layout_marginEnd="8dp">
+
+                <TextView
+                    android:id="@+id/minusSong"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:textSize="15sp"
+                    tools:text="歌曲名" />
+
+                <TextView
+                    android:id="@+id/minusArtist"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:textSize="12sp"
+                    tools:text="歌手" />
+            </LinearLayout>
+
+            <ImageView
+                android:id="@+id/btnMinusPrev"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp"
+                android:padding="9dp"
+                android:background="@drawable/bg_minus_ctrl"
+                android:contentDescription="上一首"
+                android:scaleType="centerInside"
+                android:src="@android:drawable/ic_media_previous" />
+
+            <ImageView
+                android:id="@+id/btnMinusPlay"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp"
+                android:padding="9dp"
+                android:background="@drawable/bg_minus_play"
+                android:contentDescription="播放/暂停"
+                android:scaleType="centerInside"
+                android:src="@android:drawable/ic_media_play" />
+
+            <ImageView
+                android:id="@+id/btnMinusNext"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp"
+                android:padding="9dp"
+                android:background="@drawable/bg_minus_ctrl"
+                android:contentDescription="下一首"
+                android:scaleType="centerInside"
+                android:src="@android:drawable/ic_media_next" />
+        </LinearLayout>
+
+        <!-- 右：时间 + 日期（扁平横条内不显示天气） -->
+        <LinearLayout
+            android:id="@+id/minusClockArea"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="end">
+
+            <TextClock
+                android:id="@+id/minusTime"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:format12Hour="HH:mm"
+                android:format24Hour="HH:mm"
+                android:textSize="26sp"
+                android:textStyle="bold" />
+
+            <TextClock
+                android:id="@+id/minusDate"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:format12Hour="M月d日 EEE"
+                android:format24Hour="M月d日 EEE"
+                android:textSize="12sp" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

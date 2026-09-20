@@ -25,7 +25,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * 导航/巡航信息显示（右上角"回家/公司/收藏"按钮区动态变化）。
+ * 导航/巡航信息显示。同一时刻驱动两套卡片：
+ *  - page0（桌面右侧面板，[Refs.page]=1）：导航/巡航中替换"回家/公司/收藏"按钮区；
+ *  - 负一屏（[Refs.page]=0）：悬浮于底部横条上方居中，复用同一份 view_nav_info 布局。
+ * 两套卡片内部 view id 相同，各自在容器内 findViewById，互不冲突；数据/模式/语音只有一份。
  *
  * 监听高德车机版广播：
  * - 10019：导航/巡航状态（权威判据）
@@ -66,9 +69,34 @@ class NavInfoHost(
         private const val DAY_NIGHT_POLL_MS = 60_000L
     }
 
+    /** 一套导航/巡航卡的视图引用（page0 或负一屏各一份）。[page] 为该卡片所在 ViewPager2 页索引。 */
+    private class Refs(val root: View, val page: Int) {
+        val turn: ImageView? = root.findViewById(R.id.navInfoTurn)
+        val dest: TextView? = root.findViewById(R.id.navInfoDest)
+        val eta: TextView? = root.findViewById(R.id.navInfoEta)
+        val camera: ViewGroup? = root.findViewById(R.id.navInfoCamera)
+        val exit: TextView? = root.findViewById(R.id.navInfoExit)
+        val tmc: TextView? = root.findViewById(R.id.navInfoTmc)
+        val speed: TextView? = root.findViewById(R.id.navSpeedCircle)
+        val limit: TextView? = root.findViewById(R.id.navLimitCircle)
+        val navBlock: View? = root.findViewById(R.id.navInfoNavBlock)
+        val cruiseBlock: View? = root.findViewById(R.id.navInfoCruiseBlock)
+        val cruiseSpeed: TextView? = root.findViewById(R.id.cruiseSpeed)
+        val cruiseLimit: TextView? = root.findViewById(R.id.cruiseLimit)
+        val cruiseCamOther: ViewGroup? = root.findViewById(R.id.cruiseCamOther)
+        val cruiseLight: LinearLayout? = root.findViewById(R.id.cruiseLight)
+        // 天气文字仅 page0 右侧面板存在（导航时占用其位置）；负一屏树内无此 id → null
+        val weather: View? = (root.parent as? ViewGroup)?.findViewById(R.id.weatherText)
+    }
+
+    /** 当前已附加的全部卡片（page0 必在；负一屏由 [attachMinus] 在视图绑定时加入） */
+    private val refs = ArrayList<Refs>()
+    private var minusAttachedRoot: View? = null
+
     // 模式：NONE=普通桌面 / NAVI=导航 / CRUISE=巡航
     private enum class Mode { NONE, NAVI, CRUISE }
     private var mode = Mode.NONE
+    private var currentPage = 1   // 启动后默认落在桌面页（page=1）
 
     // ==================== 疲劳驾驶提醒 ====================
     // 进入导航/巡航（驾驶态）开始计时：连续 90 分钟语音提醒注意休息，
@@ -91,28 +119,8 @@ class NavInfoHost(
         scheduleFatigueRemind()
     }
 
-    // 导航卡元素
-    private var turnView: ImageView? = null
-    private var destView: TextView? = null
-    private var etaView: TextView? = null
-    private var cameraView: ViewGroup? = null
-    private var exitView: TextView? = null
-    private var tmcView: TextView? = null
-    private var speedView: TextView? = null        // 导航卡速度（黑底蓝圈）
-    private var navLimitCircleView: TextView? = null // 导航卡限速（红圈）
-    private var navBlock: View? = null
-
-    // 巡航卡元素
-    private var cruiseBlock: View? = null
-    private var cruiseSpeedView: TextView? = null
-    private var cruiseLimitView: TextView? = null
-    private var cruiseCamOtherView: ViewGroup? = null
-    private var cruiseLightView: LinearLayout? = null   // 红绿灯容器（每方向一个胶囊，动态生成）
-
-    private var weatherView: View? = null
-
-    // 三按钮（回家/公司/收藏）：从 overlay 父容器动态查找——page0 由 ViewPager2 管理，
-    // ViewHolder 重建后旧引用会失效，必须每次从当前视图树获取
+    // 三按钮（回家/公司/收藏）：只作用于 page0。从 overlay 父容器动态查找——page0 由 ViewPager2
+    // 管理，ViewHolder 重建后旧引用会失效，必须每次从当前视图树获取
     private fun navButton(id: Int): View? = (overlay.parent as? ViewGroup)?.findViewById(id)
     private val navButtonIds = listOf(R.id.btnNavHome, R.id.btnNavCompany, R.id.btnNavFavorite)
 
@@ -145,22 +153,10 @@ class NavInfoHost(
     }
 
     fun start() {
-        turnView = overlay.findViewById(R.id.navInfoTurn)
-        destView = overlay.findViewById(R.id.navInfoDest)
-        etaView = overlay.findViewById(R.id.navInfoEta)
-        cameraView = overlay.findViewById(R.id.navInfoCamera)
-        exitView = overlay.findViewById(R.id.navInfoExit)
-        tmcView = overlay.findViewById(R.id.navInfoTmc)
-        speedView = overlay.findViewById(R.id.navSpeedCircle)
-        navLimitCircleView = overlay.findViewById(R.id.navLimitCircle)
-        navBlock = overlay.findViewById(R.id.navInfoNavBlock)
-        cruiseBlock = overlay.findViewById(R.id.navInfoCruiseBlock)
-        cruiseSpeedView = overlay.findViewById(R.id.cruiseSpeed)
-        cruiseLimitView = overlay.findViewById(R.id.cruiseLimit)
-        cruiseCamOtherView = overlay.findViewById(R.id.cruiseCamOther)
-        cruiseLightView = overlay.findViewById(R.id.cruiseLight) as LinearLayout
-        // 天气文字在右侧面板（导航卡的兄弟节点）：导航时占掉天气区域的位置
-        weatherView = (overlay.parent as? ViewGroup)?.findViewById(R.id.weatherText)
+        refs.clear()
+        refs.add(Refs(overlay, 1))
+        // 负一屏可能已先于本方法完成绑定：若 MainActivity 已缓存其根视图则立即附加
+        pendingMinusRoot?.let { attachMinus(it) }
         tts = NuiTts(context)
         context.registerReceiver(receiver, IntentFilter(ACTION_SEND))
         val h = android.os.Handler(android.os.Looper.getMainLooper())
@@ -173,7 +169,41 @@ class NavInfoHost(
         // 被动广播（10019 37/38）可能漏发或时机错过（如启动时高德未运行），周期性主动查询保证
         // FOLLOW_MAP 持续跟随。13030 查询轻量，60s 一次无压力。
         h.postDelayed(dayNightPoller, DAY_NIGHT_POLL_MS)
-        Log.i(TAG, "导航/巡航信息显示已启动")
+        Log.i(TAG, "导航/巡航信息显示已启动（卡片数=${refs.size}）")
+    }
+
+    /** start() 前负一屏已绑定时，由 MainActivity 暂存其根视图，start() 内据此补附加 */
+    var pendingMinusRoot: View? = null
+    /** 导航/巡航激活时回调（用于重置闲置计时等） */
+    var onNavActive: (() -> Unit)? = null
+
+    /** 附加负一屏卡片（视图在 ViewPager2 中绑定/重建时调用，幂等） */
+    fun attachMinus(root: View?) {
+        if (root == null) return
+        if (minusAttachedRoot === root) {
+            syncRefsState()
+            return
+        }
+        // ViewHolder 重建：移除旧的负一屏 Refs（page=0），加入新的
+        refs.removeAll { it.page == 0 }
+        refs.add(Refs(root, 0))
+        minusAttachedRoot = root
+        pendingMinusRoot = root
+        applyTheme()
+        syncRefsState()
+        Log.i(TAG, "负一屏导航/巡航卡已附加（卡片数=${refs.size}）")
+    }
+
+    /** 把当前模式/可见性/数据块状态同步到所有卡片（附加新卡片或重建后调用） */
+    private fun syncRefsState() {
+        refs.forEach { r ->
+            r.turn?.visibility = View.GONE
+            r.navBlock?.visibility = if (mode == Mode.NAVI) View.VISIBLE else View.GONE
+            r.cruiseBlock?.visibility = if (mode == Mode.CRUISE) View.VISIBLE else View.GONE
+            if (mode == Mode.NONE) r.cruiseLight?.visibility = View.GONE
+            r.root.visibility =
+                if (mode != Mode.NONE && currentPage == r.page) View.VISIBLE else View.GONE
+        }
     }
 
     /** 周期查询高德昼夜外观（13030），保证 FOLLOW_MAP 持续跟随高德外观变化 */
@@ -187,7 +217,7 @@ class NavInfoHost(
 
     /** 高德巡航播报临时静音：10047 EXTRA_CASUAL_MUTE（进巡航静音，退巡航/导航恢复）。
      *  对齐实测用法（CSDN/am 命令）：显式指定 AmapAutoBroadcastReceiver、只带 EXTRA_CASUAL_MUTE；
-     *  部分高德版本 receiver 类名可能不同，隐式 action 版本兜底双发（静音幂等，重复无害）。 */
+     * 部分高德版本 receiver 类名可能不同，隐式 action 版本兜底双发（静音幂等，重复无害）。 */
     private fun setAmapCruiseMute(mute: Boolean) {
         val v = if (mute) 1 else 0
         val intents = listOf(
@@ -231,7 +261,7 @@ class NavInfoHost(
 
     /** 外观切换时调用：导航卡背景是深蓝黑实色卡片，内部文字固定白色/浅蓝，不随外观 */
     fun applyTheme() {
-        turnView?.setColorFilter(0xFFFFFFFF.toInt(), android.graphics.PorterDuff.Mode.SRC_IN)
+        refs.forEach { it.turn?.setColorFilter(0xFFFFFFFF.toInt(), android.graphics.PorterDuff.Mode.SRC_IN) }
         Log.i(TAG, "导航/巡航卡固定深色底白字（不随外观）")
     }
 
@@ -265,19 +295,14 @@ class NavInfoHost(
         }
     }
 
-    // 桌面页可见性：切到应用列表页（page1+）隐藏悬浮信息卡，回 page0 恢复。
-    // 与广播驱动的 setMode 叠加：两者都满足才显示 overlay。
-    private var pageVisible = true
-
-    /** 页面切换回调：0=桌面页（显示导航/巡航信息卡），其它页（应用列表等）隐藏 */
+    /** 页面切换回调：0=负一屏，1=桌面页，其它=应用列表页。每套卡片只在自己所在页可见 */
     fun onPageChanged(page: Int) {
-        pageVisible = page == 0
-        applyVisibility()
-        Log.i(TAG, "onPageChanged page=$page pageVisible=$pageVisible overlay=vis${overlay.visibility}")
-    }
-
-    private fun applyVisibility() {
-        overlay.visibility = if (mode != Mode.NONE && pageVisible) View.VISIBLE else View.GONE
+        currentPage = page
+        refs.forEach { r ->
+            r.root.visibility =
+                if (mode != Mode.NONE && page == r.page) View.VISIBLE else View.GONE
+        }
+        Log.i(TAG, "onPageChanged page=$page 卡片=${refs.joinToString { "p${it.page}=vis${it.root.visibility}" }}")
     }
 
     private fun setMode(newMode: Mode) {
@@ -289,7 +314,7 @@ class NavInfoHost(
         if (old == Mode.CRUISE && newMode != Mode.CRUISE) setAmapCruiseMute(false)
         Log.i(TAG, "模式: ${old.name} -> ${newMode.name}")
         val active = newMode != Mode.NONE
-        applyVisibility()
+        if (active) onNavActive?.invoke()  // 导航/巡航激活视为用户活动，重置闲置计时
         // 疲劳提醒：进入驾驶态开始计时，退出驾驶态停止/重置
         val wasDriving = old == Mode.NAVI || old == Mode.CRUISE
         val nowDriving = newMode == Mode.NAVI || newMode == Mode.CRUISE
@@ -300,27 +325,25 @@ class NavInfoHost(
         } else if (wasDriving && !nowDriving) {
             stopFatigueRemind()
         }
-        // 导航：按钮让位给导航卡（全屏信息）；巡航：保留三按钮（回家/公司/收藏，便于操作），巡航卡显示在其下方
+        // page0：导航时三按钮让位给导航卡（全屏信息）；巡航保留三按钮，巡航卡显示在其下方。
+        // 负一屏横条按钮不与卡片抢位置，保持不变。
         val curButtons = navButtonIds.mapNotNull { navButton(it) }
         curButtons.forEach { it.visibility = if (newMode == Mode.NAVI) View.GONE else View.VISIBLE }
-        val row = navButton(R.id.btnNavHome)?.parent
-        val rowInfo = if (row is View) "vis=${row.visibility}/h=${row.height}" else "parent=${row?.javaClass?.simpleName}"
-        val b0 = curButtons.firstOrNull()
-        val loc = if (b0 != null && b0.isAttachedToWindow) {
-            val p = IntArray(2); b0.getLocationOnScreen(p); "xy=${p[0]},${p[1]}"
-        } else { "attached=${b0?.isAttachedToWindow}" }
-        Log.d(TAG, "setMode=$newMode 按钮=${curButtons.joinToString { "vis${it.visibility}/h${it.height}" }} $loc navRow=$rowInfo overlay=vis${overlay.visibility}/h${overlay.height}")
-        // 导航/巡航内容块互斥
-        navBlock?.visibility = if (newMode == Mode.NAVI) View.VISIBLE else View.GONE
-        cruiseBlock?.visibility = if (newMode == Mode.CRUISE) View.VISIBLE else View.GONE
+        // 两套卡片：导航/巡航内容块互斥 + 可见性跟随当前页
+        refs.forEach { r ->
+            r.navBlock?.visibility = if (newMode == Mode.NAVI) View.VISIBLE else View.GONE
+            r.cruiseBlock?.visibility = if (newMode == Mode.CRUISE) View.VISIBLE else View.GONE
+            r.root.visibility =
+                if (active && currentPage == r.page) View.VISIBLE else View.GONE
+            // 占用天气区域（仅 page0 有 weather）：隐藏天气文字；退出恢复
+            r.weather?.visibility = if (active) View.GONE else View.VISIBLE
+            if (!active) r.cruiseLight?.visibility = View.GONE
+        }
         if (!active) {
             overspeedAlerted = false
-            cruiseLightView?.visibility = View.GONE
             stopDataWatchdog()
         }
         if (active) resetDataWatchdog() else stopDataWatchdog()
-        // 占用天气区域：隐藏天气文字；退出恢复
-        weatherView?.visibility = if (active) View.GONE else View.VISIBLE
     }
 
     /** MainActivity 更新天气时调用：导航/巡航中返回 true 则不显示天气文字（区域被占用） */
@@ -374,7 +397,6 @@ class NavInfoHost(
         // - ICON=0：巡航数据。非导航模式下进入/更新巡航；导航模式下忽略巡航数据（不打断导航，
         //   导航活跃只由 ICON≠0 定义，导航结束由 STATE=9 或导航看门狗处理）
         // - 巡航结束：10019 STATE=25
-        // （46/47 实车不可靠，已弃用；协议文档 TYPE 字段实测高德不带，已弃用）
         var icon = intent.getIntExtra("NEW_ICON", 0)
         if (icon == 0) icon = intent.getIntExtra("ICON", 0)
 
@@ -388,8 +410,10 @@ class NavInfoHost(
             when (mode) {
                 Mode.NAVI -> {
                     // 导航中忽略巡航广播（双高德共存时不打断导航）；仅更新速度/限速/电子眼供导航卡
-                    updateCamera(intent, cameraView)
-                    renderNavSpeed(speedView, curSpeed, limitedSpeed)
+                    refs.forEach { r ->
+                        updateCamera(intent, r.camera)
+                        renderNavSpeed(r, curSpeed, limitedSpeed)
+                    }
                     resetDataWatchdog()
                     checkOverspeed()
                 }
@@ -399,7 +423,20 @@ class NavInfoHost(
                         setMode(Mode.CRUISE)
                         Log.i(TAG, "巡航进入: ICON=0")
                     }
-                    updateCruise(intent)
+                    refs.forEach { updateCruise(it, intent) }
+                    // 限速摄像头语音（全局只播一次，与两套卡片渲染解耦）：
+                    // 有距离且 TYPE=0 测速才播报；无距离视为通过（复位 + "登"一声）
+                    val cdRaw = intent.extras?.get("CAMERA_DIST")
+                    val cd = when (cdRaw) {
+                        is Int -> cdRaw
+                        is String -> cdRaw.toIntOrNull() ?: 0
+                        else -> 0
+                    }
+                    val ctype = intent.getIntExtra("CAMERA_TYPE", 0)
+                    when {
+                        cd <= 0 -> checkCameraVoice(0, 0)
+                        ctype == 0 -> checkCameraVoice(cd, intent.getIntExtra("CAMERA_SPEED", 0))
+                    }
                     resetDataWatchdog()
                     checkOverspeed()
                 }
@@ -411,72 +448,78 @@ class NavInfoHost(
         setMode(Mode.NAVI)
         resetDataWatchdog()
 
-        // 导航卡不显示转向图标/信息，速度区尽量放大当前速度
-        turnView?.visibility = View.GONE
-
         // 终点名 + 全程剩余
         val dest = intent.getStringExtra("endPOIName") ?: ""
         val remainTime = intent.getStringExtra("ROUTE_REMAIN_TIME_AUTO") ?: ""
         val remainDis = intent.getStringExtra("ROUTE_REMAIN_DIS_AUTO")
             ?: intent.getStringExtra("ROUTE_REMAIN_DIS") ?: ""
-        destView?.text = dest.ifBlank { "导航中" }
+        val destText = dest.ifBlank { "导航中" }
         // 到达时间 = 当前时间 + 剩余时长（ROUTE_REMAIN_TIME_AUTO 如"50分钟"/"1小时20分钟"）
         val arriveTime = formatArriveTime(parseRemainMinutes(remainTime))
-        val etaParts = listOf(
-            arriveTime,
-            remainDis,
-        ).filter { it.isNotBlank() }
-        etaView?.text = etaParts.joinToString(" · ").ifBlank { "导航中" }
-
-        // 电子眼
-        updateCamera(intent, cameraView)
+        val etaText = listOf(arriveTime, remainDis)
+            .filter { it.isNotBlank() }
+            .joinToString(" · ")
+            .ifBlank { "导航中" }
 
         // 出口
         val exitName = intent.getStringExtra("EXIT_NAME_INFO") ?: ""
         val exitDir = intent.getStringExtra("EXIT_DIRECTION_INFO") ?: ""
-        if (exitName.isNotBlank()) {
-            exitView?.text = "出口 $exitName" + if (exitDir.isNotBlank()) " · $exitDir" else ""
-            exitView?.visibility = View.VISIBLE
-        } else {
-            exitView?.visibility = View.GONE
+        val exitText = if (exitName.isNotBlank()) {
+            "出口 $exitName" + if (exitDir.isNotBlank()) " · $exitDir" else ""
+        } else ""
+
+        refs.forEach { r ->
+            // 导航卡不显示转向图标/信息，速度区尽量放大当前速度
+            r.turn?.visibility = View.GONE
+            r.dest?.text = destText
+            r.eta?.text = etaText
+            // 电子眼
+            updateCamera(intent, r.camera)
+            // 出口
+            if (exitText.isNotBlank()) {
+                r.exit?.text = exitText
+                r.exit?.visibility = View.VISIBLE
+            } else {
+                r.exit?.visibility = View.GONE
+            }
+            // 当前速度大字（含限速小字）
+            renderNavSpeed(r, curSpeed, limitedSpeed)
         }
 
-        // 当前速度大字（含限速小字）
-        renderNavSpeed(speedView, curSpeed, limitedSpeed)
-
-        Log.i(TAG, "导航信息: 转向=$icon 终点=$dest 全程=${etaParts.joinToString("/")} " +
-            "出口=$exitName$exitDir 速度=${curSpeed}km/h 限速=$limitedSpeed")
+        Log.i(TAG, "导航信息: 转向=$icon 终点=$dest 全程=$etaText " +
+            "出口=$exitText 速度=${curSpeed}km/h 限速=$limitedSpeed")
     }
 
     /** 巡航卡更新：当前速度大字 + 最近测速 */
-    private fun updateCruise(intent: Intent) {
+    private fun updateCruise(r: Refs, intent: Intent) {
         val speedText = if (curSpeed > 0) "$curSpeed" else "--"
-        adjustCircleText(cruiseSpeedView, speedText)
+        adjustCircleText(r.cruiseSpeed, speedText)
         // 巡航限速：只认测速点 CAMERA_SPEED（LIMITED_SPEED 巡航下恒 50 不可信）
         val camSpeed = intent.getIntExtra("CAMERA_SPEED", 0)
         if (camSpeed > 0) {
             cruiseLimit = camSpeed
-            cruiseLimitView?.apply {
+            r.cruiseLimit?.apply {
                 adjustCircleText(this, "$cruiseLimit")
                 visibility = View.VISIBLE
             }
         } else {
-            cruiseLimitView?.visibility = View.GONE
+            r.cruiseLimit?.visibility = View.GONE
         }
         // 超速时速度变红 + 限速圈数字变红
         if (cruiseLimit > 0 && curSpeed > cruiseLimit) {
-            cruiseSpeedView?.setTextColor(0xFFFF6B6B.toInt())
-            cruiseLimitView?.setTextColor(0xFFE53935.toInt())
+            r.cruiseSpeed?.setTextColor(0xFFFF6B6B.toInt())
+            r.cruiseLimit?.setTextColor(0xFFE53935.toInt())
         } else {
-            cruiseSpeedView?.setTextColor(0xFFFFFFFF.toInt())
-            cruiseLimitView?.setTextColor(0xFF1C1C1E.toInt())
+            r.cruiseSpeed?.setTextColor(0xFFFFFFFF.toInt())
+            r.cruiseLimit?.setTextColor(0xFF1C1C1E.toInt())
         }
-        updateCruiseCamera(intent)
+        updateCruiseCamera(r, intent)
     }
 
     /** 巡航摄像头：所有类型统一在第二行显示 类型图标 + 距离（限速摄像头用摄像头本身图标）。
      *  第一行只保留 速度圈 + 限速值红圈。 */
-    private fun updateCruiseCamera(intent: Intent) {
+    private fun updateCruiseCamera(r: Refs, intent: Intent) {
+        val view = r.cruiseCamOther ?: return
         val camDistRaw = intent.extras?.get("CAMERA_DIST")
         val cameraDistInt = when (camDistRaw) {
             is Int -> camDistRaw
@@ -486,18 +529,15 @@ class NavInfoHost(
         val cameraDist = if (cameraDistInt > 0) "$cameraDistInt" else ""
         val cameraType = intent.getIntExtra("CAMERA_TYPE", 0)
         if (cameraDist.isNotBlank()) {
-            val icon = cruiseCamOtherView?.findViewById<ImageView>(R.id.cruiseCamOtherIcon)
-            val text = cruiseCamOtherView?.findViewById<TextView>(R.id.cruiseCamOtherText)
+            val icon = view.findViewById<ImageView>(R.id.cruiseCamOtherIcon)
+            val text = view.findViewById<TextView>(R.id.cruiseCamOtherText)
             icon?.setImageResource(cameraIconRes(cameraType))
             text?.text = cameraDist.withSmallUnit()
-            cruiseCamOtherView?.visibility = View.VISIBLE
-            // 限速摄像头语音播报（TYPE=0 测速/限速；TYPE=1 监控不做语音，避免轰炸）
-            if (cameraType == 0) {
-                checkCameraVoice(cameraDistInt, intent.getIntExtra("CAMERA_SPEED", 0))
-            }
+            view.visibility = View.VISIBLE
+            // 限速摄像头语音播报（TYPE=0 测速/限速；TYPE=1 监控不做语音，避免轰炸）。
+            // 语音只播一次（用第一套卡片驱动即可），故放在调用方统一处理。
         } else {
-            cruiseCamOtherView?.visibility = View.GONE
-            checkCameraVoice(0, 0)
+            view.visibility = View.GONE
         }
     }
 
@@ -575,6 +615,7 @@ class NavInfoHost(
 
     /** 电子眼（导航卡）：距离+限速/类型；有则显示黄色警示，无则隐藏 */
     private fun updateCamera(intent: Intent, view: ViewGroup?) {
+        if (view == null) return
         // 兼容两种类型：部分高德版本 CAMERA_DIST 是 int（实测），部分可能是字符串
         val camDistRaw = intent.extras?.get("CAMERA_DIST")
         val cameraDist = when (camDistRaw) {
@@ -584,8 +625,8 @@ class NavInfoHost(
         }
         val cameraSpeed = intent.getIntExtra("CAMERA_SPEED", 0)
         val cameraType = intent.getIntExtra("CAMERA_TYPE", 0)
-        val icon = view?.findViewById<ImageView>(R.id.navInfoCameraIcon)
-        val text = view?.findViewById<TextView>(R.id.navInfoCameraText)
+        val icon = view.findViewById<ImageView>(R.id.navInfoCameraIcon)
+        val text = view.findViewById<TextView>(R.id.navInfoCameraText)
         if (cameraDist.isNotBlank()) {
             // 摄像头类型图标（完整映射对齐 Navi-Link，见 cameraIconRes）
             icon?.setImageResource(cameraIconRes(cameraType))
@@ -598,16 +639,16 @@ class NavInfoHost(
                 }
             }
             text?.text = warn
-            view?.visibility = View.VISIBLE
+            view.visibility = View.VISIBLE
         } else {
-            view?.visibility = View.GONE
+            view.visibility = View.GONE
         }
     }
 
     // ---------- 60073 红绿灯（巡航显示 + 变灯提醒） ----------
 
     /**
-     * 巡航红绿灯：遍历 lightsData 每个方向，动态生成"胶囊"（深蓝圆角背景 +
+     * 巡航红绿灯：两套卡片各自的 cruiseLight 容器内，按方向动态生成"胶囊"（深蓝圆角背景 +
      * 圆形灯(颜色随灯状态) + 圆内白色方向箭头 + 右侧白色倒计时数字），
      * 参考 Navi-Link TrafficLightView 样式，多个方向横排。
      */
@@ -617,18 +658,53 @@ class NavInfoHost(
         val lights = intent.getStringExtra("lightsData")
             ?: intent.getStringExtra("LIGHTS_DATA")
         if (mode == Mode.NAVI || lights.isNullOrBlank()) {
-            if (mode != Mode.NAVI) cruiseLightView?.visibility = View.GONE
+            if (mode != Mode.NAVI) refs.forEach { it.cruiseLight?.visibility = View.GONE }
             return
         }
         if (mode != Mode.CRUISE) setMode(Mode.CRUISE)
         resetDataWatchdog()
-        val container = cruiseLightView ?: return
+        val array: JSONArray
         try {
-            val array = JSONArray(lights)
-            if (array.length() == 0) {
-                container.visibility = View.GONE
-                return
-            }
+            array = JSONArray(lights)
+        } catch (e: Exception) {
+            Log.w(TAG, "解析红绿灯失败: ${e.message}")
+            return
+        }
+        if (array.length() == 0) {
+            refs.forEach { it.cruiseLight?.visibility = View.GONE }
+            return
+        }
+        // 最近（第一个）红灯倒计时，供变灯提醒用
+        var firstRedCountdown = -1
+        for (i in 0 until array.length()) {
+            val obj = array.getJSONObject(i)
+            val status = obj.optString(
+                "trafficLightStatus",
+                obj.optString("status", obj.optString("state", "unknown"))
+            )
+            val countdown = obj.optInt(
+                "redLightCountDownSeconds",
+                obj.optInt("countdown", obj.optInt("countDown",
+                    obj.optInt("remaining_time", -1)))
+            )
+            val isRed = status.contains("red", ignoreCase = true) ||
+                status == "1" || status == "0"
+            if (i == 0 && isRed) firstRedCountdown = countdown
+        }
+        // 两套卡片各自渲染一份相同的红绿灯胶囊
+        refs.forEach { r -> r.cruiseLight?.let { buildCruiseLights(it, array) } }
+
+        // 变灯提醒：巡航中最近红灯倒计时 ≤3s 语音提醒（不设速度条件，高德悬浮窗巡航即有红绿灯）
+        if (firstRedCountdown in 1..3) {
+            val text = if (firstRedCountdown <= 1) "绿灯即将亮起" else "${firstRedCountdown}秒后变绿"
+            tts?.speak(text)
+            Log.i(TAG, "变灯提醒(巡航): $text")
+        }
+    }
+
+    /** 把红绿灯 JSON 数组渲染为一排胶囊到 [container]（每套卡片各调一次） */
+    private fun buildCruiseLights(container: LinearLayout, array: JSONArray) {
+        try {
             container.removeAllViews()
             val dm = context.resources.displayMetrics.density
             fun dp(v: Int): Int = (v * dm + 0.5f).toInt()
@@ -638,8 +714,6 @@ class NavInfoHost(
             val timeSize = if (compact) 18f else 30f
             val padH = if (compact) dp(3) else dp(6)
             val itemMargin = if (compact) dp(3) else dp(8)
-            // 最近（第一个）红灯倒计时，供变灯提醒用
-            var firstRedCountdown = -1
             for (i in 0 until array.length()) {
                 val obj = array.getJSONObject(i)
                 val dir = obj.optString("dir", obj.optString("direction", "路口"))
@@ -659,7 +733,6 @@ class NavInfoHost(
                     status.contains("green", true) -> 0xFF34C759.toInt()
                     else -> 0xFFCC9900.toInt()
                 }
-                if (i == 0 && isRed) firstRedCountdown = countdown
                 // 方向 → 箭头图标（Navi-Link 同款矢量箭头，叠加在圆形灯上）
                 val arrowRes = when {
                     dir.contains("左") -> R.drawable.light_left
@@ -718,15 +791,8 @@ class NavInfoHost(
                 Log.d(TAG, "巡航红绿灯[$i]: dir=$dir status=$status ${countdown}秒 速度=${curSpeed}km/h")
             }
             container.visibility = View.VISIBLE
-
-            // 变灯提醒：巡航中最近红灯倒计时 ≤3s 语音提醒（不设速度条件，高德悬浮窗巡航即有红绿灯）
-            if (firstRedCountdown in 1..3) {
-                val text = if (firstRedCountdown <= 1) "绿灯即将亮起" else "${firstRedCountdown}秒后变绿"
-                tts?.speak(text)
-                Log.i(TAG, "变灯提醒(巡航): $text")
-            }
         } catch (e: Exception) {
-            Log.w(TAG, "解析红绿灯失败: ${e.message}")
+            Log.w(TAG, "构建红绿灯胶囊失败: ${e.message}")
         }
     }
 
@@ -737,24 +803,21 @@ class NavInfoHost(
      * 分段坐标系判定——协议文档称所有段距离之和=residual_distance（分段覆盖剩余路程、从当前位置起算），
      * 但实测（参考 Navi-Link 实现按 total_distance 画比例）高德真实广播的分段覆盖全程（段之和≈total_distance），
      * 段0 是路线起点而非当前位置，必须用 finish_distance（已行驶里程）定位当前位置所在的段，再从当前段往后找拥堵。
-     * 兼容两种坐标系：segSum≈residual → 当前位置=段0 起点；否则按全程坐标系用 finish_distance 定位。
-     * 显示距下一段拥堵的实时距离（红=拥堵 / 深红=严重拥堵）；前方无拥堵则隐藏。
+     * 兼容两种坐标系。解析一次，两套卡片同步显示。
      */
     private fun handleTmc(intent: Intent) {
-        val view = tmcView ?: return
         if (mode != Mode.NAVI) return
         val json = intent.getStringExtra("EXTRA_TMC_SEGMENT") ?: return
         try {
             val root = JSONObject(json)
-            // 打印完整原始数据，便于核对真实广播的坐标系与字段
             Log.i(TAG, "TMC原始: $json")
             if (!root.optBoolean("tmc_segment_enabled", true)) {
-                view.visibility = View.GONE
+                refs.forEach { it.tmc?.visibility = View.GONE }
                 return
             }
             val info = root.optJSONArray("tmc_info")
             if (info == null || info.length() == 0) {
-                view.visibility = View.GONE
+                refs.forEach { it.tmc?.visibility = View.GONE }
                 return
             }
             val totalDistance = root.optInt("total_distance", 0)
@@ -769,11 +832,6 @@ class NavInfoHost(
                 segSum += info.getJSONObject(i).optInt("tmc_segment_distance", 0)
             }
 
-            // 坐标系判定：真实广播为全程坐标系（段之和≈total_distance，段0=路线起点），
-            // 用 finish_distance(已行驶) 定位当前位置所在段，拥堵距离随行驶实时减小；
-            // 兼容旧版"剩余路程坐标系"（段之和≈residual 且不≈total，段0=当前位置）。
-            // 注意不能只用 segSum≈residual 判断：刚出发时剩余≈总路程会误判成剩余坐标系，
-            // 导致不减去已行驶里程、拥堵距离不实时变化。
             val isTotalCoords = totalDistance > 0 &&
                 Math.abs(segSum - totalDistance) <= Math.max(100, totalDistance / 10)
             val isResidualCoords = !isTotalCoords && residualDistance > 0 &&
@@ -808,8 +866,7 @@ class NavInfoHost(
                 }
             }
             if (targetStatus < 0) {
-                // 剩余路段无拥堵
-                view.visibility = View.GONE
+                refs.forEach { it.tmc?.visibility = View.GONE }
                 return
             }
             val level = when (targetStatus) {
@@ -818,21 +875,23 @@ class NavInfoHost(
                 else -> "缓行"
             }
             val text = if (aheadMeters <= 0) {
-                // 当前位置已在拥堵段内：显示剩余距离（结束拥堵还需多远）
                 val remain = if (congestionEndMeters > 0) congestionEndMeters else 0
                 "当前$level · 剩余${formatAhead(remain)}"
             } else {
                 "前方${formatAhead(aheadMeters)} $level"
             }
-            view.text = text
-            view.setTextColor(
-                when (targetStatus) {
-                    4 -> 0xFFD50000.toInt() // 严重拥堵：深红
-                    3 -> 0xFFFF5252.toInt() // 拥堵：红
-                    else -> 0xFFFFC400.toInt() // 缓行：黄
+            val color = when (targetStatus) {
+                4 -> 0xFFD50000.toInt() // 严重拥堵：深红
+                3 -> 0xFFFF5252.toInt() // 拥堵：红
+                else -> 0xFFFFC400.toInt() // 缓行：黄
+            }
+            refs.forEach { t ->
+                t.tmc?.apply {
+                    this.text = text
+                    setTextColor(color)
+                    visibility = View.VISIBLE
                 }
-            )
-            view.visibility = View.VISIBLE
+            }
             resetDataWatchdog()
             Log.i(TAG, "前方拥堵: $text (status=$targetStatus 距=${aheadMeters}m 结束=${congestionEndMeters}m 坐标系=${if (isResidualCoords) "剩余路程" else "全程"} 段和=$segSum total=$totalDistance residual=$residualDistance finish=$finishDistance)")
         } catch (e: Exception) {
@@ -863,23 +922,22 @@ class NavInfoHost(
      * 导航卡当前速度圈渲染（与巡航卡样式对齐）：速度黑底蓝圈大字（无单位），
      * 限速红圈白底黑字（可选）。超速时速度圈红字、限速圈红字；不超速白/黑字。
      */
-    private fun renderNavSpeed(view: TextView?, speed: Int, limit: Int) {
-        if (view == null) return
-        adjustCircleText(view, if (speed > 0) "$speed" else "--")
+    private fun renderNavSpeed(r: Refs, speed: Int, limit: Int) {
+        adjustCircleText(r.speed, if (speed > 0) "$speed" else "--")
         if (limit > 0) {
-            navLimitCircleView?.apply {
+            r.limit?.apply {
                 adjustCircleText(this, "$limit")
                 visibility = View.VISIBLE
             }
         } else {
-            navLimitCircleView?.visibility = View.GONE
+            r.limit?.visibility = View.GONE
         }
         if (limit > 0 && speed > limit) {
-            view.setTextColor(0xFFFF6B6B.toInt())
-            navLimitCircleView?.setTextColor(0xFFE53935.toInt())
+            r.speed?.setTextColor(0xFFFF6B6B.toInt())
+            r.limit?.setTextColor(0xFFE53935.toInt())
         } else {
-            view.setTextColor(0xFFFFFFFF.toInt())
-            navLimitCircleView?.setTextColor(0xFF1C1C1E.toInt())
+            r.speed?.setTextColor(0xFFFFFFFF.toInt())
+            r.limit?.setTextColor(0xFF1C1C1E.toInt())
         }
     }
 
