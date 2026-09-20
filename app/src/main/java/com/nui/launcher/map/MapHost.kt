@@ -402,6 +402,8 @@ class MapHost(
             putExtra("y", y - inset)
             putExtra("w", w + inset)
             putExtra("h", h + inset)
+            // 关键：setPackage 只发给地图 App，否则酷我等其它 App 也会收到这个广播并按相同坐标创建自己的 FloatApp，覆盖在高德浮窗上
+            current?.packageName?.let { setPackage(it) }
         }
         runCatching { context.sendBroadcast(intent) }
     }
