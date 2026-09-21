@@ -344,14 +344,36 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** 负一屏底部横条：背景与字体颜色随外观（与 dock 一致）。扁横条内导航只显彩色圆。 */
+    /** 负一屏底部横条：背景与字体颜色随外观（与 dock 一致）。扁横条内导航只显彩色圆。
+     *  玻璃质感：顶部稍亮（高光）向底部渐暗的半透明底 + 细描边，壁纸透出，接近 iOS 毛玻璃。 */
     private fun applyMinusTheme() {
         val pal = UiTheme.palette(this)
-        minusBar?.setBackgroundColor(pal.dockBg)
+        val dark = UiTheme.isDark(this)
+        val dp = resources.displayMetrics.density
+        // 顶部高光 32% → 底部 25% 的半透明渐变；深色带冷灰白描边，浅色带淡灰描边
+        minusBar?.background = GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(
+                if (dark) 0x521F242C.toInt() else 0x52E8E8ED.toInt(),
+                if (dark) 0x401F242C.toInt() else 0x40E8E8ED.toInt(),
+            )
+        ).apply {
+            setStroke((1 * dp).toInt(), if (dark) 0x33FFFFFF.toInt() else 0x1F000000.toInt())
+        }
+        // 低栏变透明后文字加淡阴影，保证亮壁纸上可读
+        val shadow = if (dark) 0x66000000.toInt() else 0x40000000.toInt()
+        for (tv in listOfNotNull(
+            minusSong, minusArtist,
+            minusRoot?.findViewById<TextView>(R.id.minusTime),
+            minusRoot?.findViewById<TextView>(R.id.minusDate),
+        )) {
+            tv.setShadowLayer(4f, 0f, 2f, shadow)
+        }
         minusSong?.setTextColor(pal.textPrimary)
         minusArtist?.setTextColor(pal.textSecondary)
         minusRoot?.findViewById<TextView>(R.id.minusTime)?.setTextColor(pal.textPrimary)
-        minusRoot?.findViewById<TextView>(R.id.minusDate)?.setTextColor(pal.textSecondary)
+        // 日期与时间同色同加粗（用户反馈次级灰看不清）
+        minusRoot?.findViewById<TextView>(R.id.minusDate)?.setTextColor(pal.textPrimary)
         // 三颗导航彩色圆内的图标：与 page0 运行时一致染 dockIconTint
         val tint = ColorStateList.valueOf(pal.dockIconTint)
         for (id in intArrayOf(R.id.shortcutNavHome, R.id.shortcutNavCompany, R.id.shortcutNavFavorite)) {
@@ -371,20 +393,22 @@ class MainActivity : AppCompatActivity() {
         setupAutoMinusTimer()
     }
 
-    /** 大号时钟 iOS 26 式玻璃效果：文字半透明 + 不透明描边（边缘清晰）+ 强阴影。 */
+    /** 大号时钟 iOS 26 式玻璃效果：fill 极淡（像透明玻璃）、只有描边不透明（边缘清晰）、弱阴影保证可读。 */
     private fun applyBigClockGlass() {
         val timeTv = minusBigClock?.findViewById<TextView>(R.id.minusBigTime)
         val dateTv = minusBigClock?.findViewById<TextView>(R.id.minusBigDate)
         for (tv in listOfNotNull(timeTv, dateTv)) {
             val p: android.graphics.Paint = tv.paint
-            p.strokeWidth = if (tv === timeTv) 3.5f else 2f
+            p.strokeWidth = if (tv === timeTv) 3f else 2f
             p.style = android.graphics.Paint.Style.FILL_AND_STROKE
-            p.color = if (tv === timeTv) 0x99FFFFFF.toInt() else 0xCCFFFFFF.toInt()  // fill 半透明
-            // 描边颜色单独设（stroke 用 setStrokeColor）
+            p.color = if (tv === timeTv) 0x2EFFFFFF.toInt() else 0x40FFFFFF.toInt()  // fill 18%/25%，透明玻璃
+            // 描边颜色单独设（stroke 用 setStrokeColor）：只有边缘不透明
             try {
                 val m = android.graphics.Paint::class.java.getMethod("setStrokeColor", Int::class.javaPrimitiveType)
-                m.invoke(p, if (tv === timeTv) 0xF0FFFFFF else 0xE6FFFFFF)
+                m.invoke(p, if (tv === timeTv) 0xE6FFFFFF else 0xD9FFFFFF)
             } catch (_: Exception) {}
+            // 弱阴影：iOS 26 玻璃字几乎无阴影，仅保留一点保证壁纸上可读
+            tv.setShadowLayer(6f, 0f, 2f, 0x26000000.toInt())
             tv.invalidate()
         }
     }
