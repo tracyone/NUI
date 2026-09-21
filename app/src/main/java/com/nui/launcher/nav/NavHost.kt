@@ -16,6 +16,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.core.content.edit
 import com.nui.launcher.R
+import com.nui.launcher.voice.NuiTts
 
 /**
  * 右侧导航按钮：回家 / 公司。
@@ -75,12 +76,15 @@ class NavHost(
         bind(companyBtn)
     }
 
-    /** 方向盘按键用：一键回家/去公司（有坐标走坐标导航，无坐标走 naviSpecial） */
+    /** 一键回家（按钮/方向盘共用）：有坐标走坐标导航，无坐标走 naviSpecial */
     fun naviHome() {
+        NuiTts(context).speak("正在发起回家的导航")
         loadTarget(KEY_HOME)?.let { startNavigation(it) } ?: naviSpecial(DEST_HOME)
     }
 
+    /** 一键去公司（按钮/方向盘共用） */
     fun naviCompany() {
+        NuiTts(context).speak("正在发起往公司的导航")
         loadTarget(KEY_COMPANY)?.let { startNavigation(it) } ?: naviSpecial(DEST_COMPANY)
     }
 
@@ -91,14 +95,13 @@ class NavHost(
         if (t == null) {
             // 未设坐标：用 navi2SpecialDest?dest=home/crop 直接触发高德已保存的家/公司地址
             b.label.text = b.default.label
-            b.container.setOnClickListener {
-                val dest = if (b.key == KEY_HOME) DEST_HOME else DEST_COMPANY
-                naviSpecial(dest)
-            }
         } else {
             // 有坐标：10007 广播直接导航
             b.label.text = t.label
-            b.container.setOnClickListener { startNavigation(t) }
+        }
+        // 点击统一走 naviHome/naviCompany（内部按是否设坐标选择导航方式），并播报语音
+        b.container.setOnClickListener {
+            if (b.key == KEY_HOME) naviHome() else naviCompany()
         }
         b.container.setOnLongClickListener { editTarget(b, t ?: b.default); true }
     }

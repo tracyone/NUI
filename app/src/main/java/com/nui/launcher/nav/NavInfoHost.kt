@@ -541,7 +541,7 @@ class NavInfoHost(
         }
     }
 
-    /** 限速摄像头语音提醒：发现摄像头即播"前方XX米有限速摄像头，限速XX"（提前警示，不限超速），
+    /** 限速摄像头语音提醒：发现摄像头即播"前方XX米限速XX"（提前警示，不限超速），
      *  距离 <200m 再提醒一次；通过后"登"一声。超速提醒由 checkOverspeed 负责（有摄像头超 10%、无摄像头超 20%）。
      *  camDist<=0 视为通过（重置状态）；距离回跳（如 100→400）视为进入下一个摄像头，重新播报。 */
     private fun checkCameraVoice(camDist: Int, camSpeed: Int) {
@@ -559,13 +559,13 @@ class NavInfoHost(
             }
             if (!camAnnouncedFirst) {
                 camAnnouncedFirst = true
-                val text = "前方${camDist}米有限速摄像头，限速${camSpeed}"
+                val text = "前方${camDist}米限速${camSpeed}"
                 tts?.speak(text)
                 Log.i(TAG, "限速摄像头首次提醒: $text")
             }
             if (!camAnnouncedNear && camDist < 200) {
                 camAnnouncedNear = true
-                val text = "前方${camDist}米有限速摄像头，限速${camSpeed}"
+                val text = "前方${camDist}米限速${camSpeed}"
                 tts?.speak(text)
                 Log.i(TAG, "限速摄像头临近提醒: $text")
             }

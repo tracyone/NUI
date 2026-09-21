@@ -35,9 +35,9 @@ object UiTheme {
             .edit().putInt(KEY_UI_DPI, dpi.coerceIn(0, 360)).apply()
     }
 
-    /** 负一屏是否在底栏之外显示大号时钟（时间+日期）。默认关闭 */
+    /** 负一屏是否在底栏之外显示大号时钟（时间+日期）。默认开启 */
     fun minusBigClock(ctx: Context): Boolean =
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_MINUS_BIG_CLOCK, false)
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_MINUS_BIG_CLOCK, true)
 
     fun setMinusBigClock(ctx: Context, on: Boolean) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

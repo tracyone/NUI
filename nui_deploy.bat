@@ -112,9 +112,9 @@ echo.
 
 echo [7/8] Capture logcat to device %LOG_FILE% (auto stop after 60s)...
 echo   - Format : threadtime
-echo   - Wait 60 seconds, then auto stop and pull to local
+echo   - Wait 160 seconds, then auto stop and pull to local
 echo.
-adb %ADB_TARGET% shell "timeout 60 logcat -v threadtime > %LOG_FILE%"
+adb %ADB_TARGET% shell "timeout 160 logcat -v threadtime > %LOG_FILE%"
 echo.
 echo       capture done.
 echo.

@@ -32,14 +32,15 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- 可选大号时钟：底栏之外、屏幕上方居中（默认隐藏，设置开关控制）。
+    <!-- 大号时钟：左上角显示（不贴边留边距），设置开关可关。
          白色字+黑色阴影，保证在任意壁纸上清晰。 -->
     <LinearLayout
         android:id="@+id/minusBigClock"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="top|center_horizontal"
-        android:layout_marginTop="110dp"
+        android:layout_gravity="top|start"
+        android:layout_marginStart="32dp"
+        android:layout_marginTop="40dp"
         android:orientation="vertical"
         android:gravity="center"
         android:visibility="gone"

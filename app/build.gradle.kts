@@ -12,8 +12,8 @@ android {
         applicationId = "com.nui.launcher"
         minSdk = 21
         targetSdk = 34
-        versionCode = 40
-        versionName = "0.0.41"
+        versionCode = 41
+        versionName = "0.0.42"
         // ABI 由 productFlavors 拆分（arm32 / arm64），见下
     }
 
@@ -66,6 +66,14 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+    }
+
+    // 全架构打包（assembleAll）时跳过 release 关键 lint 分析：
+    // lintVitalAnalyze 每个 release variant 约 54s，是全量构建的最大瓶颈；
+    // 本地快速出包不需要，需要检查时单独执行 ./gradlew lintArm64Release。
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
     }
 }
 
