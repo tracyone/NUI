@@ -173,12 +173,8 @@ class MusicHost(
 
     /** 元数据/播放状态变化回调：切歌时刷新封面等信息 */
     private var lastRenderState: Int = PlaybackState.STATE_NONE
-    /** 用户主动暂停标记：NUI 按钮 pause 置 true（自动恢复不干预）；播放/切歌后重置 */
-    private var userPaused = false
     /** 最近一次自动恢复播放时间：防抖，10s 内只自动恢复一次（避免状态抖动循环） */
     private var lastAutoResumeAt = 0L
-    /** 用户主动暂停时间：在这之后短时间内的 PLAYING 回调不重置 userPaused，maybeAutoResume 不自动恢复 */
-    private var lastUserPauseAt = 0L
     private val metadataCallback = object : MediaController.Callback() {
         override fun onMetadataChanged(metadata: MediaMetadata?) { refresh() }
         override fun onPlaybackStateChanged(s: PlaybackState?) {
@@ -263,11 +259,16 @@ class MusicHost(
     private fun isPlaying(state: PlaybackState?): Boolean =
         state != null && state.state == PlaybackState.STATE_PLAYING
 
+    /** 所有注册过回调的 controller：onDestroy 时逐一注销，杜绝 Activity 重建后旧实例回调泄漏 */
+    private val registeredControllers = mutableSetOf<MediaController>()
+
     /** 渲染播放中：封面 + 标题 + 艺术家 + 控制按钮 + 歌词（竖排） */
     private fun renderPlaying(controller: MediaController) {
         // 注销旧控制器回调，注册新控制器回调（切歌时自动刷新封面）
         currentController?.unregisterCallback(metadataCallback)
+        registeredControllers.remove(currentController)
         controller.registerCallback(metadataCallback)
+        registeredControllers.add(controller)
         currentController = controller
         lastRenderState = controller.playbackState?.state ?: PlaybackState.STATE_NONE
 
@@ -436,8 +437,7 @@ class MusicHost(
         discWrap.setOnClickListener {
             safe {
                 if (isPlaying(controller.playbackState)) {
-                    userPaused = true
-                    lastUserPauseAt = System.currentTimeMillis()
+                    userPause()
                     controller.transportControls.pause()
                 } else {
                     // 首次播放该应用：先预热（启动进程确保 metadata/歌词可用），返回后自动播放
@@ -541,8 +541,7 @@ class MusicHost(
         ) {
             safe {
                 if (isPlaying(controller.playbackState)) {
-                    userPaused = true
-                    lastUserPauseAt = System.currentTimeMillis()
+                    userPause()
                     controller.transportControls.pause()
                 } else if (primedPackage != controller.packageName) {
                     primeAndPlay(controller)   // 首次播放该应用：先预热（与唱碟点击一致）
@@ -626,6 +625,26 @@ class MusicHost(
      *  10s 内只自动恢复一次（防状态抖动循环）；用户主动暂停（NUI 按钮）不干预。
      *  32 位模拟器上酷我可能多次暂停，自动恢复后再重试 2 次。 */
     private var autoResumeRetry = 0
+
+    // ---------- 自动播放回调统一管理 ----------
+    // 所有"自动恢复/自动起播"的延迟回调都经 scheduleAuto 登记；
+    // 用户手动暂停时 cancelAllAuto 全部取消，保证暂停后绝不自动播。
+    private val autoPlayRunnables = mutableListOf<Runnable>()
+    private fun scheduleAuto(delayMs: Long, r: Runnable) {
+        autoPlayRunnables.add(r)
+        handler.postDelayed(r, delayMs)
+    }
+    private fun cancelAllAuto() {
+        for (r in autoPlayRunnables) handler.removeCallbacks(r)
+        autoPlayRunnables.clear()
+    }
+    /** 用户手动暂停：记录时间戳并取消所有排队的自动播放 */
+    private fun userPause() {
+        userPaused = true
+        lastUserPauseAt = System.currentTimeMillis()
+        cancelAllAuto()
+    }
+
     private fun maybeAutoResume() {
         if (userPaused) return
         val now = System.currentTimeMillis()
@@ -639,22 +658,24 @@ class MusicHost(
         lastAutoResumeAt = now
         autoResumeRetry = 0
         Log.i(TAG, "检测到$preferred 退后台被暂停，自动恢复播放")
-        handler.postDelayed({ doAutoResumePlay(controller) }, 800L)
+        scheduleAuto(800L) { doAutoResumePlay(controller) }
     }
 
     private fun doAutoResumePlay(controller: MediaController) {
         if (userPaused) return
+        // 双保险：用户 2s 内手动暂停过也直接放弃（cancelAllAuto 后这里基本不会走到）
+        if (System.currentTimeMillis() - lastUserPauseAt < 2000L) return
         runCatching { controller.transportControls.play() }
             .onFailure { Log.w(TAG, "自动恢复 play() 失败: ${it.message}") }
         autoResumeRetry++
         // 32 位模拟器上酷我可能在 play() 后再次暂停：2s 后检查，如果仍暂停则重试
         if (autoResumeRetry < 3) {
-            handler.postDelayed({
+            scheduleAuto(2000L) {
                 val st = controller.playbackState?.state
                 if (!userPaused && st == PlaybackState.STATE_PAUSED) {
                     doAutoResumePlay(controller)
                 }
-            }, 2000L)
+            }
         }
     }
 
@@ -670,6 +691,7 @@ class MusicHost(
     private fun renderEmpty() {
         // 注销元数据回调 + 停歌词刷新 + 清缓存（真正没会话时复位）
         currentController?.unregisterCallback(metadataCallback)
+        registeredControllers.remove(currentController)
         currentController = null
         lastTitle = ""; lastArtist = ""; lastCover = null; lastLyricRaw = null
         lyrics = emptyList()
@@ -755,10 +777,15 @@ class MusicHost(
             runCatching { context.startActivity(back) }
             primedPackage = pkg
             Log.d(TAG, "primeAndPlay: returned to NUI, will play in 800ms")
-            handler.postDelayed({
-                controller.transportControls.play()
-                Log.d(TAG, "primeAndPlay: auto play triggered")
-            }, 800L)
+            scheduleAuto(800L) {
+                // 回 NUI 后用户可能已点暂停：不再自动起播
+                if (!userPaused) {
+                    controller.transportControls.play()
+                    Log.d(TAG, "primeAndPlay: auto play triggered")
+                } else {
+                    Log.d(TAG, "primeAndPlay: user paused, skip auto play")
+                }
+            }
             // 延迟更久显示高德浮窗：让酷我 FloatApp 先创建，高德后创建在 z-order 上层
             handler.postDelayed({ onShowFloat?.invoke() }, 2500L)
         }, 3000L)
@@ -809,8 +836,14 @@ class MusicHost(
     /** 清理回调，Activity 销毁时调用 */
     fun onDestroy() {
         lyricTickRunning = false
+        cancelAllAuto()
         handler.removeCallbacks(lyricTick)
         lyricFetcher.stop()
+        // 注销所有注册过的 controller 回调：防止 Activity 重建后旧实例继续收回调触发自动播放
+        for (c in registeredControllers) {
+            runCatching { c.unregisterCallback(metadataCallback) }
+        }
+        registeredControllers.clear()
         currentController?.unregisterCallback(metadataCallback)
         currentController = null
         runCatching { lbm.unregisterReceiver(notifyReceiver) }
@@ -844,8 +877,7 @@ class MusicHost(
         val c = currentController ?: return
         safe {
             if (isPlaying(c.playbackState)) {
-                userPaused = true
-                lastUserPauseAt = System.currentTimeMillis()
+                userPause()
                 c.transportControls.pause()
             } else {
                 userPaused = false
@@ -1173,6 +1205,10 @@ class MusicHost(
         (v * context.resources.displayMetrics.density).toInt()
 
     companion object {
+        /** 用户主动暂停标记：全局静态——Activity 重建后新旧 MusicHost 并存时，任一实例暂停都能拦住所有实例的自动恢复 */
+        var userPaused = false
+        /** 用户主动暂停时间戳：全局静态 */
+        var lastUserPauseAt = 0L
         private const val TAG = "MusicHost"
         private const val PREFS = "nui_music"
         private const val KEY_APP = "music_app"

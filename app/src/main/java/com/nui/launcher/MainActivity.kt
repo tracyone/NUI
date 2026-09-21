@@ -1285,6 +1285,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupMusic() {
+        // Activity 可能被系统重建（stateNotNeeded）后再次 onCreate：先销毁旧实例，
+        // 避免新旧两个 MusicHost 并存（旧实例的自动恢复不受新实例 userPaused 约束 → 暂停后自动播放）
+        if (::musicHost.isInitialized) {
+            musicHost.onDestroy()
+        }
         musicHost = MusicHost(this, desktopMusicContainer!!)
         musicHost.onHideFloat = { mapHost.closeFloat() }
         musicHost.onShowFloat = { if (binding.viewPager.currentItem == 1) mapHost.showFloat() }
