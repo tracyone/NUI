@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
@@ -411,8 +412,40 @@ class MainActivity : AppCompatActivity() {
         if (UiTheme.autoMinus(this)) setupAutoMinusTimer()
     }
 
+    // 右侧音乐面板的子 View 会消费触摸事件，ViewPager2 收不到向右的横向滑动。
+    // 在 Activity 级别检测：桌面页右缘区域向右滑 → 平滑进入负一屏（page0 在左边）。
+    private var edgeDownX = 0f
+    private var edgeDownY = 0f
+    private var edgeTriggered = false
+
     override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
-        if (ev.actionMasked == android.view.MotionEvent.ACTION_DOWN) onUserActive()
+        val action = ev.actionMasked
+        val sw = resources.displayMetrics.widthPixels
+        val touchSlop = ViewConfiguration.get(this).scaledTouchSlop
+        val rightEdgePx = (280 * resources.displayMetrics.density).toInt()
+        when (action) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                onUserActive()
+                edgeDownX = ev.rawX; edgeDownY = ev.rawY
+                edgeTriggered = false
+            }
+            android.view.MotionEvent.ACTION_MOVE -> {
+                if (!edgeTriggered && binding.viewPager.currentItem == 1) {
+                    val dx = ev.rawX - edgeDownX
+                    val dy = ev.rawY - edgeDownY
+                    // 负一屏在 page0（左边），右侧音乐区域向右滑 → 露出左边的负一屏
+                    if (edgeDownX > sw - rightEdgePx && dx > touchSlop &&
+                        Math.abs(dx) > Math.abs(dy) * 1.5f) {
+                        edgeTriggered = true
+                        binding.viewPager.setCurrentItem(0, true)
+                    }
+                }
+                if (edgeTriggered) return true
+            }
+            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                if (edgeTriggered) { edgeTriggered = false; return true }
+            }
+        }
         return super.dispatchTouchEvent(ev)
     }
 

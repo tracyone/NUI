@@ -177,13 +177,16 @@ class MusicHost(
     private var userPaused = false
     /** 最近一次自动恢复播放时间：防抖，10s 内只自动恢复一次（避免状态抖动循环） */
     private var lastAutoResumeAt = 0L
+    /** 用户主动暂停时间：在这之后短时间内的 PLAYING 回调不重置 userPaused，maybeAutoResume 不自动恢复 */
+    private var lastUserPauseAt = 0L
     private val metadataCallback = object : MediaController.Callback() {
         override fun onMetadataChanged(metadata: MediaMetadata?) { refresh() }
         override fun onPlaybackStateChanged(s: PlaybackState?) {
             // 位置/进度每几百毫秒就变化一次：**不重建面板**，避免反复清高亮、推延 lyricTick。
             // 仅当播放/暂停状态真正切换时才重建（保证播放/暂停按钮图标同步）。
             val st = s?.state ?: PlaybackState.STATE_NONE
-            if (st == PlaybackState.STATE_PLAYING) userPaused = false
+            // 注意：不在 PLAYING 回调里重置 userPaused——酷我延迟回调可能把刚点的暂停标志清掉。
+            // userPaused 只由用户按钮操作改变（点暂停=true，点播放=false）。
             if (st != lastRenderState) {
                 lastRenderState = st
                 refresh()
@@ -434,6 +437,7 @@ class MusicHost(
             safe {
                 if (isPlaying(controller.playbackState)) {
                     userPaused = true
+                    lastUserPauseAt = System.currentTimeMillis()
                     controller.transportControls.pause()
                 } else {
                     // 首次播放该应用：先预热（启动进程确保 metadata/歌词可用），返回后自动播放
@@ -538,6 +542,7 @@ class MusicHost(
             safe {
                 if (isPlaying(controller.playbackState)) {
                     userPaused = true
+                    lastUserPauseAt = System.currentTimeMillis()
                     controller.transportControls.pause()
                 } else if (primedPackage != controller.packageName) {
                     primeAndPlay(controller)   // 首次播放该应用：先预热（与唱碟点击一致）
@@ -618,20 +623,39 @@ class MusicHost(
 
     /** 酷我车机 6.0 等车机版音乐 App 退后台会自动暂停播放：
      *  检测到"非用户主动暂停 + 绑定 App 不在前台"时，延迟约 800ms 自动恢复播放。
-     *  10s 内只自动恢复一次（防状态抖动循环）；用户主动暂停（NUI 按钮）不干预。 */
+     *  10s 内只自动恢复一次（防状态抖动循环）；用户主动暂停（NUI 按钮）不干预。
+     *  32 位模拟器上酷我可能多次暂停，自动恢复后再重试 2 次。 */
+    private var autoResumeRetry = 0
     private fun maybeAutoResume() {
         if (userPaused) return
         val now = System.currentTimeMillis()
+        // 用户刚点过暂停（2s 内），不自动恢复（避免和用户操作竞争）
+        if (now - lastUserPauseAt < 2000L) return
         if (now - lastAutoResumeAt < 10_000L) return
         val preferred = prefs.getString(KEY_APP, null) ?: return
         val controller = currentController ?: return
         if (controller.packageName != preferred) return
         if (isAppForeground(preferred)) return
         lastAutoResumeAt = now
-        android.util.Log.i("NUI.MusicHost", "检测到$preferred 退后台被暂停，自动恢复播放")
-        handler.postDelayed({
-            if (!userPaused) safe { controller.transportControls.play() }
-        }, 800L)
+        autoResumeRetry = 0
+        Log.i(TAG, "检测到$preferred 退后台被暂停，自动恢复播放")
+        handler.postDelayed({ doAutoResumePlay(controller) }, 800L)
+    }
+
+    private fun doAutoResumePlay(controller: MediaController) {
+        if (userPaused) return
+        runCatching { controller.transportControls.play() }
+            .onFailure { Log.w(TAG, "自动恢复 play() 失败: ${it.message}") }
+        autoResumeRetry++
+        // 32 位模拟器上酷我可能在 play() 后再次暂停：2s 后检查，如果仍暂停则重试
+        if (autoResumeRetry < 3) {
+            handler.postDelayed({
+                val st = controller.playbackState?.state
+                if (!userPaused && st == PlaybackState.STATE_PAUSED) {
+                    doAutoResumePlay(controller)
+                }
+            }, 2000L)
+        }
     }
 
     /** 判断 App 是否在前台（Android 9 车机 getRunningTasks 可用；高版本受限时保守返回 false 即"不在前台"） */
@@ -698,7 +722,8 @@ class MusicHost(
      *
      *  浮窗顺序管理（防止酷我的 mini player 跟地图悬浮区视觉叠在一起）：
      *    启动音乐前先 onHideFloat（关掉外部高德浮窗）
-     *    返回 NUI 后，再稍等约 900ms 让酷我自身的 overlay 收掉，然后 onShowFloat 恢复地图浮窗 */
+     *    返回 NUI 后，延迟约 2500ms 让酷我 FloatApp 先创建（后创建的浮窗在 z-order 上层），
+     *    然后 onShowFloat 恢复地图浮窗——高德浮窗最后创建，盖住酷我 FloatApp。 */
     /** 首次播放前预热：启动音乐应用确保进程在运行（metadata/歌词可用），延迟返回后自动播放。
      *  解决 QQ 音乐等应用：MediaSession 存在但进程未运行时，transportControls.play() 能播但拿不到歌词。 */
     private fun primeAndPlay(controller: MediaController) {
@@ -729,12 +754,13 @@ class MusicHost(
             }
             runCatching { context.startActivity(back) }
             primedPackage = pkg
-            Log.d(TAG, "primeAndPlay: returned to NUI, will play in 900ms")
+            Log.d(TAG, "primeAndPlay: returned to NUI, will play in 800ms")
             handler.postDelayed({
                 controller.transportControls.play()
-                onShowFloat?.invoke()
                 Log.d(TAG, "primeAndPlay: auto play triggered")
-            }, 900L)
+            }, 800L)
+            // 延迟更久显示高德浮窗：让酷我 FloatApp 先创建，高德后创建在 z-order 上层
+            handler.postDelayed({ onShowFloat?.invoke() }, 2500L)
         }, 3000L)
     }
 
@@ -770,8 +796,8 @@ class MusicHost(
                         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
                     }
                     runCatching { context.startActivity(back) }
-                    // 回 NUI 后再恢复地图浮窗（错开酷我自有关闭窗口的动画窗口）
-                    handler.postDelayed({ onShowFloat?.invoke() }, 900L)
+                    // 回 NUI 后延迟更久再恢复地图浮窗：让酷我 FloatApp 先创建，高德后创建在 z-order 上层
+                    handler.postDelayed({ onShowFloat?.invoke() }, 2500L)
                 }, 3000L)
                 return
             }
@@ -819,6 +845,7 @@ class MusicHost(
         safe {
             if (isPlaying(c.playbackState)) {
                 userPaused = true
+                lastUserPauseAt = System.currentTimeMillis()
                 c.transportControls.pause()
             } else {
                 userPaused = false
