@@ -864,6 +864,11 @@ class MusicHost(
     private var floatY = -1
     private var floatW = -1
     private var floatH = -1
+    /** 上次已应用到 WindowManager 的悬浮窗几何；用于跳过无变化的 relayout，避免壁纸闪烁 */
+    private var lastAppliedX = 0
+    private var lastAppliedY = 0
+    private var lastAppliedW = 0
+    private var lastAppliedH = 0
     /** 提供悬浮地图几何（边界格式 x1,y1,x2,y2），用于默认位置 */
     var floatBoundsProvider: (() -> IntArray?)? = null
 
@@ -894,6 +899,7 @@ class MusicHost(
             wm.removeViewImmediate(view)
             wm.addView(view, lp)
         }
+        applyFloatLayout(force = true)
     }
 
     fun setFloatAreaVisible(v: Boolean) {
@@ -930,6 +936,8 @@ class MusicHost(
     }
 
     private fun createLyricFloat() {
+        // 新窗口尚未应用过几何，置初值保证随后的 applyFloatLayout 必定 relayout 一次
+        lastAppliedX = 0; lastAppliedY = 0; lastAppliedW = 0; lastAppliedH = 0
         val percent = MusicHost.lyricBgAlpha(context)
         lastLyricBgAlpha = percent
         val bgAlpha = percent * 255 / 100   // 0-100% → 0-255，默认 80% ≈ 204
@@ -1010,14 +1018,26 @@ class MusicHost(
         }
     }
 
-    private fun applyFloatLayout() {
+    private fun applyFloatLayout(force: Boolean = false) {
         val view = lyricFloatView ?: return
         val lp = view.layoutParams as? android.view.WindowManager.LayoutParams ?: return
+        // 关键：播放中歌词每 100ms tick 一次，若几何没变也调用 updateViewLayout，会让
+        // WindowManager 以 10Hz 反复 relayout 悬浮窗、SurfaceFlinger 反复重合成，导致其下方
+        // 负一屏壁纸（TextureView 视频 / ImageView 静态图）偶发丢帧闪烁。几何不变时直接跳过；
+        // 卡拉OK扫光进度只走 KaraokeTextView.invalidate（view 内小区域重绘），无需动窗口。
+        val geoChanged = force
+            || lastAppliedX != floatX || lastAppliedY != floatY
+            || lastAppliedW != floatW || lastAppliedH != floatH
+        if (!geoChanged) return
         lp.x = floatX; lp.y = floatY; lp.width = floatW; lp.height = floatH
-        // 字号随窗口高度缩放
-        karaokeView?.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, floatH * 0.30f)
-        lyricFloatNext?.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, floatH * 0.15f)
+        // 字号只随窗口高度变化，避免每 100ms 重复 setTextSize 触发 requestLayout
+        if (force || lastAppliedH != floatH) {
+            karaokeView?.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, floatH * 0.30f)
+            lyricFloatNext?.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, floatH * 0.15f)
+        }
         runCatching { wm.updateViewLayout(view, lp) }
+        lastAppliedX = floatX; lastAppliedY = floatY
+        lastAppliedW = floatW; lastAppliedH = floatH
     }
 
     private fun hideLyricFloat() {
@@ -1055,8 +1075,11 @@ class MusicHost(
         }
         applyFloatLayout()
         val idx = lyricHighlight.coerceAtLeast(0)
-        karaokeView?.text = lyrics[idx].second
-        lyricFloatNext?.text = if (idx + 1 < lyrics.size) lyrics[idx + 1].second else ""
+        // 文本仅在歌词行变化时设置，避免每 100ms 重复 setText 触发 measure/重绘
+        val curLine = lyrics[idx].second
+        val nextLine = if (idx + 1 < lyrics.size) lyrics[idx + 1].second else ""
+        karaokeView?.let { if (it.text?.toString() != curLine) it.text = curLine }
+        lyricFloatNext?.let { if (it.text?.toString() != nextLine) it.text = nextLine }
         updateKaraokeProgress()
     }
 
