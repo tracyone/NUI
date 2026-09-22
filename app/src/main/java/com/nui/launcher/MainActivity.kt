@@ -461,6 +461,13 @@ class MainActivity : AppCompatActivity() {
                     if (edgeDownX > sw - rightEdgePx && dx > touchSlop &&
                         Math.abs(dx) > Math.abs(dy) * 1.5f) {
                         edgeTriggered = true
+                        // 触发即向 DOWN 时的触摸目标（音乐卡等）补发 CANCEL：后续 MOVE/UP
+                        // 被本层吞掉，子 View 收不到 CANCEL 会保留 500ms 长按计时，
+                        // 切到负一屏后误弹"选择音乐 App"对话框。
+                        val cancel = android.view.MotionEvent.obtain(ev)
+                        cancel.action = android.view.MotionEvent.ACTION_CANCEL
+                        super.dispatchTouchEvent(cancel)
+                        cancel.recycle()
                         binding.viewPager.setCurrentItem(0, true)
                     }
                 }
