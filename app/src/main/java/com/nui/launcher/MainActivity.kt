@@ -563,8 +563,8 @@ class MainActivity : AppCompatActivity() {
                 if (position == 0) {
                     binding.viewPager.post {
                         if (!isDestroyed && !isFinishing && binding.viewPager.currentItem == 0) {
+                            // VIDEO 分支 setVideo→ensurePlaying 已确定性起播，无需再 resume（避免重复建播放器）
                             if (::wallpaper.isInitialized) applyMinusWallpaper()
-                            minusVideo?.resume()
                         }
                     }
                 } else {
@@ -890,6 +890,18 @@ class MainActivity : AppCompatActivity() {
             appGridLoaded = false
             // 应用页 ViewHolder 复用，无需 clear（loadAppGrid 增量更新时会重新 bind）
             loadAppGrid()
+        }
+        // 从系统文件选择器/其它 App 遮挡返回负一屏：遮挡期间 TextureView 的 surface 可能失效，
+        // 播放器仍在解码但画面不合成（透出桌面壁纸，表现为"动态壁纸设置无效"）。强制重绑 surface 重启。
+        if (::wallpaper.isInitialized &&
+            binding.viewPager.currentItem == 0 &&
+            wallpaper.minusWallpaperMode() == com.nui.launcher.WallpaperController.MinusMode.VIDEO
+        ) {
+            binding.viewPager.post {
+                if (!isDestroyed && !isFinishing && binding.viewPager.currentItem == 0) {
+                    minusVideo?.forceRestart()
+                }
+            }
         }
     }
 
