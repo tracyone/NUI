@@ -10,12 +10,13 @@
 ## 1. 项目是什么
 
 **NUI · 车机桌面** —— 一个 Android 横屏 Launcher（桌面启动器），为车机场景设计。
-核心能力：高德车机版深度联动（悬浮地图 + 导航/巡航 HUD）、音乐控制、天气动画、系统 TTS 语音、CarPlay 风格 Dock 布局。
+核心能力：负一屏（独立静态/动态视频壁纸 + 透明信息层）、高德车机版深度联动（悬浮地图 + 导航/巡航 HUD）、音乐控制、天气动画、系统 TTS 语音、CarPlay 风格 Dock 布局。
 
 - **语言**：Kotlin（100%），`viewBinding` 已开启
 - **包名**：`com.nui.launcher`（debug 包名自动加 `.debug` 后缀 → `com.nui.launcher.debug`）
 - **入口 Activity**：`.MainActivity`（声明了 `HOME` category，是桌面）
-- 主模块共 33 个 Kotlin 文件，全部在 `app/src/main/java/com/nui/launcher/` 下
+- 主模块共 34 个 Kotlin 文件，全部在 `app/src/main/java/com/nui/launcher/` 下
+- **分页结构（ViewPager2）**：position 0=负一屏、1=桌面地图页（page0）、2..N=应用各页；改翻页 / 手势前先认清这个顺序（负一屏在最左，进负一屏是向右滑）
 
 ---
 
@@ -51,11 +52,12 @@ NUI/
 ├── app/                        # 主模块（:app），所有业务代码都在这
 │   └── src/main/
 │       ├── java/com/nui/launcher/
-│       │   ├── MainActivity.kt          # 桌面主入口（~1300 行，总装；含昼夜广播接收器）
-│       │   ├── AppListActivity.kt        # 分页应用列表
+│       │   ├── MainActivity.kt          # 桌面主入口（~1800 行，总装；ViewPager2 三页、边缘手势、昼夜广播接收器）
+│       │   ├── AppListActivity.kt        # 遗留独立应用列表（当前应用页由 ViewPager2 + page_app_grid 承载，勿优先改这里）
 │       │   ├── DockConfig.kt / DockSlots.kt / DockPickerDialog.kt  # 左侧 Dock 配置与选择
 │       │   ├── AppListAdapter.kt / AppModel.kt / RecentApps.kt / HiddenApps.kt
-│       │   ├── WallpaperController.kt / UiTheme.kt   # 昼夜主题、壁纸
+│       │   ├── WallpaperController.kt / UiTheme.kt   # 昼夜主题、壁纸（含负一屏壁纸三模式与外观偏好）
+│       │   ├── VideoWallpaperView.kt     # 负一屏动态视频壁纸（TextureView + MediaPlayer，centerCrop 铺满无黑边）
 │       │   ├── IconUtils.kt / NuiToast.kt / StockHome.kt
 │       │   ├── map/                     # 悬浮地图
 │       │   │   ├── MapHost.kt           #   浮窗托管（~790 行）
@@ -63,7 +65,7 @@ NUI/
 │       │   │   └── MapPickerDialog.kt
 │       │   ├── nav/                     # 导航 / 巡航（核心，最复杂）
 │       │   │   ├── NavInfoHost.kt       # ★收 10001/10019/60073/13011 广播 + 状态机
-│       │   │   │                        #   + HUD 渲染 + 超速 + 疲劳提醒 + 巡航静音（~950 行）
+│       │   │   │                        #   + HUD 渲染 + 超速 + 疲劳提醒 + 巡航静音（~1000 行）
 │       │   │   ├── NavHost.kt           # 右侧"回家/公司"按钮 + URL Scheme + 10007 坐标导航
 │       │   │   └── TrafficLightMonitor.kt  # 红绿灯倒计时语音（仅巡航）
 │       │   ├── music/
@@ -72,8 +74,8 @@ NUI/
 │       │   │   └── LyricFetcher.kt      # 网易云 LRC 歌词抓取
 │       │   ├── weather/                 # WeatherActivity / WeatherFetcher / WeatherSurfaceView / WeatherVoice
 │       │   ├── voice/NuiTts.kt          # ★系统 TTS 的唯一封装，全项目语音都走它
-│       │   └── settings/                # SettingsActivity / SettingsDialog / KeyMapConfig / KeyMapExecutor
-│       └── res/                         # 8 个 layout + drawable + mipmap
+│       │   └── settings/                # SettingsDialog（实际使用的全屏设置）/ SettingsActivity（遗留）/ KeyMapConfig / KeyMapExecutor
+│       └── res/                         # 10 个 layout + drawable + mipmap
 ├── gpsmock/                    # :gpsmock 模块（MockGpsService，注入模拟 GPS，配合巡航测试）
 ├── icontest/                   # :icontest 模块（图标测试）
 ├── weather-screen/             # 实验/截图/模型资源目录（**不是 Gradle 模块**，勿 include）
@@ -198,6 +200,15 @@ adb shell getprop ro.product.cpu.abi
 - 白天/夜晚双壁纸槽位，缺省逐级回退。
 - **已知坑**：多实例下外观去重用实例级 `appliedMapDark` 标志；后台 `invalidate` 会丢弃刷新，回前台要强制重排重绘。改主题先看 git log 里 `fix(theme):` 的提交。
 
+**负一屏壁纸与外观（独立于桌面）：**
+
+- 壁纸三模式 `WallpaperController.MinusMode`：`FOLLOW`（默认，透出桌面壁纸）/ `IMAGE`（独立静态图 `files/minus_image.jpg`）/ `VIDEO`（独立动态视频 `files/minus_video.mp4`）。模式存 prefs `minus_mode`；选图 / 选视频走系统选择器（`REQ_PICK_MINUS_IMAGE/VIDEO`），复制进内部存储后回调 `onMinusWallpaperChanged` → `applyMinusWallpaper()`。
+- **VIDEO 由 `VideoWallpaperView`（TextureView + MediaPlayer）承担**：静音、`isLooping`，centerCrop 铺满全屏无黑边（视频比屏幕小则放大、比屏幕大则裁剪，由 `applyCropMatrix()` 处理；TextureView 默认已把帧铺满 view）。
+- **起播统一走 `ensurePlaying()` / `forceRestart()` 的确定性恢复**，不要退回只靠 `onSurfaceTextureAvailable` 碰运气；`prepareAsync` 有 8 秒看门狗（超时重启一次，`MAX_PREPARE_RETRIES=1`）。TextureView 首帧渲染前是透明的、会透出底层壁纸——这正是"设置后短暂 / 一直跟随桌面"的根因，改动时务必保留看门狗与 surface 重建逻辑。
+- **切出负一屏必须 `pause()` 释放 MediaPlayer**（surface 销毁 / `onDetachedFromWindow` 同样释放），不允许后台继续播放或占用硬解；ViewPager2 可能并存多个实例，用 `playToken` 丢弃陈旧播放器的异步回调。
+- 4K 等过高分辨率是软解帧率低（并非失败），选视频时 `warnIfVideoOversized()` 会提示可能卡顿。
+- 负一屏外观偏好（`UiTheme`，键见常量）：`minus_big_clock` 大号时钟（**默认开**）、`auto_minus` 闲置自动进入（默认关）、`auto_minus_minutes` 等待分钟（1/2/3/5/10/15，默认 3）。闲置计时在 `MainActivity.setupAutoMinusTimer()`；触摸 DOWN、翻页、`navInfoHost.onNavActive`（导航 / 巡航激活）都会调 `onUserActive()` 重置，所以导航中不会误判为闲置。
+
 ### 5.5 车机专属
 
 - 方向盘按键映射：`settings/KeyMapConfig.kt` + `KeyMapExecutor.kt`。
@@ -212,7 +223,7 @@ adb shell getprop ro.product.cpu.abi
 
 | 任务 | 入口 |
 |---|---|
-| 新增一个桌面设置项 | `settings/SettingsActivity.kt` + `SettingsDialog.kt`，注意 SharedPreferences 键命名 |
+| 新增一个桌面设置项 | `settings/SettingsDialog.kt`（主入口，全屏 Dialog）；`SettingsActivity` 为备用独立页面（Manifest 仍注册但主流程不启动），注意 SharedPreferences 键命名 |
 | 新增导航/巡航字段展示 | 读 `docs/amap_auto_protocol.md` → 在 `NavInfoHost.kt` 接收解析 + 渲染 |
 | 改状态机判定 | `NavInfoHost.kt` 的 10019/10001 处理与 `Mode` 枚举；`TrafficLightMonitor.kt` 有独立模式标志需同步 |
 | 改超速 / 疲劳 / 巡航静音阈值 | 都在 `NavInfoHost.kt`（`checkOverspeed()` / `FATIGUE_*` / `setAmapCruiseMute()`） |
@@ -221,6 +232,7 @@ adb shell getprop ro.product.cpu.abi
 | 新增支持一个音乐 App | Manifest `<queries>` 加包名 + `MusicHost.isMusicLike()` 关键词 / `MUSIC_PACKAGES` 候选 |
 | 新增语音播报场景 | 调 `NuiTts` 的统一播报接口，不要新建 TTS 实例 |
 | 改桌面布局/Dock | `MainActivity.kt` + res/layout，注意按 DPI/分辨率算每页容量 |
+| 改负一屏 / 动态视频壁纸 | `VideoWallpaperView.kt`（播放 / centerCrop）+ `WallpaperController`（模式 / 选择）+ `page_minus_one.xml`，约定见 5.4 |
 | 生成新启动图标 | `python3 scripts/gen_launcher_icon.py`（需 Pillow） |
 
 ---
@@ -255,6 +267,9 @@ chore: 删除无引用死代码
 10. `weather-screen/` 不是 Gradle 模块，别 `include` 进 settings.gradle。
 11. 新增音乐 App 只改关键词不够，Manifest `<queries>` 也要加（Android 11+ 包可见性限制）。
 12. **音乐卡是硬绑定**：设了绑定 App 就只显示它，别的音乐 App 在播放也不许抢占（见 5.3）。不要把 `refresh()` 改回"任意 App 在播放就跟随"的软逻辑。
+13. **动态视频壁纸切出负一屏必须释放 MediaPlayer**（`pause()` / surface 销毁 / detach），不许后台播放或占用硬解；起播走 `ensurePlaying()` 并保留 prepare 看门狗——TextureView 首帧前透明会透出底层壁纸。
+14. 视频壁纸只能 centerCrop 铺满全屏（视频比屏幕小则放大、比屏幕大则裁剪），**不允许黑边或拉伸变形**；不要给 `VideoWallpaperView` 用 fitCenter 之类会留边的缩放。
+15. 进负一屏是**向右滑**（负一屏在 ViewPager2 position 0、最左）；边缘手势在 `MainActivity.dispatchTouchEvent`，改方向时注意 32 / 64 位、Android 版本差异，改完务必装机实测。
 
 ---
 
