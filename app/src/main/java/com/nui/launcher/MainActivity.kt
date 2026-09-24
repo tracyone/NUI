@@ -125,6 +125,8 @@ class MainActivity : AppCompatActivity() {
     private var autoMinusRunnable: Runnable? = null
     private var page0Ready = false
     private var appGridLoaded = false
+    /** 上次应用的系统 Dock 显隐状态（null=尚未记录）；切换时需重算应用网格高度 */
+    private var lastSystemDock: Boolean? = null
     /** 从系统卸载页返回后需重载应用网格 */
     private var pendingReloadOnResume = false
     /** 分页应用网格：外层 ViewPager2 每页一个 6 列 RecyclerView；key=页索引(0..N) */
@@ -172,20 +174,21 @@ class MainActivity : AppCompatActivity() {
                 1 -> inflater.inflate(R.layout.page_desktop, parent, false)
                 else -> {
                     // 应用页容器：必须 MATCH_PARENT（ViewPager2 要求页面占满），
-                    // 带与桌面一致的 padding（dock 让位），内容为单页 6 列网格
+                    // 内容为单页 6 列网格（上/右 padding 在此设置；让位由 rv/root insets 统一处理）
                     FrameLayout(parent.context).apply {
                         layoutParams = ViewGroup.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT,
                         )
                         val dp = resources.displayMetrics.density
-                        // 左侧让位由 applyDockStyle 按 dock 形态统一设置在 RecyclerView 上
-                        // （edge=108dp / 悬浮=116dp），容器只保留上/右/下 padding，避免双重叠加
+                        // 左侧让位由 applyDockStyle 按 dock 形态统一设置在 RecyclerView 上，
+                        // 底部让位同理（系统 Dock 显示时 root insets 已让位、隐藏时仅给分页
+                        // 指示器留空），容器本身不再设底部 padding，避免双重叠加
                         setPadding(
                             0,
                             (32 * dp).toInt(),
                             (32 * dp).toInt(),
-                            (48 * dp).toInt(),
+                            0,
                         )
                     }
                 }
@@ -207,6 +210,11 @@ class MainActivity : AppCompatActivity() {
         val dockW = 96f
         return if (edge) dockW + 12 else 8 + dockW + 12
     }
+
+    /** 应用网格底部内边距（dp）：系统 Dock 显示时 root insets 已让位（网格贴 ViewPager2 底）；
+     *  系统 Dock 隐藏（沉浸）时仅给底部分页指示器留出空间，避免网格贴底后指示器压住最后一行。 */
+    private fun appGridBottomPadDp(): Float =
+        if (UiTheme.showSystemDock(this)) 0f else 28f
 
     /** 应用页：往容器里放一个静态 6 列网格（不参与滚动，翻页由外层 ViewPager2 驱动） */
     private fun bindAppPage(container: ViewGroup, pageIndex: Int) {
@@ -238,7 +246,7 @@ class MainActivity : AppCompatActivity() {
         appPageAdapters[pageIndex] = gridAdapter
         // 立即按当前 dock 形态设置左侧让位（与 applyDockStyle 同一口径），避免首次显示贴住 dock
         val dp = resources.displayMetrics.density
-        rv.setPadding((appGridLeftPadDp() * dp).toInt(), 0, 0, 0)
+        rv.setPadding((appGridLeftPadDp() * dp).toInt(), 0, 0, (appGridBottomPadDp() * dp).toInt())
         appPageViews[pageIndex] = rv
         // 同一 ViewHolder 可能被多次 re-bind（图标比例/数据变化时 notifyItemRangeChanged），先清空再挂
         container.removeAllViews()
@@ -1084,8 +1092,9 @@ class MainActivity : AppCompatActivity() {
         }
         // 应用网格：dock 右侧留出 12dp 统一间距（参考氢桌面比例），各应用页同步
         val leftPad = appGridLeftPadDp()
+        val bottomPad = (appGridBottomPadDp() * dp.toFloat()).toInt()
         for (rv in appPageViews.values) {
-            rv.setPadding((leftPad * dp.toFloat()).toInt(), rv.paddingTop, rv.paddingEnd, rv.paddingBottom)
+            rv.setPadding((leftPad * dp.toFloat()).toInt(), rv.paddingTop, rv.paddingEnd, bottomPad)
         }
     }
 
@@ -1356,22 +1365,23 @@ class MainActivity : AppCompatActivity() {
 
         // 每页行数：按当前 DPI 与图标尺寸精确计算，保证每行图标+名称完整显示。
         // 行高 = item 上下 padding(12dp*2) + 图标(72dp*scale) + 标签区(8dp marginTop + 14sp 文字≈17dp + 上下 padding 4dp)，
-        // 可用高 = 屏高(dp) - 网格上下 padding(32+48dp)。宁可少放一行也不允许文字被裁掉。
+        // 可用高 = ViewPager2 实际高度 - 网格上下 padding(32dp + 动态底部)。宁可少放一行也不允许文字被裁掉。
         val density = resources.displayMetrics.density
-        val screenHdp = resources.displayMetrics.heightPixels / density
+        // 用 ViewPager2 实际内容区高度：沉浸=物理屏高；系统 Dock 显示时 root 的 insets padding
+        // 已让位、ViewPager2 自动缩小到导航栏上方。不用 displayMetrics.heightPixels，
+        // 其口径随系统栏显示与否变化，易双重扣减（悬浮地图同款坑）；也不用 root.height，
+        // root 是窗口根、高度恒为物理屏高，不会随系统栏让位而缩小
+        val screenHdp = binding.viewPager.height / density
         val iconScale = UiTheme.appIconScale(this)
-        val gridPadTop = 32f    // page_app_grid.xml paddingTop
-        val gridPadBottom = 48f // page_app_grid.xml paddingBottom
+        val gridPadTop = 32f    // 应用页容器 paddingTop（onCreateViewHolder）
+        val gridPadBottom = appGridBottomPadDp() // 应用网格底部内边距（系统 Dock 隐藏时给指示器留空）
         val itemPad = 24f       // item_app_grid.xml item 上下 padding 12dp*2
         val iconSizeDp = UiTheme.DEFAULT_APP_ICON_DP * iconScale
         val labelH = 29f        // 8dp marginTop + 14sp 文字(≈17dp) + 文字上下 padding 4dp
         val itemH = itemPad + iconSizeDp + labelH
         val availH = screenHdp - gridPadTop - gridPadBottom
-        val rows = maxOf(2, (availH / itemH).toInt())
-        val perPage = 6 * rows
-        // 固定行高：均分可用高度撑满整屏（最后一行贴底不悬空），item 内容垂直居中
-        val rowHeightDp = availH / rows
-        android.util.Log.d("NUI.AppGrid", "分页网格: rows=$rows perPage=$perPage availH=$availH itemH=$itemH rowH=$rowHeightDp")
+        // 屏幕可容纳的最大行数（宁可少放一行也不允许文字被裁掉）
+        val maxRows = maxOf(2, (availH / itemH).toInt())
 
         Thread {
             val pm = packageManager
@@ -1436,6 +1446,14 @@ class MainActivity : AppCompatActivity() {
                 },
             )
             val allApps = listOf(settingsEntry) + apps
+            // 实际行数 = min(屏幕可容纳最大行数, 应用所需行数)：应用不足整屏时均分可用高度，
+            // 不留空行（18 个应用按 3 行均分，而不是算 4 行留空一整行）
+            val needRows = maxOf(1, (allApps.size + 5) / 6)
+            val rows = minOf(maxRows, needRows)
+            val perPage = 6 * rows
+            // 固定行高：均分可用高度撑满整屏（最后一行贴底不悬空），item 内容垂直居中
+            val rowHeightDp = availH / rows
+            android.util.Log.d("NUI.AppGrid", "分页网格: rows=$rows perPage=$perPage availH=$availH itemH=$itemH rowH=$rowHeightDp")
             val pages = allApps.chunked(perPage)
             android.util.Log.d("NUI.AppGrid", "应用总数=${allApps.size} 页数=${pages.size}")
             runOnUiThread {
@@ -1711,7 +1729,6 @@ class MainActivity : AppCompatActivity() {
     private fun applySystemDock() {
         val showStatus = UiTheme.showStatusBar(this)
         val showDock = UiTheme.showSystemDock(this)
-
         if (showStatus) {
             window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
         } else {
@@ -1745,6 +1762,20 @@ class MainActivity : AppCompatActivity() {
             val top = if (UiTheme.showStatusBar(this)) insets.getSystemWindowInsetTop() else 0
             val bottom = if (UiTheme.showSystemDock(this)) insets.getSystemWindowInsetBottom() else 0
             v.setPadding(0, top, 0, bottom)
+            // 系统 Dock 显隐切换：ViewPager2 高度变化 → 应用网格可用高度变化，
+            // 更新 rv 底部内边距并在本帧布局完成后重算行数/行高
+            val curDock = UiTheme.showSystemDock(this)
+            val prevDock = lastSystemDock
+            lastSystemDock = curDock
+            if (prevDock != null && prevDock != curDock) {
+                applyDockStyle()
+                v.post {
+                    if (binding.viewPager.height > 0) {
+                        appGridLoaded = false
+                        loadAppGrid()
+                    }
+                }
+            }
             // 悬浮地图（高德浮窗）同步避让底部系统 Dock：上限=物理屏高-导航栏高-8dp；
             // Dock 隐藏时解除限制（可拖到屏幕最底部）
             if (::mapHost.isInitialized) {
