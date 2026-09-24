@@ -4,7 +4,7 @@
   - 底层全屏壁纸：静态图（ivMinusWallpaper centerCrop）或动态视频（VideoWallpaperView 静音循环 centerCrop 铺满，无黑边）。
   - 上层信息（尽量透明、少占壁纸）：
       · 可选大号时钟（minusBigClock，底栏之外、屏幕上方居中，设置开关控制）；
-      · 导航/巡航信息卡（navInfoOverlayMinus，复用 view_nav_info，仅高德导航/巡航中出现，悬浮于横条上方居中）；
+      · 导航/巡航信息卡（navInfoOverlayMinus，复用 view_nav_info，仅高德导航/巡航中出现，左下角、大时钟下方左列、底栏上方）；
       · 底部一条扁平横条（minusBar，背景跟随 dock 深浅色）：
           左=回家/公司/收藏三颗纯彩色圆（与 page0 同色，扁横条内只显圆不显文字）；
           中=音乐卡（封面+歌名歌手+上一首/绿色播放键/下一首，与桌面音乐卡控件一致）；
@@ -73,13 +73,15 @@
             android:shadowDy="2" />
     </LinearLayout>
 
-    <!-- 导航/巡航信息卡（复用 view_nav_info；wrap_content 居中悬浮于横条上方，仅导航/巡航中显示） -->
+    <!-- 导航/巡航信息卡（复用 view_nav_info；wrap_content 左下角、大时钟下方左列，
+         底栏上方，仅导航/巡航中显示） -->
     <include
         android:id="@+id/navInfoOverlayMinus"
         layout="@layout/view_nav_info"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="bottom|center_horizontal"
+        android:layout_gravity="bottom|start"
+        android:layout_marginStart="28dp"
         android:layout_marginBottom="96dp" />
 
     <!-- 底部扁平横条：背景色/字体色由代码按外观设置（与 dock 一致） -->

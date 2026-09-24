@@ -419,7 +419,7 @@ class MainActivity : AppCompatActivity() {
         autoMinusRunnable = null
         if (!UiTheme.autoMinus(this)) return
         if (binding.viewPager.currentItem == 0) return
-        val delayMs = UiTheme.autoMinusMinutes(this) * 60_000L
+        val delayMs = UiTheme.autoMinusSeconds(this) * 1_000L
         val r = Runnable {
             if (!isFinishing && !isDestroyed && UiTheme.autoMinus(this) &&
                 binding.viewPager.currentItem != 0

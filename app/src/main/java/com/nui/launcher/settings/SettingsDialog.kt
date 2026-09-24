@@ -303,13 +303,14 @@ class SettingsDialog(context: Context) : Dialog(context) {
         }
         optAutoMinusMinutes.setOnClickListener {
             if (!UiTheme.autoMinus(context)) return@setOnClickListener
-            val options = intArrayOf(1, 2, 3, 5, 10, 15)
-            val names = options.map { "$it 分钟" }.toTypedArray()
-            val checked = options.indexOf(UiTheme.autoMinusMinutes(context)).coerceAtLeast(0)
+            // 30 秒起步，然后 1/2/3/5/10/15 分钟
+            val options = intArrayOf(30, 60, 120, 180, 300, 600, 900)
+            val names = options.map { UiTheme.formatAutoMinus(it) }.toTypedArray()
+            val checked = options.indexOf(UiTheme.autoMinusSeconds(context)).coerceAtLeast(0)
             AlertDialog.Builder(context)
                 .setTitle("闲置等待时间")
                 .setSingleChoiceItems(names, checked) { d, which ->
-                    UiTheme.setAutoMinusMinutes(context, options[which])
+                    UiTheme.setAutoMinusSeconds(context, options[which])
                     renderMinus()
                     onMinusPrefsChanged?.invoke()
                     d.dismiss()
@@ -822,7 +823,7 @@ class SettingsDialog(context: Context) : Dialog(context) {
             if (UiTheme.minusBigClock(context)) View.VISIBLE else View.GONE
         checkAutoMinus.visibility =
             if (UiTheme.autoMinus(context)) View.VISIBLE else View.GONE
-        tvAutoMinusMinutesValue.text = "${UiTheme.autoMinusMinutes(context)} 分钟"
+        tvAutoMinusMinutesValue.text = UiTheme.formatAutoMinus(UiTheme.autoMinusSeconds(context))
         val enabled = UiTheme.autoMinus(context)
         optAutoMinusMinutes.isEnabled = enabled
         optAutoMinusMinutes.alpha = if (enabled) 1f else 0.4f
