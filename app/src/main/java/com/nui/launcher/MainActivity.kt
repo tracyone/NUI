@@ -119,7 +119,6 @@ class MainActivity : AppCompatActivity() {
     private var minusBtnPlay: ImageView? = null
     private var minusRoot: View? = null
     private var minusBigClock: View? = null
-    private var minusNavOverlay: View? = null
     // 闲置自动进入负一屏（类似屏保）：用户无操作达设定分钟后切到负一屏
     private val autoMinusHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var autoMinusRunnable: Runnable? = null
@@ -265,9 +264,6 @@ class MainActivity : AppCompatActivity() {
         minusBar = v.findViewById(R.id.minusBar)
         minusBtnPlay = v.findViewById(R.id.btnMinusPlay)
         minusBigClock = v.findViewById(R.id.minusBigClock)
-        minusNavOverlay = v.findViewById(R.id.navInfoOverlayMinus)
-        // 导航/巡航卡接入 NavInfoHost（host 可能尚未创建，缓存后由 setupNav 补附加）
-        navInfoHost?.attachMinus(minusNavOverlay)
         // 音乐控制按钮
         v.findViewById<View>(R.id.btnMinusPrev).setOnClickListener {
             if (::musicHost.isInitialized) musicHost.prev()
@@ -303,48 +299,33 @@ class MainActivity : AppCompatActivity() {
         val root = minusRoot ?: run { android.util.Log.w("NUI.Main", "applyMinusWallpaper: minusRoot=null"); return }
         val video = minusVideo
         // onBindViewHolder 可能在 wallpaper 初始化前就绑定负一屏（ViewPager2 预加载），做保护
-        if (!::wallpaper.isInitialized) { root.background = null; video?.visibility = View.GONE; android.util.Log.w("NUI.Main", "applyMinusWallpaper: wallpaper not initialized"); return }
-        val mode = wallpaper.minusWallpaperMode()
-        android.util.Log.i("NUI.Main", "applyMinusWallpaper: mode=$mode video=$video path=${wallpaper.minusWallpaperPath()}")
-        when (mode) {
-            com.nui.launcher.WallpaperController.MinusMode.VIDEO -> {
-                val path = wallpaper.minusWallpaperPath()
-                if (!path.isNullOrBlank() && video != null) {
-                    root.background = null
-                    ivMinusWallpaper?.visibility = View.GONE
-                    video.visibility = View.VISIBLE
-                    // 播放失败时明确提示（不再静默回退默认）；首帧渲染确认成功
-                    video.onError = { what, extra ->
-                        android.widget.Toast.makeText(
-                            this@MainActivity,
-                            "视频壁纸播放失败（code=$what/$extra），已回退桌面壁纸",
-                            android.widget.Toast.LENGTH_LONG
-                        ).show()
-                        video.visibility = View.GONE
-                        root.background = null
-                    }
-                    video.onFirstFrame = {
-                        android.util.Log.d("NUI.Main", "minus video first frame rendered")
-                    }
-                    video.setVideo(path)   // centerCrop 铺满、静音循环
-                } else {
-                    // 视频路径无效：回退跟随桌面
-                    video?.visibility = View.GONE
-                    root.background = null
-                }
+        if (!::wallpaper.isInitialized) { root.background = null; video?.visibility = View.GONE; return }
+        // 按当前槽位文件类型自动判断：视频 → 播放；图片 → 显示；无文件 → 跟随桌面
+        val path = wallpaper.minusWallpaperPath()
+        if (!path.isNullOrBlank() && video != null) {
+            root.background = null
+            ivMinusWallpaper?.visibility = View.GONE
+            video.visibility = View.VISIBLE
+            video.onError = { what, extra ->
+                android.widget.Toast.makeText(
+                    this@MainActivity,
+                    "视频壁纸播放失败（code=$what/$extra），已回退桌面壁纸",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+                video.visibility = View.GONE
+                root.background = null
             }
-            com.nui.launcher.WallpaperController.MinusMode.IMAGE -> {
-                video?.release()
-                video?.visibility = View.GONE
+            video.setVideo(path)   // centerCrop 铺满、静音循环
+        } else {
+            val bmp = wallpaper.minusWallpaperBitmap()
+            video?.release()
+            video?.visibility = View.GONE
+            if (bmp != null) {
                 ivMinusWallpaper?.visibility = View.VISIBLE
                 root.background = null
-                val bmp = wallpaper.minusWallpaperBitmap()
                 ivMinusWallpaper?.setImageBitmap(bmp)   // centerCrop 铺满
-                if (bmp == null) ivMinusWallpaper?.visibility = View.GONE
-            }
-            else -> { // FOLLOW
-                video?.release()
-                video?.visibility = View.GONE
+            } else {
+                // 跟随桌面
                 ivMinusWallpaper?.setImageDrawable(null)
                 ivMinusWallpaper?.visibility = View.GONE
                 root.background = null       // 透明，透出 root 壁纸
@@ -394,9 +375,9 @@ class MainActivity : AppCompatActivity() {
         minusRoot?.findViewById<ImageView>(R.id.btnMinusNext)?.imageTintList = whiteTint
     }
 
-    /** 应用负一屏偏好：大号时钟显隐 + 重置闲置自动进入计时 */
+    /** 应用负一屏偏好：大号时钟玻璃效果 + 重置闲置自动进入计时 */
     private fun applyMinusPrefs() {
-        minusBigClock?.visibility = if (UiTheme.minusBigClock(this)) View.VISIBLE else View.GONE
+        minusBigClock?.visibility = View.VISIBLE
         applyBigClockGlass()
         setupAutoMinusTimer()
     }
@@ -807,9 +788,10 @@ class MainActivity : AppCompatActivity() {
         wallpaper.onActivityResult(requestCode, resultCode, data)
         wallpaper.onMinusActivityResult(requestCode, resultCode, data)
         // 从图库选壁纸返回后，刷新设置面板中壁纸的状态文字
-        if (requestCode == com.nui.launcher.WallpaperController.REQ_PICK ||
-            requestCode == com.nui.launcher.WallpaperController.REQ_PICK_MINUS_IMAGE ||
-            requestCode == com.nui.launcher.WallpaperController.REQ_PICK_MINUS_VIDEO) {
+        val wc = com.nui.launcher.WallpaperController
+        if (requestCode == wc.REQ_PICK ||
+            requestCode == wc.REQ_PICK_MINUS_DAY ||
+            requestCode == wc.REQ_PICK_MINUS_NIGHT) {
             settingsDialog?.refreshWallpaper()
         }
     }
@@ -907,7 +889,7 @@ class MainActivity : AppCompatActivity() {
         // 播放器仍在解码但画面不合成（透出桌面壁纸，表现为"动态壁纸设置无效"）。强制重绑 surface 重启。
         if (::wallpaper.isInitialized &&
             binding.viewPager.currentItem == 0 &&
-            wallpaper.minusWallpaperMode() == com.nui.launcher.WallpaperController.MinusMode.VIDEO
+            wallpaper.minusWallpaperPath() != null
         ) {
             binding.viewPager.post {
                 if (!isDestroyed && !isFinishing && binding.viewPager.currentItem == 0) {
@@ -1002,6 +984,8 @@ class MainActivity : AppCompatActivity() {
         // Dock 栏：半透明背景 + 时钟/图标色（圆角随 Dock 形态：贴边矩形 / 悬浮圆角）
         applyDockVisual(dark)
         applyMinusTheme()
+        // 外观切换时负一屏壁纸也按深浅重新解析（白天/晚上图自动切换）
+        applyMinusWallpaper()
         binding.dockClock.setTextColor(p.textPrimary)
         // dockApps 用现代N标彩色图标，不做 tint 染色
         val itemBg = RippleDrawable(
@@ -1036,8 +1020,6 @@ class MainActivity : AppCompatActivity() {
             rp.findViewById<TextView>(R.id.navLabelHome)?.setTextColor(p.textPrimary)
             rp.findViewById<TextView>(R.id.navLabelCompany)?.setTextColor(p.textPrimary)
             rp.findViewById<TextView>(R.id.navLabelFavorite)?.setTextColor(p.textPrimary)
-            rp.findViewById<TextView>(R.id.clockTime)?.setTextColor(p.textPrimary)
-            rp.findViewById<TextView>(R.id.clockDate)?.setTextColor(p.textSecondary)
             rp.findViewById<TextView>(R.id.weatherText)?.setTextColor(p.textSecondary)
             rp.findViewById<MaterialCardView>(R.id.musicPanel)?.setCardBackgroundColor(p.mapBg)
         }
@@ -1291,8 +1273,6 @@ class MainActivity : AppCompatActivity() {
             this,
             desktopNavInfoOverlay!!,
         )
-        // 负一屏视图可能已先绑定（ViewPager2 预加载）：交给 host 在 start 时一并附加
-        navInfoHost?.pendingMinusRoot = minusNavOverlay
         // 导航/巡航进行中不自动进入负一屏：激活时取消计时，结束时重新调度
         navInfoHost?.onNavActive = { setupAutoMinusTimer() }
         navInfoHost?.onNavInactive = { setupAutoMinusTimer() }
@@ -1421,13 +1401,9 @@ class MainActivity : AppCompatActivity() {
                     val dlg = com.nui.launcher.settings.SettingsDialog(this)
                     dlg.wallpaperHasCustom = { slot -> wallpaper.hasCustom(slot) }
                     dlg.onWallpaperPick = { slot -> wallpaper.showMenu(slot) }
-                    dlg.onMinusWallpaperPick = { wallpaper.showMinusMenu() }
-                    dlg.minusWallpaperStatus = {
-                        when (wallpaper.minusWallpaperMode()) {
-                            com.nui.launcher.WallpaperController.MinusMode.IMAGE -> "静态图片"
-                            com.nui.launcher.WallpaperController.MinusMode.VIDEO -> "动态视频"
-                            else -> "跟随桌面"
-                        }
+                    dlg.onMinusWallpaperPick = { day -> wallpaper.showMinusMenu(day) }
+                    dlg.minusWallpaperStatus = { day ->
+                        if (wallpaper.hasMinusCustom(day)) "已设置" else "跟随桌面"
                     }
                     // 负一屏偏好（大号时钟 / 闲置自动进入 / 等待时间）变化即时生效
                     dlg.onMinusPrefsChanged = { applyMinusPrefs() }

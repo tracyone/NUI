@@ -21,7 +21,6 @@ object UiTheme {
     private const val KEY_MAP_LAUNCH_DELAY_SEC = "map_launch_delay_sec"
     private const val KEY_MAP_RETURN_DELAY_SEC = "map_return_delay_sec"
     private const val KEY_UI_DPI = "ui_dpi"
-    private const val KEY_MINUS_BIG_CLOCK = "minus_big_clock"
     private const val KEY_AUTO_MINUS = "auto_minus"
     private const val KEY_AUTO_MINUS_MINUTES = "auto_minus_minutes" // 旧：分钟存储（兼容读取迁移）
     private const val KEY_AUTO_MINUS_SECONDS = "auto_minus_seconds" // 新：秒存储，支持 30 秒起步
@@ -36,34 +35,25 @@ object UiTheme {
             .edit().putInt(KEY_UI_DPI, dpi.coerceIn(0, 360)).apply()
     }
 
-    /** 负一屏是否在底栏之外显示大号时钟（时间+日期）。默认开启 */
-    fun minusBigClock(ctx: Context): Boolean =
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_MINUS_BIG_CLOCK, true)
-
-    fun setMinusBigClock(ctx: Context, on: Boolean) {
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit().putBoolean(KEY_MINUS_BIG_CLOCK, on).apply()
-    }
-
-    /** 闲置一段时间后是否自动进入负一屏（类似屏保）。默认关闭 */
+    /** 闲置一段时间后是否自动进入负一屏（类似屏保）。默认开启 */
     fun autoMinus(ctx: Context): Boolean =
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_AUTO_MINUS, false)
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_AUTO_MINUS, true)
 
     fun setAutoMinus(ctx: Context, on: Boolean) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putBoolean(KEY_AUTO_MINUS, on).apply()
     }
 
-    /** 自动进入负一屏的闲置等待秒数（30~3600，默认 3 分钟）。
+    /** 自动进入负一屏的闲置等待秒数（30~3600，默认 30 秒）。
      *  兼容旧数据：优先读新 key（秒），不存在时从旧 key（分钟）迁移。 */
     fun autoMinusSeconds(ctx: Context): Int {
         val sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         return if (sp.contains(KEY_AUTO_MINUS_SECONDS)) {
-            sp.getInt(KEY_AUTO_MINUS_SECONDS, 180)
+            sp.getInt(KEY_AUTO_MINUS_SECONDS, 30)
         } else if (sp.contains(KEY_AUTO_MINUS_MINUTES)) {
-            (sp.getInt(KEY_AUTO_MINUS_MINUTES, 3) * 60).coerceIn(30, 3600)
+            (sp.getInt(KEY_AUTO_MINUS_MINUTES, 0) * 60).coerceIn(30, 3600)
         } else {
-            180
+            30
         }
     }
 

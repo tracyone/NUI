@@ -42,6 +42,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var tabMusic: TextView
     private lateinit var tabSteering: TextView
     private lateinit var tabAppearance: TextView
+    private lateinit var tabWallpaper: TextView
     private lateinit var tabVoice: TextView
     private lateinit var tabMap: TextView
     private lateinit var tabApps: TextView
@@ -49,6 +50,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var panelMusic: View
     private lateinit var panelSteering: View
     private lateinit var panelAppearance: View
+    private lateinit var panelWallpaper: View
     private lateinit var panelVoice: View
     private lateinit var panelMap: View
     private lateinit var panelApps: View
@@ -95,6 +97,10 @@ class SettingsActivity : AppCompatActivity() {
     private var voiceSupportRetries = 0
     private lateinit var optWallpaperDay: View
     private lateinit var optWallpaperNight: View
+    private lateinit var optWallpaperMinusDay: View
+    private lateinit var optWallpaperMinusNight: View
+    private lateinit var tvWallpaperMinusDayStatus: TextView
+    private lateinit var tvWallpaperMinusNightStatus: TextView
     private lateinit var tvWallpaperDayStatus: TextView
     private lateinit var tvWallpaperNightStatus: TextView
     private lateinit var tvWallpaperHint: TextView
@@ -115,6 +121,7 @@ class SettingsActivity : AppCompatActivity() {
         tabMusic = findViewById(R.id.tabMusic)
         tabSteering = findViewById(R.id.tabSteering)
         tabAppearance = findViewById(R.id.tabAppearance)
+        tabWallpaper = findViewById(R.id.tabWallpaper)
         tabVoice = findViewById(R.id.tabVoice)
         tabMap = findViewById(R.id.tabMap)
         tabApps = findViewById(R.id.tabApps)
@@ -122,6 +129,7 @@ class SettingsActivity : AppCompatActivity() {
         panelMusic = findViewById(R.id.panelMusic)
         panelSteering = findViewById(R.id.panelSteering)
         panelAppearance = findViewById(R.id.panelAppearance)
+        panelWallpaper = findViewById(R.id.panelWallpaper)
         panelVoice = findViewById(R.id.panelVoice)
         panelMap = findViewById(R.id.panelMap)
         panelApps = findViewById(R.id.panelApps)
@@ -168,18 +176,23 @@ class SettingsActivity : AppCompatActivity() {
         checkVoiceMale = findViewById(R.id.checkVoiceMale)
         optWallpaperDay = findViewById(R.id.optWallpaperDay)
         optWallpaperNight = findViewById(R.id.optWallpaperNight)
+        optWallpaperMinusDay = findViewById(R.id.optWallpaperMinusDay)
+        optWallpaperMinusNight = findViewById(R.id.optWallpaperMinusNight)
         tvWallpaperDayStatus = findViewById(R.id.tvWallpaperDayStatus)
         tvWallpaperNightStatus = findViewById(R.id.tvWallpaperNightStatus)
+        tvWallpaperMinusDayStatus = findViewById(R.id.tvWallpaperMinusDayStatus)
+        tvWallpaperMinusNightStatus = findViewById(R.id.tvWallpaperMinusNightStatus)
         tvWallpaperHint = findViewById(R.id.tvWallpaperHint)
 
         // 左侧分类切换
         tabMusic.setOnClickListener { selectTab(0) }
         tabSteering.setOnClickListener { selectTab(1) }
         tabAppearance.setOnClickListener { selectTab(2) }
-        tabVoice.setOnClickListener { selectTab(3) }
-        tabMap.setOnClickListener { selectTab(4) }
-        tabApps.setOnClickListener { selectTab(5) }
-        tabAbout.setOnClickListener { selectTab(6) }
+        tabWallpaper.setOnClickListener { selectTab(3) }
+        tabVoice.setOnClickListener { selectTab(4) }
+        tabMap.setOnClickListener { selectTab(5) }
+        tabApps.setOnClickListener { selectTab(6) }
+        tabAbout.setOnClickListener { selectTab(7) }
         selectTab(0)
 
         // 地图：两个延迟配置，输入即时保存
@@ -252,6 +265,8 @@ class SettingsActivity : AppCompatActivity() {
         wallpaper.applyOnStart()
         optWallpaperDay.setOnClickListener { wallpaper.showMenu(com.nui.launcher.WallpaperController.Slot.DAY) }
         optWallpaperNight.setOnClickListener { wallpaper.showMenu(com.nui.launcher.WallpaperController.Slot.NIGHT) }
+        optWallpaperMinusDay.setOnClickListener { wallpaper.showMinusMenu(true) }
+        optWallpaperMinusNight.setOnClickListener { wallpaper.showMinusMenu(false) }
         refreshWallpaper()
         // 应用 → 管理隐藏应用：点击弹出隐藏列表，可恢复显示
         findViewById<View>(R.id.optHiddenApps).setOnClickListener { showHiddenAppsDialog() }
@@ -345,8 +360,8 @@ class SettingsActivity : AppCompatActivity() {
     private fun selectTab(index: Int, dark: Boolean) {
         currentTab = index
         val p = UiTheme.settingsPalette(dark)
-        val tabs = listOf(tabMusic, tabSteering, tabAppearance, tabVoice, tabMap, tabApps, tabAbout)
-        val panels = listOf(panelMusic, panelSteering, panelAppearance, panelVoice, panelMap, panelApps, panelAbout)
+        val tabs = listOf(tabMusic, tabSteering, tabAppearance, tabWallpaper, tabVoice, tabMap, tabApps, tabAbout)
+        val panels = listOf(panelMusic, panelSteering, panelAppearance, panelWallpaper, panelVoice, panelMap, panelApps, panelAbout)
         tabs.forEachIndexed { i, tab ->
             val isSel = i == index
             tab.isSelected = isSel
@@ -670,12 +685,19 @@ class SettingsActivity : AppCompatActivity() {
     private fun refreshWallpaper() {
         tvWallpaperDayStatus.text = if (wallpaper.hasCustom(com.nui.launcher.WallpaperController.Slot.DAY)) getString(R.string.wallpaper_set) else getString(R.string.wallpaper_default)
         tvWallpaperNightStatus.text = if (wallpaper.hasCustom(com.nui.launcher.WallpaperController.Slot.NIGHT)) getString(R.string.wallpaper_set) else getString(R.string.wallpaper_default)
+        // 负一屏白天/晚上壁纸：跟随桌面 / 已设置
+        tvWallpaperMinusDayStatus.text = if (wallpaper.hasMinusCustom(true)) "已设置" else "跟随桌面"
+        tvWallpaperMinusNightStatus.text = if (wallpaper.hasMinusCustom(false)) "已设置" else "跟随桌面"
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == com.nui.launcher.WallpaperController.REQ_PICK) {
+        val wc = com.nui.launcher.WallpaperController
+        if (requestCode == wc.REQ_PICK) {
             if (::wallpaper.isInitialized) wallpaper.onActivityResult(requestCode, resultCode, data)
+            refreshWallpaper()
+        } else if (requestCode == wc.REQ_PICK_MINUS_DAY || requestCode == wc.REQ_PICK_MINUS_NIGHT) {
+            if (::wallpaper.isInitialized) wallpaper.onMinusActivityResult(requestCode, resultCode, data)
             refreshWallpaper()
         }
     }

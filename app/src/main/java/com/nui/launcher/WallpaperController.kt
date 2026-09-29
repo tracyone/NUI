@@ -39,22 +39,20 @@ class WallpaperController(
         NIGHT("wallpaper_night.jpg"),
     }
 
-    /** 负一屏壁纸模式：FOLLOW=跟随桌面（默认）/ IMAGE=独立静态图 / VIDEO=独立动态视频 */
-    enum class MinusMode { FOLLOW, IMAGE, VIDEO }
+    /** 负一屏壁纸变更回调（选完图片/视频后通知 MainActivity 重新应用） */
+    var onMinusWallpaperChanged: (() -> Unit)? = null
 
     companion object {
         private const val TAG = "WallpaperController"
         const val REQ_PICK = 0x1011
-        const val REQ_PICK_MINUS_IMAGE = 0x1012
-        const val REQ_PICK_MINUS_VIDEO = 0x1013
+        /** 负一屏白天壁纸选图（图片/视频均可，按 MIME 自动存为 .jpg/.mp4） */
+        const val REQ_PICK_MINUS_DAY = 0x1012
+        /** 负一屏晚上壁纸选图（图片/视频均可） */
+        const val REQ_PICK_MINUS_NIGHT = 0x1013
         private const val PREFS = "nui_wallpaper"
-        private const val KEY_MINUS_MODE = "minus_mode"
-        private const val MINUS_IMAGE_FILE = "minus_image.jpg"
-        private const val MINUS_VIDEO_FILE = "minus_video.mp4"
+        private const val MINUS_DAY_BASE = "minus_day"
+        private const val MINUS_NIGHT_BASE = "minus_night"
     }
-
-    /** 负一屏壁纸变更回调（选完图片/视频后通知 MainActivity 重新应用） */
-    var onMinusWallpaperChanged: (() -> Unit)? = null
 
     /** 弹菜单/选图前隐藏悬浮地图，关闭后恢复（由外部注入，同 NavHost/MusicHost 模式） */
     var onHideFloat: (() -> Unit)? = null
@@ -154,27 +152,35 @@ class WallpaperController(
     }
 
     // ==================== 负一屏壁纸 ====================
+    // 设计：白天/晚上两个独立槽位，每槽位"跟随桌面"或"选择壁纸"（图片/视频自动识别）。
+    // 文件命名：minus_day.jpg / minus_day.mp4、minus_night.jpg / minus_night.mp4
+    // 应用时按当前外观深浅取对应槽位的文件；无文件则跟随桌面。
 
-    private fun minusPrefs() =
-        activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private fun minusBase(day: Boolean) = if (day) MINUS_DAY_BASE else MINUS_NIGHT_BASE
 
-    /** 当前负一屏壁纸模式（默认跟随桌面）。 */
-    fun minusWallpaperMode(): MinusMode = try {
-        MinusMode.valueOf(minusPrefs().getString(KEY_MINUS_MODE, MinusMode.FOLLOW.name)!!)
-    } catch (e: Exception) { MinusMode.FOLLOW }
-
-    /** 负一屏视频壁纸绝对路径（VIDEO 模式且文件存在时）。 */
-    fun minusWallpaperPath(): String? {
-        if (minusWallpaperMode() != MinusMode.VIDEO) return null
-        val f = File(activity.filesDir, MINUS_VIDEO_FILE)
-        return if (f.exists()) f.absolutePath else null
+    /** 查找指定槽位已存在的壁纸文件（先找 .jpg 再找 .mp4），不存在返回 null。 */
+    private fun minusFile(day: Boolean): File? {
+        val base = minusBase(day)
+        val jpg = File(activity.filesDir, "$base.jpg")
+        if (jpg.exists()) return jpg
+        val mp4 = File(activity.filesDir, "$base.mp4")
+        return if (mp4.exists()) mp4 else null
     }
 
-    /** 负一屏静态壁纸 Bitmap（IMAGE 模式且文件存在时，居中裁剪到屏幕尺寸）。 */
+    /** 当前外观应使用的负一屏壁纸文件（null=跟随桌面）。 */
+    private fun currentMinusFile(): File? = minusFile(!UiTheme.isDark(activity))
+
+    /** 当前负一屏壁纸是否为视频（文件存在且扩展名为 .mp4）。 */
+    private fun isVideoFile(f: File?): Boolean =
+        f != null && f.extension.equals("mp4", ignoreCase = true)
+
+    /** 负一屏视频壁纸路径（当前槽位为视频时）。 */
+    fun minusWallpaperPath(): String? = currentMinusFile()?.takeIf { isVideoFile(it) }?.absolutePath
+
+    /** 负一屏静态壁纸 Bitmap（当前槽位为图片时，居中裁剪到屏幕尺寸）。 */
     fun minusWallpaperBitmap(): Bitmap? {
-        if (minusWallpaperMode() != MinusMode.IMAGE) return null
-        val file = File(activity.filesDir, MINUS_IMAGE_FILE)
-        if (!file.exists()) return null
+        val file = currentMinusFile() ?: return null
+        if (isVideoFile(file)) return null
         return try {
             val sw = activity.resources.displayMetrics.widthPixels
             val sh = activity.resources.displayMetrics.heightPixels
@@ -189,81 +195,75 @@ class WallpaperController(
         }
     }
 
-    /** 弹负一屏壁纸菜单：跟随桌面 / 选择图片 / 选择视频 / （有图或视频时）恢复跟随。 */
-    fun showMinusMenu() {
-        val mode = minusWallpaperMode()
-        val items = mutableListOf("跟随桌面壁纸", "选择静态图片", "选择动态视频")
+    /** 负一屏白天/晚上壁纸是否已自定义（设置页状态显示用）。 */
+    fun hasMinusCustom(day: Boolean): Boolean = minusFile(day) != null
+
+    /** 弹负一屏指定槽位的壁纸菜单：跟随桌面 / 选择壁纸。 */
+    fun showMinusMenu(day: Boolean) {
+        val label = if (day) "白天" else "晚上"
+        val has = hasMinusCustom(day)
+        val items = if (has) arrayOf("跟随桌面", "选择新壁纸") else arrayOf("跟随桌面", "选择壁纸")
         onHideFloat?.invoke()
         followUpPending = false
         val d = AlertDialog.Builder(activity)
-            .setTitle("负一屏壁纸（当前：${minusModeLabel(mode)}）")
-            .setItems(items.toTypedArray()) { _, which ->
+            .setTitle("负一屏${label}壁纸")
+            .setItems(items) { _, which ->
                 when (which) {
-                    0 -> setMinusMode(MinusMode.FOLLOW)
-                    1 -> { followUpPending = true; pickMinusImage() }
-                    2 -> { followUpPending = true; pickMinusVideo() }
+                    0 -> resetMinus(day)
+                    1 -> { followUpPending = true; pickMinus(day) }
                 }
             }.create()
         d.setOnDismissListener { if (!followUpPending) onShowFloat?.invoke() }
         d.show()
     }
 
-    private fun minusModeLabel(m: MinusMode) = when (m) {
-        MinusMode.FOLLOW -> "跟随桌面"
-        MinusMode.IMAGE -> "静态图片"
-        MinusMode.VIDEO -> "动态视频"
-    }
-
-    private fun setMinusMode(m: MinusMode) {
-        minusPrefs().edit().putString(KEY_MINUS_MODE, m.name).apply()
-        NuiToast.show(activity, "负一屏壁纸：${minusModeLabel(m)}", Toast.LENGTH_SHORT)
-        onMinusWallpaperChanged?.invoke()
-        onShowFloat?.invoke()
-    }
-
-    private fun pickMinusImage() {
+    private fun pickMinus(day: Boolean) {
+        val label = if (day) "白天" else "晚上"
         val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = "image/*"
+            type = "*/*"  // 图片/视频均可，按 MIME 自动识别
         }
+        val req = if (day) REQ_PICK_MINUS_DAY else REQ_PICK_MINUS_NIGHT
         runCatching {
-            activity.startActivityForResult(Intent.createChooser(intent, "选择负一屏壁纸"), REQ_PICK_MINUS_IMAGE)
-        }.onFailure { Log.e(TAG, "pick minus image failed", it) }
+            activity.startActivityForResult(Intent.createChooser(intent, "选择负一屏${label}壁纸"), req)
+        }.onFailure { Log.e(TAG, "pick minus failed", it) }
     }
 
-    private fun pickMinusVideo() {
-        val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "video/*"
-        }
-        runCatching {
-            activity.startActivityForResult(Intent.createChooser(intent, "选择负一屏动态壁纸"), REQ_PICK_MINUS_VIDEO)
-        }.onFailure { Log.e(TAG, "pick minus video failed", it) }
-    }
-
-    /** 处理负一屏选图/选视频结果（MainActivity.onActivityResult 转发）。 */
+    /** 处理负一屏选图结果（MainActivity.onActivityResult 转发）。按 MIME 存为 .jpg/.mp4。 */
     fun onMinusActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (requestCode != REQ_PICK_MINUS_IMAGE && requestCode != REQ_PICK_MINUS_VIDEO) return
+        val isDay = requestCode == REQ_PICK_MINUS_DAY
+        val isNight = requestCode == REQ_PICK_MINUS_NIGHT
+        if (!isDay && !isNight) return
         onShowFloat?.invoke()
         if (resultCode != Activity.RESULT_OK || data == null) return
         val uri = data.data ?: return
-        val targetName = if (requestCode == REQ_PICK_MINUS_IMAGE) MINUS_IMAGE_FILE else MINUS_VIDEO_FILE
-        val target = File(activity.filesDir, targetName)
+        val day = isDay
         try {
+            // 先清掉该槽位旧文件（无论 .jpg 还是 .mp4）
+            File(activity.filesDir, "${minusBase(day)}.jpg").delete()
+            File(activity.filesDir, "${minusBase(day)}.mp4").delete()
+            val mime = activity.contentResolver.getType(uri) ?: ""
+            val ext = if (mime.startsWith("video/")) "mp4" else "jpg"
+            val target = File(activity.filesDir, "${minusBase(day)}.$ext")
             activity.contentResolver.openInputStream(uri)?.use { input ->
                 target.outputStream().use { output -> input.copyTo(output) }
             } ?: return
-            // 切换模式并通知重绘
-            val newMode = if (requestCode == REQ_PICK_MINUS_IMAGE) MinusMode.IMAGE else MinusMode.VIDEO
-            minusPrefs().edit().putString(KEY_MINUS_MODE, newMode.name).apply()
-            NuiToast.show(activity, "负一屏壁纸：${minusModeLabel(newMode)}", Toast.LENGTH_SHORT)
-            // 视频分辨率明显超过屏幕（像素总量 > 屏幕 2 倍）时，软解设备可能卡顿，温和提示但不阻止
-            if (newMode == MinusMode.VIDEO) warnIfVideoOversized(target)
+            NuiToast.show(activity, "负一屏${if (day) "白天" else "晚上"}壁纸已设置", Toast.LENGTH_SHORT)
+            if (ext == "mp4") warnIfVideoOversized(target)
             onMinusWallpaperChanged?.invoke()
         } catch (e: Exception) {
             Log.e(TAG, "copy minus failed", e)
             NuiToast.show(activity, "负一屏壁纸设置失败", Toast.LENGTH_SHORT)
         }
+    }
+
+    /** 恢复负一屏指定槽位为跟随桌面（删除该槽位文件）。 */
+    private fun resetMinus(day: Boolean) {
+        File(activity.filesDir, "${minusBase(day)}.jpg").delete()
+        File(activity.filesDir, "${minusBase(day)}.mp4").delete()
+        NuiToast.show(activity, "负一屏${if (day) "白天" else "晚上"}壁纸：跟随桌面", Toast.LENGTH_SHORT)
+        onMinusWallpaperChanged?.invoke()
+        onShowFloat?.invoke()
     }
     /** 探测视频分辨率，仅当视频明显超出屏幕（单边 2 倍以上，如 4K 在 1080p 屏）才提示软解可能卡顿。 */
     private fun warnIfVideoOversized(file: File) {
@@ -291,6 +291,31 @@ class WallpaperController(
         if (legacy.exists() && !day.exists()) {
             runCatching { legacy.copyTo(day, overwrite = false) }
             legacy.delete()
+        }
+        // 旧版负一屏单图/单视频 → 迁移到白天槽位（minus_day.jpg / minus_day.mp4）
+        val oldMinusImg = File(activity.filesDir, "minus_image.jpg")
+        val minusDayJpg = File(activity.filesDir, "$MINUS_DAY_BASE.jpg")
+        if (oldMinusImg.exists() && !minusDayJpg.exists()) {
+            runCatching { oldMinusImg.copyTo(minusDayJpg, overwrite = false) }
+            oldMinusImg.delete()
+        }
+        val oldMinusVid = File(activity.filesDir, "minus_video.mp4")
+        val minusDayMp4 = File(activity.filesDir, "$MINUS_DAY_BASE.mp4")
+        if (oldMinusVid.exists() && !minusDayMp4.exists()) {
+            runCatching { oldMinusVid.copyTo(minusDayMp4, overwrite = false) }
+            oldMinusVid.delete()
+        }
+        // 上一版的 minus_image_day/night.jpg 迁移到 minus_day/night.jpg
+        mapOf(
+            "minus_image_day.jpg" to "$MINUS_DAY_BASE.jpg",
+            "minus_image_night.jpg" to "$MINUS_NIGHT_BASE.jpg",
+        ).forEach { (old, new) ->
+            val o = File(activity.filesDir, old)
+            val n = File(activity.filesDir, new)
+            if (o.exists() && !n.exists()) {
+                runCatching { o.copyTo(n, overwrite = false) }
+                o.delete()
+            }
         }
     }
 

@@ -91,6 +91,19 @@
             android:textSize="18sp" />
 
         <TextView
+            android:id="@+id/tabWallpaper"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_settings_tab"
+            android:gravity="center_vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:text="@string/wallpaper_group"
+            android:textColor="@color/settings_label"
+            android:textSize="18sp" />
+
+        <TextView
             android:id="@+id/tabVoice"
             android:layout_width="match_parent"
             android:layout_height="52dp"
@@ -872,136 +885,6 @@
                         android:textColor="@color/settings_value"
                         android:textSize="13sp" />
 
-                    <!-- 壁纸分组（白天 / 晚上，跟随外观深浅自动选用） -->
-                    <TextView
-                        android:id="@+id/groupTitleWallpaper"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="20dp"
-                        android:text="@string/wallpaper_group"
-                        android:textColor="@color/settings_group_title"
-                        android:textSize="14sp" />
-
-                    <View
-                        android:id="@+id/dividerWallpaper"
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:layout_marginTop="12dp"
-                        android:layout_marginBottom="16dp"
-                        android:background="@color/settings_divider" />
-
-                    <!-- 白天壁纸（浅色外观使用） -->
-                    <LinearLayout
-                        android:id="@+id/optWallpaperDay"
-                        android:layout_width="match_parent"
-                        android:layout_height="56dp"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:background="@drawable/bg_settings_row_ripple"
-                        android:paddingStart="8dp"
-                        android:paddingEnd="8dp">
-
-                        <TextView
-                            android:id="@+id/tvOptWallpaperDay"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="@string/wallpaper_day"
-                            android:textColor="@color/settings_label"
-                            android:textSize="17sp" />
-
-                        <TextView
-                            android:id="@+id/tvWallpaperDayStatus"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="@string/wallpaper_default"
-                            android:textColor="@color/settings_value"
-                            android:textSize="14sp" />
-                    </LinearLayout>
-
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:background="@color/settings_divider" />
-
-                    <!-- 晚上壁纸（深色外观使用；未设置时自动回退白天壁纸） -->
-                    <LinearLayout
-                        android:id="@+id/optWallpaperNight"
-                        android:layout_width="match_parent"
-                        android:layout_height="56dp"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:background="@drawable/bg_settings_row_ripple"
-                        android:paddingStart="8dp"
-                        android:paddingEnd="8dp">
-
-                        <TextView
-                            android:id="@+id/tvOptWallpaperNight"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="@string/wallpaper_night"
-                            android:textColor="@color/settings_label"
-                            android:textSize="17sp" />
-
-                        <TextView
-                            android:id="@+id/tvWallpaperNightStatus"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="@string/wallpaper_default"
-                            android:textColor="@color/settings_value"
-                            android:textSize="14sp" />
-                    </LinearLayout>
-
-                    <!-- 负一屏壁纸（跟随桌面 / 静态图片 / 动态视频） -->
-                    <LinearLayout
-                        android:id="@+id/optWallpaperMinus"
-                        android:layout_width="match_parent"
-                        android:layout_height="56dp"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:background="@drawable/bg_settings_row_ripple"
-                        android:paddingStart="8dp"
-                        android:paddingEnd="8dp">
-
-                        <TextView
-                            android:id="@+id/tvOptWallpaperMinus"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="负一屏壁纸"
-                            android:textColor="@color/settings_label"
-                            android:textSize="17sp" />
-
-                        <TextView
-                            android:id="@+id/tvWallpaperMinusStatus"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="跟随桌面"
-                            android:textColor="@color/settings_value"
-                            android:textSize="14sp" />
-                    </LinearLayout>
-
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:background="@color/settings_divider" />
-
-                    <TextView
-                        android:id="@+id/tvWallpaperHint"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/wallpaper_hint"
-                        android:textColor="@color/settings_value"
-                        android:textSize="13sp" />
-
                     <!-- 负一屏分组 -->
                     <TextView
                         android:id="@+id/groupTitleMinus"
@@ -1018,43 +901,6 @@
                         android:layout_height="1dp"
                         android:layout_marginTop="12dp"
                         android:layout_marginBottom="16dp"
-                        android:background="@color/settings_divider" />
-
-                    <LinearLayout
-                        android:id="@+id/optMinusBigClock"
-                        android:layout_width="match_parent"
-                        android:layout_height="56dp"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:background="@drawable/bg_settings_row_ripple"
-                        android:paddingStart="8dp"
-                        android:paddingEnd="8dp">
-
-                        <TextView
-                            android:id="@+id/tvOptMinusBigClock"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="负一屏大号时钟"
-                            android:textColor="@color/settings_label"
-                            android:textSize="17sp" />
-
-                        <TextView
-                            android:id="@+id/checkMinusBigClock"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="✓"
-                            android:textColor="@color/settings_btn_text"
-                            android:textSize="20sp"
-                            android:visibility="gone" />
-                    </LinearLayout>
-
-                    <View
-                        android:id="@+id/dividerMinus2"
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
                         android:background="@color/settings_divider" />
 
                     <LinearLayout
@@ -1134,6 +980,210 @@
                         android:textSize="13sp" />
                 </LinearLayout>
             </ScrollView>
+        </LinearLayout>
+
+        <!-- 壁纸详情（桌面白天/晚上 + 负一屏白天/晚上/视频，独立一级入口） -->
+        <LinearLayout
+            android:id="@+id/panelWallpaper"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/groupTitleWallpaper"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/wallpaper_group"
+                android:textColor="@color/settings_group_title"
+                android:textSize="14sp" />
+
+            <View
+                android:id="@+id/dividerWallpaper"
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="12dp"
+                android:layout_marginBottom="16dp"
+                android:background="@color/settings_divider" />
+
+            <!-- 桌面壁纸分组 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="桌面壁纸"
+                android:textColor="@color/settings_group_title"
+                android:textSize="13sp" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="12dp"
+                android:layout_marginBottom="12dp"
+                android:background="@color/settings_divider" />
+
+            <!-- 白天壁纸（浅色外观使用） -->
+            <LinearLayout
+                android:id="@+id/optWallpaperDay"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="@drawable/bg_settings_row_ripple"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
+
+                <TextView
+                    android:id="@+id/tvOptWallpaperDay"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/wallpaper_day"
+                    android:textColor="@color/settings_label"
+                    android:textSize="17sp" />
+
+                <TextView
+                    android:id="@+id/tvWallpaperDayStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/wallpaper_default"
+                    android:textColor="@color/settings_value"
+                    android:textSize="14sp" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/settings_divider" />
+
+            <!-- 晚上壁纸（深色外观使用；未设置时自动回退白天壁纸） -->
+            <LinearLayout
+                android:id="@+id/optWallpaperNight"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="@drawable/bg_settings_row_ripple"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
+
+                <TextView
+                    android:id="@+id/tvOptWallpaperNight"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/wallpaper_night"
+                    android:textColor="@color/settings_label"
+                    android:textSize="17sp" />
+
+                <TextView
+                    android:id="@+id/tvWallpaperNightStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/wallpaper_default"
+                    android:textColor="@color/settings_value"
+                    android:textSize="14sp" />
+            </LinearLayout>
+
+            <!-- 负一屏壁纸分组 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:text="负一屏壁纸"
+                android:textColor="@color/settings_group_title"
+                android:textSize="13sp" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="12dp"
+                android:layout_marginBottom="12dp"
+                android:background="@color/settings_divider" />
+
+            <!-- 负一屏白天壁纸（跟随桌面 / 自定义图片或视频） -->
+            <LinearLayout
+                android:id="@+id/optWallpaperMinusDay"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="@drawable/bg_settings_row_ripple"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
+
+                <TextView
+                    android:id="@+id/tvOptWallpaperMinusDay"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="负一屏白天壁纸"
+                    android:textColor="@color/settings_label"
+                    android:textSize="17sp" />
+
+                <TextView
+                    android:id="@+id/tvWallpaperMinusDayStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="跟随桌面"
+                    android:textColor="@color/settings_value"
+                    android:textSize="14sp" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/settings_divider" />
+
+            <!-- 负一屏晚上壁纸（跟随桌面 / 自定义图片或视频） -->
+            <LinearLayout
+                android:id="@+id/optWallpaperMinusNight"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="@drawable/bg_settings_row_ripple"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
+
+                <TextView
+                    android:id="@+id/tvOptWallpaperMinusNight"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="负一屏晚上壁纸"
+                    android:textColor="@color/settings_label"
+                    android:textSize="17sp" />
+
+                <TextView
+                    android:id="@+id/tvWallpaperMinusNightStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="跟随桌面"
+                    android:textColor="@color/settings_value"
+                    android:textSize="14sp" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/settings_divider" />
+
+            <TextView
+                android:id="@+id/tvWallpaperHint"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/wallpaper_hint"
+                android:textColor="@color/settings_value"
+                android:textSize="13sp" />
         </LinearLayout>
 
         <!-- 声音详情 -->

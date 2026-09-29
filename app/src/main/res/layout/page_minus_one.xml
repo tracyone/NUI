@@ -73,17 +73,6 @@
             android:shadowDy="2" />
     </LinearLayout>
 
-    <!-- 导航/巡航信息卡（复用 view_nav_info；wrap_content 左下角、大时钟下方左列，
-         底栏上方，仅导航/巡航中显示） -->
-    <include
-        android:id="@+id/navInfoOverlayMinus"
-        layout="@layout/view_nav_info"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom|start"
-        android:layout_marginStart="28dp"
-        android:layout_marginBottom="96dp" />
-
     <!-- 底部扁平横条：背景色/字体色由代码按外观设置（与 dock 一致） -->
     <LinearLayout
         android:id="@+id/minusBar"

@@ -89,9 +89,8 @@ class NavInfoHost(
         val weather: View? = (root.parent as? ViewGroup)?.findViewById(R.id.weatherText)
     }
 
-    /** 当前已附加的全部卡片（page0 必在；负一屏由 [attachMinus] 在视图绑定时加入） */
+    /** 当前已附加的全部卡片（仅桌面页 page=1；负一屏不显示导航信息） */
     private val refs = ArrayList<Refs>()
-    private var minusAttachedRoot: View? = null
 
     // 模式：NONE=普通桌面 / NAVI=导航 / CRUISE=巡航
     private enum class Mode { NONE, NAVI, CRUISE }
@@ -155,8 +154,6 @@ class NavInfoHost(
     fun start() {
         refs.clear()
         refs.add(Refs(overlay, 1))
-        // 负一屏可能已先于本方法完成绑定：若 MainActivity 已缓存其根视图则立即附加
-        pendingMinusRoot?.let { attachMinus(it) }
         tts = NuiTts(context)
         context.registerReceiver(receiver, IntentFilter(ACTION_SEND))
         val h = android.os.Handler(android.os.Looper.getMainLooper())
@@ -172,29 +169,10 @@ class NavInfoHost(
         Log.i(TAG, "导航/巡航信息显示已启动（卡片数=${refs.size}）")
     }
 
-    /** start() 前负一屏已绑定时，由 MainActivity 暂存其根视图，start() 内据此补附加 */
-    var pendingMinusRoot: View? = null
     /** 导航/巡航激活时回调（用于取消闲置自动进入负一屏计时等） */
     var onNavActive: (() -> Unit)? = null
     /** 导航/巡航结束时回调（用于重新安排闲置自动进入负一屏计时等） */
     var onNavInactive: (() -> Unit)? = null
-
-    /** 附加负一屏卡片（视图在 ViewPager2 中绑定/重建时调用，幂等） */
-    fun attachMinus(root: View?) {
-        if (root == null) return
-        if (minusAttachedRoot === root) {
-            syncRefsState()
-            return
-        }
-        // ViewHolder 重建：移除旧的负一屏 Refs（page=0），加入新的
-        refs.removeAll { it.page == 0 }
-        refs.add(Refs(root, 0))
-        minusAttachedRoot = root
-        pendingMinusRoot = root
-        applyTheme()
-        syncRefsState()
-        Log.i(TAG, "负一屏导航/巡航卡已附加（卡片数=${refs.size}）")
-    }
 
     /** 把当前模式/可见性/数据块状态同步到所有卡片（附加新卡片或重建后调用） */
     private fun syncRefsState() {

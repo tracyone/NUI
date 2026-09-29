@@ -178,7 +178,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content" />
 
-        <!-- 时钟 -->
+        <!-- 时钟区：去掉大时间（负一屏已有大时钟），仅保留天气 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
@@ -186,26 +186,6 @@
             android:orientation="vertical"
             android:gravity="center"
             android:layout_marginTop="8dp">
-
-            <TextClock
-                android:id="@+id/clockTime"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:format12Hour="HH:mm"
-                android:format24Hour="HH:mm"
-                android:textSize="44sp"
-                android:textColor="@color/text_primary"
-                android:textStyle="bold" />
-
-            <TextClock
-                android:id="@+id/clockDate"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:format12Hour="M月d日 EEE"
-                android:format24Hour="M月d日 EEE"
-                android:textSize="14sp"
-                android:textColor="@color/text_secondary"
-                android:layout_marginTop="2dp" />
 
             <TextView
                 android:id="@+id/weatherText"
