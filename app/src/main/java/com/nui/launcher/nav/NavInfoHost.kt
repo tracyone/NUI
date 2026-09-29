@@ -174,8 +174,10 @@ class NavInfoHost(
 
     /** start() 前负一屏已绑定时，由 MainActivity 暂存其根视图，start() 内据此补附加 */
     var pendingMinusRoot: View? = null
-    /** 导航/巡航激活时回调（用于重置闲置计时等） */
+    /** 导航/巡航激活时回调（用于取消闲置自动进入负一屏计时等） */
     var onNavActive: (() -> Unit)? = null
+    /** 导航/巡航结束时回调（用于重新安排闲置自动进入负一屏计时等） */
+    var onNavInactive: (() -> Unit)? = null
 
     /** 附加负一屏卡片（视图在 ViewPager2 中绑定/重建时调用，幂等） */
     fun attachMinus(root: View?) {
@@ -314,7 +316,8 @@ class NavInfoHost(
         if (old == Mode.CRUISE && newMode != Mode.CRUISE) setAmapCruiseMute(false)
         Log.i(TAG, "模式: ${old.name} -> ${newMode.name}")
         val active = newMode != Mode.NONE
-        if (active) onNavActive?.invoke()  // 导航/巡航激活视为用户活动，重置闲置计时
+        if (active) onNavActive?.invoke()       // 进入导航/巡航：取消闲置计时
+        else onNavInactive?.invoke()            // 退出导航/巡航：重新安排闲置计时
         // 疲劳提醒：进入驾驶态开始计时，退出驾驶态停止/重置
         val wasDriving = old == Mode.NAVI || old == Mode.CRUISE
         val nowDriving = newMode == Mode.NAVI || newMode == Mode.CRUISE
@@ -348,6 +351,10 @@ class NavInfoHost(
 
     /** MainActivity 更新天气时调用：导航/巡航中返回 true 则不显示天气文字（区域被占用） */
     fun isNavActive(): Boolean = mode != Mode.NONE
+
+    /** 是否处于导航中（不含巡航）：用于决定是否阻止自动进入负一屏。
+     *  巡航仍允许自动进入负一屏（巡航卡显示在负一屏上，不冲突）。 */
+    fun isNavigating(): Boolean = mode == Mode.NAVI
 
     // ==================== 疲劳驾驶提醒 ====================
     private fun isDriving(): Boolean = mode == Mode.NAVI || mode == Mode.CRUISE

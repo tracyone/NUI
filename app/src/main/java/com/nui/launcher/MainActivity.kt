@@ -421,16 +421,20 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** （重新）安排闲置自动进入负一屏；开关关或已在负一屏时不安排 */
+    /** （重新）安排闲置自动进入负一屏；开关关、已在负一屏、或导航中时不安排。
+     *  导航中不自动进负一屏，避免打断驾驶；巡航不受影响（巡航卡可在负一屏显示）。
+     *  退出导航后由 onNavInactive 重新调度。 */
     private fun setupAutoMinusTimer() {
         autoMinusHandler.removeCallbacksAndMessages(null)
         autoMinusRunnable = null
         if (!UiTheme.autoMinus(this)) return
         if (binding.viewPager.currentItem == 0) return
+        if (navInfoHost?.isNavigating() == true) return   // 仅导航中不调度，巡航正常
         val delayMs = UiTheme.autoMinusSeconds(this) * 1_000L
         val r = Runnable {
             if (!isFinishing && !isDestroyed && UiTheme.autoMinus(this) &&
-                binding.viewPager.currentItem != 0
+                binding.viewPager.currentItem != 0 &&
+                navInfoHost?.isNavigating() != true        // 触发时再次确认未在导航
             ) {
                 binding.viewPager.setCurrentItem(0, true)
             }
@@ -1289,8 +1293,9 @@ class MainActivity : AppCompatActivity() {
         )
         // 负一屏视图可能已先绑定（ViewPager2 预加载）：交给 host 在 start 时一并附加
         navInfoHost?.pendingMinusRoot = minusNavOverlay
-        // 导航/巡航激活时重置闲置计时（发导航、巡航开始不算闲置）
-        navInfoHost?.onNavActive = { onUserActive() }
+        // 导航/巡航进行中不自动进入负一屏：激活时取消计时，结束时重新调度
+        navInfoHost?.onNavActive = { setupAutoMinusTimer() }
+        navInfoHost?.onNavInactive = { setupAutoMinusTimer() }
         navInfoHost?.start()
         bindNavFavoriteClick()
     }
