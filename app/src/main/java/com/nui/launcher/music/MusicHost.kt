@@ -244,9 +244,19 @@ class MusicHost(
     }
 
     /** 用户点击"去授权"时调用：跳到通知监听权限设置页 */
-    /** 方向盘按键用：下一首/上一首 */
-    fun next() { currentController?.let { safe { it.transportControls.skipToNext() } } }
-    fun prev() { currentController?.let { safe { it.transportControls.skipToPrevious() } } }
+    /** 方向盘按键用：下一首/上一首。
+     *  绑定音乐没有活跃会话（未启动）时先拉起它（与启动卡点击行为一致，3 秒后自动回桌面）；
+     *  已在运行（播放/暂停）则直接切歌，不重复启动。 */
+    fun next() {
+        val c = currentController
+        if (c == null) { if (hasPermission) launchPreferredApp(); return }
+        safe { c.transportControls.skipToNext() }
+    }
+    fun prev() {
+        val c = currentController
+        if (c == null) { if (hasPermission) launchPreferredApp(); return }
+        safe { c.transportControls.skipToPrevious() }
+    }
 
     fun requestPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -816,21 +826,31 @@ class MusicHost(
                 primedPackage = pkg
                 // 用户主动进入 App：停留，不自动回桌面（浮窗随 onResume 恢复）
                 if (!autoReturn) return
-                // 延迟返回 NUI
-                handler.postDelayed({
-                    val back = Intent().apply {
-                        setClassName(context, "com.nui.launcher.MainActivity")
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-                    }
-                    runCatching { context.startActivity(back) }
-                    // 回 NUI 后延迟更久再恢复地图浮窗：让酷我 FloatApp 先创建，高德后创建在 z-order 上层
-                    handler.postDelayed({ onShowFloat?.invoke() }, 2500L)
-                }, 3000L)
+                // 延迟返回 NUI；车机音乐 App 冷启动慢，首次返回后可能其初始化完成又抢回前台，
+                // 补发一次夺回桌面（与 MapHost.goBackToNui 双保险同策略）。
+                // 带 EXTRA_AUTO_BACK：第二次返回时 NUI 可能已在前台，只保持当前页，
+                // 避免误触发 onNewIntent 的 page 切换/外部恢复逻辑
+                handler.postDelayed({ backToNui() }, 3000L)
+                handler.postDelayed({ backToNui() }, 5500L)
+                // 回 NUI 后延迟更久再恢复地图浮窗：让酷我 FloatApp 先创建，高德后创建在 z-order 上层
+                handler.postDelayed({ onShowFloat?.invoke() }, 8000L)
                 return
             }
             NuiToast.show(context, "无法启动已绑定的音乐 App（$pkg）", Toast.LENGTH_SHORT)
         }
         pickPreferredApp()
+    }
+
+    /** 返回 NUI：发 HOME intent 把已有的 home task（singleTask 的 MainActivity）带到前台，
+     *  走 onNewIntent（同 MapHost.goBackToNui 的成熟方案——显式 Intent 从外部 task 启动
+     *  可能重建实例，HOME intent 不会）。带 EXTRA_AUTO_BACK：只保持当前页，不触发翻页逻辑。 */
+    private fun backToNui() {
+        val back = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_HOME)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            putExtra(com.nui.launcher.map.MapHost.EXTRA_AUTO_BACK, true)
+        }
+        runCatching { context.startActivity(back) }
     }
 
     /** 清理回调，Activity 销毁时调用 */

@@ -181,12 +181,15 @@ class NavHost(
         }
     }
 
-    /** 发起导航后延迟返回 NUI，并恢复高德浮窗（用户可在悬浮窗看到导航画面）。 */
+    /** 发起导航后延迟返回 NUI，并恢复高德浮窗（用户可在悬浮窗看到导航画面）。
+     *  带 [EXTRA_BACK_DESKTOP] 标记：无论从哪页发起（如负一屏），返回后强制切到桌面页——
+     *  导航卡/悬浮地图都在桌面页，停在负一屏看不到导航状态。 */
     private fun returnToNui(delayMs: Long) {
         handler.postDelayed({
             val back = Intent().apply {
                 setClassName(context, "com.nui.launcher.MainActivity")
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                putExtra(EXTRA_BACK_DESKTOP, true)
             }
             runCatching { context.startActivity(back) }
             // 回 NUI 后恢复浮窗，高德在后台继续导航
@@ -390,6 +393,8 @@ class NavHost(
     private data class NavTarget(val label: String, val lat: Double, val lon: Double)
 
     companion object {
+        /** 返回 NUI 时强制切到桌面页（负一屏发起导航后返回必须落在桌面页） */
+        const val EXTRA_BACK_DESKTOP = "nui_back_desktop"
         private const val PREFS = "nui_nav"
         private const val KEY_HOME = "home"
         private const val KEY_COMPANY = "company"

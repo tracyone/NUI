@@ -541,6 +541,8 @@ class MainActivity : AppCompatActivity() {
                 onUserActive()
                 // 负一屏无 dock 栏；其它页（桌面/应用列表）恢复 dock
                 binding.dockBar.visibility = if (position == 0) View.GONE else View.VISIBLE
+                // 负一屏强制隐藏系统 Dock（不管用户设置）；切回其它页按用户设置恢复
+                applySystemDock()
                 // 离开桌面时关闭高德浮窗；回到桌面时浮窗几何由 IDLE 回调刷新
                 // （滑动动画中 getLocationOnScreen 会取到过渡坐标，导致浮窗与 dock 重叠）
                 if (::mapHost.isInitialized && position != 1) mapHost.closeFloat()
@@ -821,6 +823,14 @@ class MainActivity : AppCompatActivity() {
             android.util.Log.d("NUI.Main", "onNewIntent: EXTRA_AUTO_BACK, keep page ${binding.viewPager.currentItem}")
             return
         }
+        // 导航发起后返回：强制切到桌面页——导航卡/悬浮地图都在桌面页，
+        // 从负一屏发起导航时不能恢复回负一屏（否则看不到导航状态）
+        if (intent.getBooleanExtra(com.nui.launcher.nav.NavHost.EXTRA_BACK_DESKTOP, false)) {
+            launchedExternalApp = false
+            if (binding.viewPager.currentItem != 1) binding.viewPager.setCurrentItem(1, false)
+            android.util.Log.d("NUI.Main", "onNewIntent: EXTRA_BACK_DESKTOP -> page 1")
+            return
+        }
         if (launchedExternalApp) {
             // 从外部 app 按 home 回来：恢复到启动前的 page
             binding.viewPager.currentItem = pageBeforeLaunch
@@ -1021,6 +1031,8 @@ class MainActivity : AppCompatActivity() {
             rp.findViewById<TextView>(R.id.navLabelCompany)?.setTextColor(p.textPrimary)
             rp.findViewById<TextView>(R.id.navLabelFavorite)?.setTextColor(p.textPrimary)
             rp.findViewById<TextView>(R.id.weatherText)?.setTextColor(p.textSecondary)
+            rp.findViewById<TextView>(R.id.clockTime)?.setTextColor(p.textPrimary)
+            rp.findViewById<TextView>(R.id.clockDate)?.setTextColor(p.textSecondary)
             rp.findViewById<MaterialCardView>(R.id.musicPanel)?.setCardBackgroundColor(p.mapBg)
         }
     }
@@ -1672,12 +1684,17 @@ class MainActivity : AppCompatActivity() {
         if (::mapHost.isInitialized) mapHost.setRightLimit(availableRight)
     }
 
+    /** 有效的系统 Dock 显示状态：负一屏（position 0）强制隐藏系统 Dock（不管用户设置），
+     *  其它页（桌面/应用列表）按用户设置。切页时由 onPageSelected 重新应用。 */
+    private fun effectiveShowDock(): Boolean =
+        UiTheme.showSystemDock(this) && binding.viewPager.currentItem != 0
+
     /** 按配置应用系统栏显隐（状态栏/导航栏）。
      *  API30+ 用 WindowInsetsController（应用退出回桌面后重设可靠，旧 systemUiVisibility 在
      *  Android 11+ 已废弃、切回前台后可能不生效）；低版本用 systemUiVisibility。 */
     private fun applySystemUi() {
         val showStatus = UiTheme.showStatusBar(this)
-        val showDock = UiTheme.showSystemDock(this)
+        val showDock = effectiveShowDock()
         if (Build.VERSION.SDK_INT >= 30) {
             val controller = window.insetsController ?: return
             if (showStatus) controller.show(android.view.WindowInsets.Type.statusBars())
@@ -1709,7 +1726,7 @@ class MainActivity : AppCompatActivity() {
      */
     private fun applySystemDock() {
         val showStatus = UiTheme.showStatusBar(this)
-        val showDock = UiTheme.showSystemDock(this)
+        val showDock = effectiveShowDock()
         if (showStatus) {
             window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
         } else {
@@ -1741,11 +1758,11 @@ class MainActivity : AppCompatActivity() {
         // 使左侧 dock、页面、天气层等各窗口动态缩小上移，不遮挡系统 Dock。
         binding.root.setOnApplyWindowInsetsListener { v, insets ->
             val top = if (UiTheme.showStatusBar(this)) insets.getSystemWindowInsetTop() else 0
-            val bottom = if (UiTheme.showSystemDock(this)) insets.getSystemWindowInsetBottom() else 0
+            val bottom = if (effectiveShowDock()) insets.getSystemWindowInsetBottom() else 0
             v.setPadding(0, top, 0, bottom)
-            // 系统 Dock 显隐切换：ViewPager2 高度变化 → 应用网格可用高度变化，
+            // 系统 Dock 显隐切换（含负一屏强制隐藏）：ViewPager2 高度变化 → 应用网格可用高度变化，
             // 更新 rv 底部内边距并在本帧布局完成后重算行数/行高
-            val curDock = UiTheme.showSystemDock(this)
+            val curDock = effectiveShowDock()
             val prevDock = lastSystemDock
             lastSystemDock = curDock
             if (prevDock != null && prevDock != curDock) {
@@ -1760,7 +1777,7 @@ class MainActivity : AppCompatActivity() {
             // 悬浮地图（高德浮窗）同步避让底部系统 Dock：上限=物理屏高-导航栏高-8dp；
             // Dock 隐藏时解除限制（可拖到屏幕最底部）
             if (::mapHost.isInitialized) {
-                if (UiTheme.showSystemDock(this)) {
+                if (effectiveShowDock()) {
                     // 导航栏高度统一用 getNavBarHeight()（含 nui_debug_navbar_h 模拟值），
                     // 不用 inset：模拟器/无系统栏设备无真实 inset，用 inset 会把限制错误清掉
                     val sh = realScreenHeight()
