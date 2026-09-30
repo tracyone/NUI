@@ -549,8 +549,9 @@ class MainActivity : AppCompatActivity() {
                 onUserActive()
                 // 负一屏无 dock 栏；其它页（桌面/应用列表）恢复 dock
                 binding.dockBar.visibility = if (position == 0) View.GONE else View.VISIBLE
-                // 进入负一屏时关闭桌面设置弹窗，避免弹窗悬浮在负一屏之上
-                if (position == 0) settingsDialog?.dismiss()
+                // 进入负一屏时关闭桌面设置弹窗，避免弹窗悬浮在负一屏之上。
+                // 使用无动画关闭，防止浅色背景淡出动画透过负一屏透明根布局形成白雾。
+                if (position == 0) settingsDialog?.dismissImmediate()
                 // 负一屏强制隐藏系统 Dock（不管用户设置）；切回其它页按用户设置恢复
                 applySystemDock()
                 // 离开桌面时关闭高德浮窗；回到桌面时浮窗几何由 IDLE 回调刷新

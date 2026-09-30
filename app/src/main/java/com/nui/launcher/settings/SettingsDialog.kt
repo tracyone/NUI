@@ -1035,6 +1035,12 @@ class SettingsDialog(context: Context) : Dialog(context) {
     /** 捕获对话框内所有触摸事件，通知宿主重置闲置计时（DOWN/MOVE 各限流一次） */
     private var lastTouchResetMs = 0L
 
+    /** 无动画立即关闭（用于自动进入负一屏等场景，避免浅色背景淡出动画透到负一屏形成白雾） */
+    fun dismissImmediate() {
+        window?.setWindowAnimations(0)
+        dismiss()
+    }
+
     override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
         val action = ev.actionMasked
         if (action == android.view.MotionEvent.ACTION_DOWN ||
