@@ -117,6 +117,9 @@ class SettingsDialog(context: Context) : Dialog(context) {
     /** 点击壁纸槽位（由 MainActivity 注入，弹出该槽位的壁纸菜单） */
     var onWallpaperPick: ((com.nui.launcher.WallpaperController.Slot) -> Unit)? = null
 
+    /** 对话框内有触摸事件时回调（MainActivity 用来重置闲置计时） */
+    var onUserTouch: (() -> Unit)? = null
+
     /** 点击负一屏白天/晚上壁纸行：由宿主弹菜单（true=白天，false=晚上） */
     var onMinusWallpaperPick: ((day: Boolean) -> Unit)? = null
 
@@ -1028,4 +1031,18 @@ class SettingsDialog(context: Context) : Dialog(context) {
     }
 
     private fun dp(v: Int) = (v * context.resources.displayMetrics.density).toInt()
+
+    /** 捕获对话框内所有触摸事件，通知宿主重置闲置计时（DOWN/MOVE 各限流一次） */
+    private var lastTouchResetMs = 0L
+
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        val action = ev.actionMasked
+        if (action == android.view.MotionEvent.ACTION_DOWN ||
+            (action == android.view.MotionEvent.ACTION_MOVE &&
+             android.os.SystemClock.uptimeMillis() - lastTouchResetMs > 2_000L)) {
+            lastTouchResetMs = android.os.SystemClock.uptimeMillis()
+            onUserTouch?.invoke()
+        }
+        return super.dispatchTouchEvent(ev)
+    }
 }

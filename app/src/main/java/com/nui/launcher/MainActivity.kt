@@ -434,6 +434,8 @@ class MainActivity : AppCompatActivity() {
     private var edgeDownX = 0f
     private var edgeDownY = 0f
     private var edgeTriggered = false
+    /** 上次重置闲置计时的时间戳（ACTION_MOVE 限流用，避免每帧都调 setupAutoMinusTimer） */
+    private var lastActiveResetMs = 0L
 
     override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
         val action = ev.actionMasked
@@ -447,6 +449,12 @@ class MainActivity : AppCompatActivity() {
                 edgeTriggered = false
             }
             android.view.MotionEvent.ACTION_MOVE -> {
+                // 用户持续滑动（浏览应用列表/拖动等）也属活动，限流重置闲置计时
+                val now = android.os.SystemClock.uptimeMillis()
+                if (now - lastActiveResetMs > 2_000L) {
+                    lastActiveResetMs = now
+                    onUserActive()
+                }
                 if (!edgeTriggered && binding.viewPager.currentItem == 1) {
                     val dx = ev.rawX - edgeDownX
                     val dy = ev.rawY - edgeDownY
@@ -541,6 +549,8 @@ class MainActivity : AppCompatActivity() {
                 onUserActive()
                 // 负一屏无 dock 栏；其它页（桌面/应用列表）恢复 dock
                 binding.dockBar.visibility = if (position == 0) View.GONE else View.VISIBLE
+                // 进入负一屏时关闭桌面设置弹窗，避免弹窗悬浮在负一屏之上
+                if (position == 0) settingsDialog?.dismiss()
                 // 负一屏强制隐藏系统 Dock（不管用户设置）；切回其它页按用户设置恢复
                 applySystemDock()
                 // 离开桌面时关闭高德浮窗；回到桌面时浮窗几何由 IDLE 回调刷新
@@ -1413,6 +1423,8 @@ class MainActivity : AppCompatActivity() {
                     val dlg = com.nui.launcher.settings.SettingsDialog(this)
                     dlg.wallpaperHasCustom = { slot -> wallpaper.hasCustom(slot) }
                     dlg.onWallpaperPick = { slot -> wallpaper.showMenu(slot) }
+                    // 设置弹窗内的触摸也重置闲置计时
+                    dlg.onUserTouch = { onUserActive() }
                     dlg.onMinusWallpaperPick = { day -> wallpaper.showMinusMenu(day) }
                     dlg.minusWallpaperStatus = { day ->
                         if (wallpaper.hasMinusCustom(day)) "已设置" else "跟随桌面"
