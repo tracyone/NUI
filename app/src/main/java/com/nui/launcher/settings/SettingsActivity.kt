@@ -681,13 +681,13 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    /** 刷新壁纸槽位状态文字（默认/已设置） */
+    /** 刷新壁纸槽位状态文字（默认/文件名） */
     private fun refreshWallpaper() {
-        tvWallpaperDayStatus.text = if (wallpaper.hasCustom(com.nui.launcher.WallpaperController.Slot.DAY)) getString(R.string.wallpaper_set) else getString(R.string.wallpaper_default)
-        tvWallpaperNightStatus.text = if (wallpaper.hasCustom(com.nui.launcher.WallpaperController.Slot.NIGHT)) getString(R.string.wallpaper_set) else getString(R.string.wallpaper_default)
-        // 负一屏白天/晚上壁纸：跟随桌面 / 已设置
-        tvWallpaperMinusDayStatus.text = if (wallpaper.hasMinusCustom(true)) "已设置" else "跟随桌面"
-        tvWallpaperMinusNightStatus.text = if (wallpaper.hasMinusCustom(false)) "已设置" else "跟随桌面"
+        tvWallpaperDayStatus.text = wallpaper.wallpaperDisplayName(com.nui.launcher.WallpaperController.Slot.DAY) ?: getString(R.string.wallpaper_default)
+        tvWallpaperNightStatus.text = wallpaper.wallpaperDisplayName(com.nui.launcher.WallpaperController.Slot.NIGHT) ?: getString(R.string.wallpaper_default)
+        // 负一屏白天/晚上壁纸：跟随桌面 / 文件名
+        tvWallpaperMinusDayStatus.text = wallpaper.minusWallpaperDisplayName(true) ?: "跟随桌面"
+        tvWallpaperMinusNightStatus.text = wallpaper.minusWallpaperDisplayName(false) ?: "跟随桌面"
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {

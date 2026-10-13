@@ -6,6 +6,7 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
+import android.database.Cursor
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
@@ -102,12 +103,48 @@ class WallpaperController(
                     input.copyTo(output)
                 }
             } ?: return false
+            // 保存原始文件名供设置页显示
+            queryDisplayName(uri)?.let { name ->
+                activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .edit().putString("name_${slot.name}", name).apply()
+            }
             applyForAppearance(UiTheme.isDark(activity))
             true
         } catch (e: Exception) {
             Log.e(TAG, "copyToInternal failed", e)
             false
         }
+    }
+
+    /** 从 Uri 查询原始文件名（DISPLAY_NAME），失败返回 null。 */
+    private fun queryDisplayName(uri: Uri): String? {
+        return try {
+            activity.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c: Cursor ->
+                if (c.moveToFirst()) c.getString(0) else null
+            }
+        } catch (e: Exception) { null }
+    }
+
+    /** 设置页显示用：壁纸原始文件名（已裁剪到 24 字符），未设置返回 null。 */
+    fun wallpaperDisplayName(slot: Slot): String? {
+        if (!hasCustom(slot)) return null
+        val name = activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString("name_${slot.name}", null)
+        return name?.let { cropName(it) } ?: activity.getString(com.nui.launcher.R.string.wallpaper_set)
+    }
+
+    /** 设置页显示用：负一屏壁纸原始文件名（已裁剪），未设置返回 null。 */
+    fun minusWallpaperDisplayName(day: Boolean): String? {
+        if (!hasMinusCustom(day)) return null
+        val key = "name_minus_${if (day) "day" else "night"}"
+        val name = activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(key, null)
+        return name?.let { cropName(it) } ?: "已设置"
+    }
+
+    private fun cropName(name: String): String {
+        val max = 24
+        return if (name.length <= max) name else name.take(max - 1) + "…"
     }
 
     /** 启动时应用壁纸（自动迁移旧版单壁纸 → 白天壁纸）。 */
@@ -128,7 +165,12 @@ class WallpaperController(
     /** 恢复默认壁纸（指定槽位；默认双槽位全清）。 */
     fun reset(slot: Slot? = null) {
         val slots = slot?.let { listOf(it) } ?: Slot.values().toList()
-        for (s in slots) File(activity.filesDir, s.fileName).delete()
+        val ed = activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        for (s in slots) {
+            File(activity.filesDir, s.fileName).delete()
+            ed.remove("name_${s.name}")
+        }
+        ed.apply()
         applyForAppearance(UiTheme.isDark(activity))
         NuiToast.show(activity, "已恢复默认壁纸", Toast.LENGTH_SHORT)
     }
@@ -248,6 +290,10 @@ class WallpaperController(
             activity.contentResolver.openInputStream(uri)?.use { input ->
                 target.outputStream().use { output -> input.copyTo(output) }
             } ?: return
+            queryDisplayName(uri)?.let { name ->
+                activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .edit().putString("name_minus_${if (day) "day" else "night"}", name).apply()
+            }
             NuiToast.show(activity, "负一屏${if (day) "白天" else "晚上"}壁纸已设置", Toast.LENGTH_SHORT)
             if (ext == "mp4") warnIfVideoOversized(target)
             onMinusWallpaperChanged?.invoke()
@@ -261,6 +307,8 @@ class WallpaperController(
     private fun resetMinus(day: Boolean) {
         File(activity.filesDir, "${minusBase(day)}.jpg").delete()
         File(activity.filesDir, "${minusBase(day)}.mp4").delete()
+        activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .remove("name_minus_${if (day) "day" else "night"}").apply()
         NuiToast.show(activity, "负一屏${if (day) "白天" else "晚上"}壁纸：跟随桌面", Toast.LENGTH_SHORT)
         onMinusWallpaperChanged?.invoke()
         onShowFloat?.invoke()

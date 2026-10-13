@@ -114,6 +114,9 @@ class SettingsDialog(context: Context) : Dialog(context) {
     /** 壁纸槽位是否已设置（由 MainActivity 注入，读 WallpaperController 状态） */
     var wallpaperHasCustom: ((com.nui.launcher.WallpaperController.Slot) -> Boolean)? = null
 
+    /** 壁纸槽位显示文件名（由 MainActivity 注入，未设置返回 null） */
+    var wallpaperDisplayName: ((com.nui.launcher.WallpaperController.Slot) -> String?)? = null
+
     /** 点击壁纸槽位（由 MainActivity 注入，弹出该槽位的壁纸菜单） */
     var onWallpaperPick: ((com.nui.launcher.WallpaperController.Slot) -> Unit)? = null
 
@@ -831,10 +834,10 @@ class SettingsDialog(context: Context) : Dialog(context) {
     }
 
     fun refreshWallpaper() {
-        val daySet = wallpaperHasCustom?.invoke(com.nui.launcher.WallpaperController.Slot.DAY) ?: false
-        val nightSet = wallpaperHasCustom?.invoke(com.nui.launcher.WallpaperController.Slot.NIGHT) ?: false
-        tvWallpaperDayStatus.text = if (daySet) context.getString(R.string.wallpaper_set) else context.getString(R.string.wallpaper_default)
-        tvWallpaperNightStatus.text = if (nightSet) context.getString(R.string.wallpaper_set) else context.getString(R.string.wallpaper_default)
+        tvWallpaperDayStatus.text = wallpaperDisplayName?.invoke(com.nui.launcher.WallpaperController.Slot.DAY)
+            ?: context.getString(R.string.wallpaper_default)
+        tvWallpaperNightStatus.text = wallpaperDisplayName?.invoke(com.nui.launcher.WallpaperController.Slot.NIGHT)
+            ?: context.getString(R.string.wallpaper_default)
         tvWallpaperMinusDayStatus.text = minusWallpaperStatus?.invoke(true) ?: "跟随桌面"
         tvWallpaperMinusNightStatus.text = minusWallpaperStatus?.invoke(false) ?: "跟随桌面"
     }

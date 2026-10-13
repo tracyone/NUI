@@ -1425,12 +1425,13 @@ class MainActivity : AppCompatActivity() {
                 onClick = {
                     val dlg = com.nui.launcher.settings.SettingsDialog(this)
                     dlg.wallpaperHasCustom = { slot -> wallpaper.hasCustom(slot) }
+                    dlg.wallpaperDisplayName = { slot -> wallpaper.wallpaperDisplayName(slot) }
                     dlg.onWallpaperPick = { slot -> wallpaper.showMenu(slot) }
                     // 设置弹窗内的触摸也重置闲置计时
                     dlg.onUserTouch = { onUserActive() }
                     dlg.onMinusWallpaperPick = { day -> wallpaper.showMinusMenu(day) }
                     dlg.minusWallpaperStatus = { day ->
-                        if (wallpaper.hasMinusCustom(day)) "已设置" else "跟随桌面"
+                        wallpaper.minusWallpaperDisplayName(day) ?: "跟随桌面"
                     }
                     // 负一屏偏好（大号时钟 / 闲置自动进入 / 等待时间）变化即时生效
                     dlg.onMinusPrefsChanged = { applyMinusPrefs() }
