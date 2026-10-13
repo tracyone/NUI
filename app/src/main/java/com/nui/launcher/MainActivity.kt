@@ -1388,8 +1388,10 @@ class MainActivity : AppCompatActivity() {
         val labelH = 29f        // 8dp marginTop + 14sp 文字(≈17dp) + 文字上下 padding 4dp
         val itemH = itemPad + iconSizeDp + labelH
         val availH = screenHdp - gridPadTop - gridPadBottom
-        // 屏幕可容纳的最大行数（宁可少放一行也不允许文字被裁掉）
-        val maxRows = maxOf(2, (availH / itemH).toInt())
+        // 屏幕可容纳的最大行数：够几行算几行，最少 1 行。
+        // 不强制最少 2 行——导航栏很高时可用高度不足 2 行 item 高度，
+        // 强制 2 行会导致行高 < item 内容高度，文字被裁。
+        val maxRows = (availH / itemH).toInt().coerceAtLeast(1)
 
         Thread {
             val pm = packageManager
@@ -1699,8 +1701,12 @@ class MainActivity : AppCompatActivity() {
 
     /** 有效的系统 Dock 显示状态：负一屏（position 0）强制隐藏系统 Dock（不管用户设置），
      *  其它页（桌面/应用列表）按用户设置。切页时由 onPageSelected 重新应用。 */
-    private fun effectiveShowDock(): Boolean =
-        UiTheme.showSystemDock(this) && binding.viewPager.currentItem != 0
+    private fun effectiveShowDock(): Boolean {
+        // 调试：nui_debug_navbar_h>0 时模拟"显示系统 dock"开启，便于无系统栏设备复现
+        val simNav = android.provider.Settings.Global.getInt(contentResolver, "nui_debug_navbar_h", 0)
+        val showDock = if (simNav > 0) true else UiTheme.showSystemDock(this)
+        return showDock && binding.viewPager.currentItem != 0
+    }
 
     /** 按配置应用系统栏显隐（状态栏/导航栏）。
      *  API30+ 用 WindowInsetsController（应用退出回桌面后重设可靠，旧 systemUiVisibility 在
@@ -1771,19 +1777,27 @@ class MainActivity : AppCompatActivity() {
         // 使左侧 dock、页面、天气层等各窗口动态缩小上移，不遮挡系统 Dock。
         binding.root.setOnApplyWindowInsetsListener { v, insets ->
             val top = if (UiTheme.showStatusBar(this)) insets.getSystemWindowInsetTop() else 0
-            val bottom = if (effectiveShowDock()) insets.getSystemWindowInsetBottom() else 0
+            // nui_debug_navbar_h 模拟导航栏高度（无系统栏设备调试用），优先于真实 inset
+            val simNav = android.provider.Settings.Global.getInt(contentResolver, "nui_debug_navbar_h", 0)
+            val bottom = if (effectiveShowDock()) {
+                if (simNav > 0) simNav else insets.getSystemWindowInsetBottom()
+            } else 0
             v.setPadding(0, top, 0, bottom)
             // 系统 Dock 显隐切换（含负一屏强制隐藏）：ViewPager2 高度变化 → 应用网格可用高度变化，
-            // 更新 rv 底部内边距并在本帧布局完成后重算行数/行高
+            // 更新 rv 底部内边距并重算行数/行高。
+            // setPadding 触发的 layout 是异步的，单次 post 时 ViewPager2 高度可能还没更新，
+            // 双重 post 确保 layout 完成后再重算，否则拿到旧的全屏高度导致最后一行被裁。
             val curDock = effectiveShowDock()
             val prevDock = lastSystemDock
             lastSystemDock = curDock
-            if (prevDock != null && prevDock != curDock) {
+            if (prevDock == null || prevDock != curDock) {
                 applyDockStyle()
                 v.post {
-                    if (binding.viewPager.height > 0) {
-                        appGridLoaded = false
-                        loadAppGrid()
+                    v.post {
+                        if (binding.viewPager.height > 0) {
+                            appGridLoaded = false
+                            loadAppGrid()
+                        }
                     }
                 }
             }
@@ -1800,6 +1814,24 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             insets
+        }
+        // 模拟导航栏高度时（模拟器无真实导航栏，insets 回调可能不触发），
+        // 直接同步设置 root padding：显示 Dock 时留出导航栏高度，隐藏时清除。
+        val simNavNow = android.provider.Settings.Global.getInt(contentResolver, "nui_debug_navbar_h", 0)
+        if (simNavNow > 0) {
+            val bottomPad = if (effectiveShowDock()) simNavNow else 0
+            val prevPad = binding.root.paddingBottom
+            binding.root.setPadding(0, binding.root.paddingTop, 0, bottomPad)
+            if (prevPad != bottomPad) {
+                binding.root.post {
+                    binding.root.post {
+                        if (binding.viewPager.height > 0) {
+                            appGridLoaded = false
+                            loadAppGrid()
+                        }
+                    }
+                }
+            }
         }
         binding.root.requestApplyInsets()
         // 系统 Dock 显隐变化后刷新高德浮窗几何（位置/边界可能已变）
