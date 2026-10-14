@@ -554,6 +554,17 @@ class MainActivity : AppCompatActivity() {
                 if (position == 0) settingsDialog?.dismissImmediate()
                 // 负一屏强制隐藏系统 Dock（不管用户设置）；切回其它页按用户设置恢复
                 applySystemDock()
+                // 切到应用列表页（position>=2）时强制重算网格：
+                // 从 page0 滑过来时 padding 没变（都是显示 Dock），不会触发 applySystemDock 里的重算，
+                // 但应用列表 RecyclerView 可能刚创建、高度需按当前 ViewPager2 尺寸重新计算
+                if (position >= 2) {
+                    binding.viewPager.post {
+                        if (!isDestroyed && !isFinishing) {
+                            appGridLoaded = false
+                            loadAppGrid()
+                        }
+                    }
+                }
                 // 离开桌面时关闭高德浮窗；回到桌面时浮窗几何由 IDLE 回调刷新
                 // （滑动动画中 getLocationOnScreen 会取到过渡坐标，导致浮窗与 dock 重叠）
                 if (::mapHost.isInitialized && position != 1) mapHost.closeFloat()
@@ -1375,11 +1386,16 @@ class MainActivity : AppCompatActivity() {
         // 行高 = item 上下 padding(12dp*2) + 图标(72dp*scale) + 标签区(8dp marginTop + 14sp 文字≈17dp + 上下 padding 4dp)，
         // 可用高 = ViewPager2 实际高度 - 网格上下 padding(32dp + 动态底部)。宁可少放一行也不允许文字被裁掉。
         val density = resources.displayMetrics.density
-        // 用 ViewPager2 实际内容区高度：沉浸=物理屏高；系统 Dock 显示时 root 的 insets padding
-        // 已让位、ViewPager2 自动缩小到导航栏上方。不用 displayMetrics.heightPixels，
-        // 其口径随系统栏显示与否变化，易双重扣减（悬浮地图同款坑）；也不用 root.height，
-        // root 是窗口根、高度恒为物理屏高，不会随系统栏让位而缩小
-        val screenHdp = binding.viewPager.height / density
+        // ViewPager2 内容区高度 = 物理屏高 - 状态栏(显示时) - 导航栏(显示时)。
+        // 不用 root.height 或 viewPager.height——窗口 flag 切换(沉浸/非沉浸)后这两个值异步更新，
+        // 切页瞬间拿到旧值会导致应用网格行数/行高算错、最后一行被裁。
+        // 物理屏高和系统栏高度都是确定性常量，立即可用。
+        val statusBarId = resources.getIdentifier("status_bar_height", "dimen", "android")
+        val statusBarH = if (UiTheme.showStatusBar(this) && statusBarId > 0)
+            resources.getDimensionPixelSize(statusBarId) else 0
+        val navBarH = if (effectiveShowDock()) getNavBarHeight() else 0
+        val vpH = realScreenHeight() - statusBarH - navBarH
+        val screenHdp = vpH / density
         val iconScale = UiTheme.appIconScale(this)
         val gridPadTop = 32f    // 应用页容器 paddingTop（onCreateViewHolder）
         val gridPadBottom = appGridBottomPadDp() // 应用网格底部内边距（系统 Dock 隐藏时给指示器留空）
@@ -1793,14 +1809,9 @@ class MainActivity : AppCompatActivity() {
             lastSystemDock = curDock
             if (prevDock == null || prevDock != curDock) {
                 applyDockStyle()
-                v.post {
-                    v.post {
-                        if (binding.viewPager.height > 0) {
-                            appGridLoaded = false
-                            loadAppGrid()
-                        }
-                    }
-                }
+                // padding 已同步设置，高度可直接计算，无需等 layout
+                appGridLoaded = false
+                loadAppGrid()
             }
             // 悬浮地图（高德浮窗）同步避让底部系统 Dock：上限=物理屏高-导航栏高-8dp；
             // Dock 隐藏时解除限制（可拖到屏幕最底部）
@@ -1824,14 +1835,9 @@ class MainActivity : AppCompatActivity() {
             val prevPad = binding.root.paddingBottom
             binding.root.setPadding(0, binding.root.paddingTop, 0, bottomPad)
             if (prevPad != bottomPad) {
-                binding.root.post {
-                    binding.root.post {
-                        if (binding.viewPager.height > 0) {
-                            appGridLoaded = false
-                            loadAppGrid()
-                        }
-                    }
-                }
+                // padding 已同步设置，高度可直接计算，无需等 layout
+                appGridLoaded = false
+                loadAppGrid()
             }
         }
         binding.root.requestApplyInsets()
