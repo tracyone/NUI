@@ -124,6 +124,8 @@ class MainActivity : AppCompatActivity() {
     private var autoMinusRunnable: Runnable? = null
     private var page0Ready = false
     private var appGridLoaded = false
+    /** 上次计算应用网格时的 ViewPager2 高度（px），高度不变时跳过重算避免切页卡顿 */
+    private var lastAppGridVpH = -1
     /** 上次应用的系统 Dock 显隐状态（null=尚未记录）；切换时需重算应用网格高度 */
     private var lastSystemDock: Boolean? = null
     /** 从系统卸载页返回后需重载应用网格 */
@@ -1395,6 +1397,9 @@ class MainActivity : AppCompatActivity() {
             resources.getDimensionPixelSize(statusBarId) else 0
         val navBarH = if (effectiveShowDock()) getNavBarHeight() else 0
         val vpH = realScreenHeight() - statusBarH - navBarH
+        // 高度未变则跳过重算（避免每次切到应用列表都刷新 RecyclerView 导致卡顿）
+        if (vpH == lastAppGridVpH) return
+        lastAppGridVpH = vpH
         val screenHdp = vpH / density
         val iconScale = UiTheme.appIconScale(this)
         val gridPadTop = 32f    // 应用页容器 paddingTop（onCreateViewHolder）
