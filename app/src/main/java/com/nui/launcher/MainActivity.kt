@@ -1753,8 +1753,9 @@ class MainActivity : AppCompatActivity() {
         val gap = (12 * density).toInt()
         val minPanel = (180 * density).toInt()          // 音乐栏最小宽度，低于则整体消失
         val availableRight = sw - rightMargin
-        // 地图右缘上限：MapHost 内部会再扣除分割条所需右侧预留（gap + 竖条半宽），
-        // 这里取同一个值，避免地图铺满到屏幕右缘把竖条顶出、被高德浮窗盖住而拖不动
+        // 地图右缘上限：铺满时 = 屏幕宽 - 12dp（MapHost.mapRightLimit），
+        // 大于 availableRight（音乐栏贴边）——铺满时音乐栏已隐藏，地图用足右侧空间
+        //（旧逻辑钳在 availableRight，浮窗右缘与屏幕右缘之间留 12px 空隙没用上）
         val mapRightCap = if (::mapHost.isInitialized) mapHost.mapRightLimit() else availableRight
         // 地图右缘（相对 Page0，全屏坐标系）。
         // 用 mlp.width 而非 mp.width：拖动时 applyGeometry 刚改了 layoutParams，
@@ -1793,8 +1794,6 @@ class MainActivity : AppCompatActivity() {
                 rp.requestLayout()
             }
         }
-        // 地图右缘上限：音乐栏消失后地图可铺到屏幕右缘-16dp
-        if (::mapHost.isInitialized) mapHost.setRightLimit(availableRight)
     }
 
     /** 有效的系统 Dock 显示状态：负一屏（position 0）强制隐藏系统 Dock（不管用户设置），

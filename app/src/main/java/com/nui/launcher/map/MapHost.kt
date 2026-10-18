@@ -88,8 +88,6 @@ class MapHost(
     private var startWidth = 0
     private var startHeight = 0
     private var resizeMode = ResizeMode.NONE
-    /** 地图右缘上限（px）：由外部 syncRightPanel 按右侧音乐栏位置设定，0=不限制 */
-    private var rightLimit = 0
     /** 地图底部上限（px）：系统底部 Dock（导航栏）显示时由外部传入（屏幕高-导航栏高-8dp），
      *  保证悬浮地图不进入系统 Dock 区域；0=不限制（可拖到屏幕最底部）。 */
     private var bottomLimit = 0
@@ -120,30 +118,17 @@ class MapHost(
      *  否则用户开始拖动时闲置计时可能刚好到点，把页面切到负一屏、竖条中途消失。 */
     var onDividerInteract: (() -> Unit)? = null
 
-    /** 分割条贴右时所需的右侧预留（px）：与右侧面板右边距一致（16dp），地图铺满时
-     *  右缘对齐屏幕右边距，白线（6dp）仍完整落在屏内且在高德浮窗右侧；
+    /** 铺满时地图右缘距屏幕右缘的预留（px）：12dp。高德浮窗右缘比地图卡片外扩约 4px，
+     *  剩下 8px 屏幕空隙恰好放 6dp 白线（上下各留 1px），浮窗尽量用足右侧空间；
      *  竖条热区（28dp）允许右侧探出屏外，不影响触摸（可见部分仍可点）。 */
-    private val dividerRightReserve: Int get() = dp(16)
+    private val dividerRightReserve: Int get() = dp(12)
 
-    /** 地图右缘允许的最大屏幕坐标（px）：分割条拖动与右侧面板联动都用它，
-     *  保证"地图铺满到最右"时竖条仍完整可见、可继续拖动（否则会被顶到屏幕右缘、
-     *  左侧大半被高德浮窗盖住而拖不动）。 */
+    /** 地图右缘允许的最大屏幕坐标（px）：屏幕宽 - 右侧预留。
+     *  注意不能与 rightLimit（音乐栏贴边位置 = 屏幕宽-16dp）取 min：
+     *  铺满时音乐栏已隐藏，地图应越过它用足右侧空间，否则浮窗右缘与屏幕之间
+     *  会留一截没利用的空隙。分割条拖动、浮窗缩放吸附、隐藏音乐栏后的扩展都用它。 */
     fun mapRightLimit(): Int {
-        val base = if (rightLimit > 0) rightLimit else realScreenW - dp(8)
-        return minOf(base, realScreenW - dividerRightReserve)
-    }
-
-    /** 设置地图右缘上限；若当前地图超出则立即缩回 */
-    fun setRightLimit(px: Int) {
-        rightLimit = px
-        if (px <= 0) return
-        val lp = mapPanel.layoutParams as FrameLayout.LayoutParams
-        val maxW = (mapRightLimit() - lp.leftMargin).coerceAtLeast(MIN_SIZE)
-        if (lp.width > maxW) {
-            lp.width = maxW
-            mapPanel.layoutParams = lp
-            onGeometryChanged?.invoke()
-        }
+        return realScreenW - dividerRightReserve
     }
 
     /** 设置地图底部上限（px，屏幕坐标系）；系统 Dock 显示时调用，0=不限制 */
@@ -654,8 +639,7 @@ class MapHost(
                     if (resizeMode == ResizeMode.RIGHT || resizeMode == ResizeMode.BOTH) nw += dx
                     if (resizeMode == ResizeMode.BOTTOM || resizeMode == ResizeMode.BOTH) nh += dy
 
-                    val effectiveRight = if (rightLimit > 0) rightLimit
-                        else context.resources.displayMetrics.widthPixels - dp(8)
+                    val effectiveRight = mapRightLimit()
                     val snapWidth = effectiveRight - startLeft
 
                     if (snappedToRight) {
@@ -710,8 +694,8 @@ class MapHost(
     private fun clampSizeFixed(x: Int, y: Int, w: Int, h: Int): IntArray {
         val sw = realScreenW
         val sh = realScreenH
-        // 右侧面板固定贴边后：地图右缘不超过 rightLimit（有值用值，无值用 屏幕宽-8dp）
-        val maxRight = if (rightLimit > 0) rightLimit else sw - dp(8)
+        // 右侧：地图右缘上限 = 屏幕宽 - 分割条预留（铺满时音乐栏已隐藏，可越过音乐栏贴边位置）
+        val maxRight = mapRightLimit()
         // 底部：系统 Dock 显示时不超过 bottomLimit（避开导航栏），否则不碰到底边 8dp
         val maxBottom = if (bottomLimit > 0) bottomLimit else sh - dp(8)
         var nw = w.coerceAtLeast(MIN_SIZE)
@@ -938,8 +922,8 @@ class MapHost(
     }
 
     /** 分割条贴音乐栏左缘（地图与音乐栏的实际边界），用屏幕坐标定位。
-     *  注意：不能放在 mapPanel 右缘+gap 中心——高德浮窗外扩 4px 后右缘会盖住竖条大部分，
-     *  导致用户点不到（"根本拖不动"）。竖条必须完全落在高德浮窗右缘之外。 */
+     *  注意：竖条中央对齐 musicLeft，白色细条（固定偏移）恰好落在高德浮窗右缘之外；
+     *  铺满（音乐栏隐藏）时白线落在 [浮窗右缘, 屏幕右缘] 的空隙中央，热区部分探出屏外。 */
     private fun updateDividerPosition() {
         val bar = dividerOverlay ?: return
         // 已隐藏（非桌面页/退到后台）时不再定位，否则任何几何刷新都会把它拉回屏幕
@@ -963,9 +947,11 @@ class MapHost(
             return
         }
         val gap = dp(MUSIC_GAP_DP)
-        // 竖条中央对齐音乐栏左缘（= mapPanel 右缘 + gap），完全在高德浮窗（右缘=mapPanel右缘+4）之外
+        // 竖条中央对齐音乐栏左缘（= mapPanel 右缘 + gap）。不能钳制到屏内：铺满时若钳制，
+        // 白线会被拉进高德浮窗内部（浮窗右缘=地图右缘+4）造成重叠；白线位置（热区内固定偏移）
+        // 恰好落在 [浮窗右缘, 屏幕右缘] 的 8px 空隙中央，热区右侧探出屏外无碍触摸。
         val musicLeft = loc[0] + mapPanel.width + gap
-        val targetX = (musicLeft - lp.width / 2).coerceIn(0, sw - lp.width)
+        val targetX = (musicLeft - lp.width / 2).coerceAtLeast(0)
         if (lp.x != targetX) {
             lp.x = targetX
             runCatching { wm.updateViewLayout(bar, lp) }
