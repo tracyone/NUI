@@ -1316,6 +1316,49 @@
                 android:layout_marginBottom="20dp"
                 android:background="@color/settings_divider" />
 
+            <!-- 绑定地图应用（点击弹出地图选择器更换悬浮地图） -->
+            <LinearLayout
+                android:id="@+id/optMapApp"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
+
+                <TextView
+                    android:id="@+id/tvMapAppTitle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/map_app_title"
+                    android:textColor="@color/settings_label"
+                    android:textSize="17sp" />
+
+                <TextView
+                    android:id="@+id/tvMapAppValue"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/settings_value"
+                    android:textSize="15sp" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/settings_divider" />
+
+            <TextView
+                android:id="@+id/tvMapAppHint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:text="@string/map_app_hint"
+                android:textColor="@color/settings_value"
+                android:textSize="13sp" />
+
             <!-- 桌面启动后第几秒启动高德 -->
             <LinearLayout
                 android:id="@+id/optMapLaunch"

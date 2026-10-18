@@ -18,6 +18,8 @@
     <string name="appearance">外观</string>
     <string name="sound">声音</string>
     <string name="map">地图</string>
+    <string name="map_app_title">绑定地图应用</string>
+    <string name="map_app_hint">点击可更换悬浮地图应用；首次启动的自动拉起与导航按钮都使用该应用</string>
     <string name="map_launch_delay_title">启动高德延迟（秒）</string>
     <string name="map_return_delay_title">返回桌面延迟（秒）</string>
     <string name="map_launch_delay_hint">桌面启动后第 N 秒自动启动高德，0 = 立即</string>

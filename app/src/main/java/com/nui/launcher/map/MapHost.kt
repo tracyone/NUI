@@ -96,12 +96,44 @@ class MapHost(
     /** 几何是否已加载完成（loadGeometry 执行完毕），用于防止 syncRightPanel 在默认位置生效前扩展地图 */
     var geometryLoaded = false
 
+    // ===== 常驻悬浮分割条（类似 iOS 分屏竖条，悬浮于高德浮窗之上，拖动调整地图宽度）=====
+    private var dividerOverlay: View? = null
+    private var dividerShown = false
+    private var dividerStartX = 0f
+    private var dividerStartMapW = 0
+    /** 分割条已吸附到最右（音乐栏隐藏、地图铺满）；滞回阈值内保持吸附，防手指抖动来回跳 */
+    private var dividerSnappedRight = false
+    private var dividerLastMoveX = 0f
+    /** 分割条调整模式：长按竖条后隐藏地图浮窗、只显示绑定地图应用图标，拖动期间生效 */
+    private var dividerAdjustActive = false
+    /** 调整模式期间显示的地图应用图标 overlay */
+    private var iconOverlay: View? = null
+    private var longPressPending = false
+    private val longPressRunnable = Runnable { enterDividerAdjust() }
+
+    /** 分割条被触摸（按下/拖动）时回调，宿主用来重置"闲置自动进入负一屏"计时。
+     *  分割条是独立悬浮窗，触摸不经过 Activity.dispatchTouchEvent，必须单独通知，
+     *  否则用户开始拖动时闲置计时可能刚好到点，把页面切到负一屏、竖条中途消失。 */
+    var onDividerInteract: (() -> Unit)? = null
+
+    /** 分割条贴右时所需的右侧预留（px）：竖条中央 = 地图右缘 + gap，半宽 = barW/2，
+     *  故地图右缘至少留出 gap + barW/2 的余量，竖条才能完整落在屏幕内、不被高德浮窗遮挡。 */
+    private val dividerRightReserve: Int get() = dp(MUSIC_GAP_DP) + dp(DIVIDER_BAR_W_DP) / 2
+
+    /** 地图右缘允许的最大屏幕坐标（px）：分割条拖动与右侧面板联动都用它，
+     *  保证"地图铺满到最右"时竖条仍完整可见、可继续拖动（否则会被顶到屏幕右缘、
+     *  左侧大半被高德浮窗盖住而拖不动）。 */
+    fun mapRightLimit(): Int {
+        val base = if (rightLimit > 0) rightLimit else realScreenW - dp(8)
+        return minOf(base, realScreenW - dividerRightReserve)
+    }
+
     /** 设置地图右缘上限；若当前地图超出则立即缩回 */
     fun setRightLimit(px: Int) {
         rightLimit = px
         if (px <= 0) return
         val lp = mapPanel.layoutParams as FrameLayout.LayoutParams
-        val maxW = (px - lp.leftMargin).coerceAtLeast(MIN_SIZE)
+        val maxW = (mapRightLimit() - lp.leftMargin).coerceAtLeast(MIN_SIZE)
         if (lp.width > maxW) {
             lp.width = maxW
             mapPanel.layoutParams = lp
@@ -426,6 +458,8 @@ class MapHost(
                 container.post {
                     sendFloatBroadcast(src.floatShowAction)
                     container.postDelayed({ onFloatShown?.invoke() }, 600)
+                    // 竖条定位在音乐栏左缘（高德浮窗右缘之外），不与浮窗重叠，
+                    // 无需 bringDividerToFront 置顶（remove+add 反而可能导致 overlay 消失或断触摸流）
                 }
             }
     }
@@ -448,6 +482,9 @@ class MapHost(
         Log.d(TAG, "onPause: close float")
         mapView?.onPause()
         closeFloat()
+        // 分割条是独立悬浮窗（TYPE_APPLICATION_OVERLAY），Activity 退到后台不会自动消失。
+        // 从 dock/应用列表启动其它应用后不隐藏的话，竖条会浮在被启动的应用之上。
+        setDividerVisible(false)
     }
 
     fun onDestroy() {
@@ -683,8 +720,12 @@ class MapHost(
         if (w != null) lp.width = w
         if (h != null) lp.height = h
         mapPanel.layoutParams = lp
+        mapPanel.post { updateDividerPosition() }
         onGeometryChanged?.invoke()
     }
+
+    /** 外部几何联动完成后刷新分割条位置（公开，供 MainActivity 在 onGeometryChanged 调用） */
+    fun refreshDivider() = mapPanel.post { updateDividerPosition() }
 
     private fun loadGeometry() {
         // 一次性重置旧版地图几何（dock 变窄后旧位置离 dock 太远）
@@ -759,6 +800,296 @@ class MapHost(
         prefs.edit { putString(KEY_GEOMETRY, "${lp.leftMargin},${lp.topMargin},${lp.width},${lp.height}") }
     }
 
+    /** 分割条拖动完成后保存当前几何（供外部 UI 调用，复用 saveGeometry 逻辑） */
+    fun saveGeometryForDivider() = saveGeometry()
+
+    // ==================== 常驻悬浮分割条（类似 iOS 分屏竖条）====================
+    // 高德浮窗（TYPE_APPLICATION_OVERLAY）覆盖 mapPanel 右缘，布局内 view 会被其遮挡，
+    // 故分割条用独立的悬浮 overlay，z 序高于高德浮窗，常驻显示、可拖动。
+
+    fun showDivider() {
+        if (dividerShown && dividerOverlay != null) {
+            // 已存在：仅更新位置（竖条在高德浮窗外，无需置顶）
+            updateDividerPosition()
+            return
+        }
+        if (!Settings.canDrawOverlays(context)) return
+        dividerShown = true
+        ensureDivider()
+        updateDividerPosition()
+        // 延迟重试：setupMap 调用时 mapPanel 可能尚未布局完成（loc 异常 → x=-10000），
+        // 等布局稳定后再定位一次。
+        mapPanel.postDelayed({ updateDividerPosition() }, 500)
+        mapPanel.postDelayed({ updateDividerPosition() }, 1500)
+    }
+
+    /** 切换分割条可见性：非 page0 时直接移出屏幕（x=-10000），不 removeView 不 GONE，
+     *  保持 overlay 稳定存在，避免反复创建/销毁导致丢失。page0 时定位到音乐栏左缘。 */
+    fun setDividerVisible(visible: Boolean) {
+        if (visible) {
+            if (dividerOverlay == null) {
+                showDivider()
+            } else {
+                dividerOverlay?.visibility = View.VISIBLE
+                dividerShown = true
+                updateDividerPosition()
+            }
+        } else {
+            dividerShown = false
+            dividerAdjustActive = false
+            dividerOverlay?.let {
+                val lp = it.layoutParams as WindowManager.LayoutParams
+                lp.x = -10000
+                runCatching { wm.updateViewLayout(it, lp) }
+            }
+            hideDividerIcon()
+        }
+    }
+
+    fun hideDivider() {
+        dividerShown = false
+        dividerAdjustActive = false
+        dividerOverlay?.let { runCatching { wm.removeView(it) } }
+        dividerOverlay = null
+        hideDividerIcon()
+    }
+
+    fun isDividerShown() = dividerShown
+
+    private fun ensureDivider() {
+        if (dividerOverlay != null) return
+        val bar = FrameLayout(context).apply {
+            // 半透明触摸热区 + 中间可视细条
+            addView(View(context).apply {
+                setBackgroundColor(0x22000000.toInt()) // 极淡黑底，提示可拖动区域
+            }, FrameLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            ))
+            addView(View(context).apply {
+                // 用代码创建细条背景，避免 release 下 getIdentifier 找不到 drawable
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                    cornerRadius = dp(3).toFloat()
+                    setColor(0xE6FFFFFF.toInt())
+                }
+            }, FrameLayout.LayoutParams(
+                dp(6),
+                dp(120),
+                Gravity.CENTER,
+            ))
+        }
+        val barW = dp(DIVIDER_BAR_W_DP)
+        val lp = WindowManager.LayoutParams(
+            barW,
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O)
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else
+                @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 0
+            y = 0
+        }
+        lp.width = barW
+        lp.height = realScreenH
+        bar.setOnTouchListener(dividerTouch)
+        try {
+            wm.addView(bar, lp)
+            dividerOverlay = bar
+        } catch (e: Exception) {
+            Log.e(TAG, "ensureDivider: addView FAILED", e)
+            dividerOverlay = null
+        }
+    }
+
+    /** 把分割条重新 addView 置顶（高德浮窗同为 TYPE_APPLICATION_OVERLAY、后加会在上）。
+     *  切回桌面/拖动前调用，确保分割条悬浮于地图浮窗之上可见可拖。 */
+    private fun bringDividerToFront() {
+        val bar = dividerOverlay ?: return
+        val oldLp = bar.layoutParams as WindowManager.LayoutParams
+        runCatching { wm.removeView(bar) }
+        val lp = WindowManager.LayoutParams(oldLp.width, oldLp.height, oldLp.type,
+            oldLp.flags, oldLp.format).apply {
+            gravity = oldLp.gravity; x = oldLp.x; y = oldLp.y
+        }
+        runCatching { wm.addView(bar, lp) }
+    }
+
+    /** 分割条贴音乐栏左缘（地图与音乐栏的实际边界），用屏幕坐标定位。
+     *  注意：不能放在 mapPanel 右缘+gap 中心——高德浮窗外扩 4px 后右缘会盖住竖条大部分，
+     *  导致用户点不到（"根本拖不动"）。竖条必须完全落在高德浮窗右缘之外。 */
+    private fun updateDividerPosition() {
+        val bar = dividerOverlay ?: return
+        // 已隐藏（非桌面页/退到后台）时不再定位，否则任何几何刷新都会把它拉回屏幕
+        if (!dividerShown) return
+        val lp = bar.layoutParams as WindowManager.LayoutParams
+        val loc = IntArray(2)
+        mapPanel.getLocationOnScreen(loc)
+        val sw = realScreenW
+        // mapPanel 只在桌面页存在且布局正常；非桌面页（负一屏/应用列表）mapPanel 不可见，
+        // getLocationOnScreen 返回异常（0 或屏幕外），此时把分割条移出屏幕。
+        if (loc[0] <= 0 || loc[0] >= sw || mapPanel.width <= 0) {
+            if (lp.x != -10000) {
+                lp.x = -10000
+                runCatching { wm.updateViewLayout(bar, lp) }
+            }
+            return
+        }
+        val gap = dp(MUSIC_GAP_DP)
+        // 竖条中央对齐音乐栏左缘（= mapPanel 右缘 + gap），完全在高德浮窗（右缘=mapPanel右缘+4）之外
+        val musicLeft = loc[0] + mapPanel.width + gap
+        val targetX = (musicLeft - lp.width / 2).coerceIn(0, sw - lp.width)
+        if (lp.x != targetX) {
+            lp.x = targetX
+            runCatching { wm.updateViewLayout(bar, lp) }
+        }
+    }
+
+    /** 拖动分割条 → 调整地图宽度（高度不变），音乐栏宽度由外部 syncRightPanel 联动。
+     *  长按（或按下即拖动）进入调整模式：先隐藏地图浮窗、只显示绑定地图应用图标，
+     *  拖动过程实时改宽度，松手保存几何并恢复地图浮窗。 */
+    private val dividerTouch = View.OnTouchListener { bar, e ->
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                // 注意：不能在 DOWN 里 removeView/addView 分割条（置顶会中断触摸流，
+                // 后续 MOVE 会被派发给下层 ViewPager 导致误切页）。置顶只发生在非触摸时机。
+                onDividerInteract?.invoke()
+                val lpDown = mapPanel.layoutParams as FrameLayout.LayoutParams
+                dividerStartX = e.rawX
+                dividerStartMapW = lpDown.width
+                dividerLastMoveX = e.rawX
+                // 起点已是铺满状态（音乐栏隐藏、地图占满右侧）时保持吸附，避免一按下就抖动
+                val limitW0 = mapRightLimit() - lpDown.leftMargin
+                dividerSnappedRight = dividerStartMapW >= limitW0 - 1
+                longPressPending = true
+                bar.removeCallbacks(longPressRunnable)
+                bar.postDelayed(longPressRunnable, LONG_PRESS_MS)
+                true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                // 长按前就开始移动（快速拖动）→ 同样进入调整模式
+                onDividerInteract?.invoke()
+                if (!dividerAdjustActive && longPressPending) enterDividerAdjust()
+                if (dividerAdjustActive) {
+                    val lp = mapPanel.layoutParams as FrameLayout.LayoutParams
+                    // 地图右缘上限（音乐栏隐藏后地图可铺满到这里；已扣除竖条所需右侧预留）
+                    val limitW = (mapRightLimit() - lp.leftMargin).coerceAtLeast(MIN_SIZE)
+                    // 还能容下音乐栏时的地图最大宽度，超过就会被 syncRightPanel 判定为"音乐栏太窄"而隐藏
+                    val keepPanelMaxW = (limitW - dp(MUSIC_GAP_DP) - dp(MUSIC_PANEL_MIN_WIDTH_DP))
+                        .coerceAtLeast(MIN_SIZE)
+                    var newW = dividerStartMapW + (e.rawX - dividerStartX).toInt()
+                    if (dividerSnappedRight) {
+                        // 已吸附铺满：保持铺满，明确向左拖过阈值才退出（滞回，防手指抖动来回跳）。
+                        // 退出时直接落到"音乐栏刚好还能显示"的宽度（而不是让地图缩到中间、音乐栏还没
+                        // 回来的空白区），并重置基准，之后继续向左拖就是平滑收缩、音乐栏同步变宽。
+                        if (dividerStartX - e.rawX > snapExitThreshold) {
+                            dividerSnappedRight = false
+                            newW = keepPanelMaxW
+                            dividerStartMapW = keepPanelMaxW
+                            dividerStartX = e.rawX
+                        } else {
+                            newW = limitW
+                        }
+                    } else if (e.rawX > dividerLastMoveX && newW > keepPanelMaxW) {
+                        // 向右拖且会挤掉音乐栏 → 吸附铺满。必须在这里一步到位：
+                        // syncRightPanel 会一边隐藏音乐栏一边把地图拉满，慢拖时和拖动逐帧互相打架，
+                        // 结果就是"音乐栏没了但右边留空、还拖不动"。吸附后重置基准，退出吸附不跳变。
+                        dividerSnappedRight = true
+                        newW = limitW
+                        dividerStartMapW = limitW
+                        dividerStartX = e.rawX
+                    }
+                    dividerLastMoveX = e.rawX
+                    newW = newW.coerceIn(MIN_SIZE, limitW)
+                    if (newW != lp.width) {
+                        lp.width = newW
+                        mapPanel.layoutParams = lp
+                        applyGeometry(null, null, newW, null)
+                        updateDividerPosition()
+                        updateDividerIconPosition()
+                    }
+                }
+                true
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                bar.removeCallbacks(longPressRunnable)
+                longPressPending = false
+                if (dividerAdjustActive) exitDividerAdjust()
+                true
+            }
+            else -> false
+        }
+    }
+
+    /** 进入调整模式：隐藏地图浮窗（拖动过程不实时渲染地图、性能优先），显示绑定地图应用图标占位 */
+    private fun enterDividerAdjust() {
+        if (dividerAdjustActive) return
+        dividerAdjustActive = true
+        closeFloat()
+        showDividerIcon()
+    }
+
+    /** 退出调整模式：隐藏图标、保存新几何、恢复地图浮窗 */
+    private fun exitDividerAdjust() {
+        if (!dividerAdjustActive) return
+        dividerAdjustActive = false
+        hideDividerIcon()
+        saveGeometryForDivider()
+        primeCache()
+        showFloat()
+    }
+
+    /** 调整模式期间在地图区域中央显示绑定地图应用的图标（悬浮 overlay）。
+     *  直接铺满图标本体，不套白色卡片——套卡片会让图标显得很小、外圈多一个矩形。 */
+    private fun showDividerIcon() {
+        if (iconOverlay != null) return
+        val icon = current?.icon ?: return
+        val view = ImageView(context).apply {
+            setImageDrawable(icon)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+        val size = dp(DIVIDER_ICON_DP)
+        val lp = WindowManager.LayoutParams(
+            size, size,
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O)
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else
+                @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 0; y = 0
+        }
+        runCatching { wm.addView(view, lp) }
+            .onFailure { Log.e(TAG, "addView divider icon failed", it); return }
+        iconOverlay = view
+        updateDividerIconPosition()
+    }
+
+    /** 图标保持在地图区域中央（拖动中地图变宽/变窄时跟随居中） */
+    private fun updateDividerIconPosition() {
+        val icon = iconOverlay ?: return
+        val lp = icon.layoutParams as WindowManager.LayoutParams
+        val loc = IntArray(2)
+        mapPanel.getLocationOnScreen(loc)
+        if (loc[0] <= 0 || loc[0] >= realScreenW || mapPanel.width <= 0) return
+        lp.x = loc[0] + (mapPanel.width - lp.width) / 2
+        lp.y = loc[1] + (mapPanel.height - lp.height) / 2
+        runCatching { wm.updateViewLayout(icon, lp) }
+    }
+
+    private fun hideDividerIcon() {
+        iconOverlay?.let { runCatching { wm.removeView(it) } }
+        iconOverlay = null
+    }
+
     private fun dp(value: Int): Int =
         (value * context.resources.displayMetrics.density).toInt()
 
@@ -770,12 +1101,18 @@ class MapHost(
         private const val KEY_GEOM_V2 = "geometry_v2" // 新版几何标记（dock 变窄后重置旧位置）
         private const val EDGE_ZONE_DP = 28   // 右/下边缘把手宽度
         private val MIN_SIZE = 240 // px，缩放下限
+        /** 长按分割条进入调整模式（隐藏地图、显示图标）的阈值 */
+        private const val LONG_PRESS_MS = 500L
+        /** 调整模式下地图区域中央显示的地图应用图标尺寸（dp） */
+        private const val DIVIDER_ICON_DP = 96
         /** autoLaunch 是否已执行过——静态变量，防止 Activity 重建导致重复启动外部地图 */
         private var autoLaunched = false
         /** 右侧音乐栏最小宽度（dp）：低于此值音乐栏整体消失，地图吸附到最右端 */
         private const val MUSIC_PANEL_MIN_WIDTH_DP = 180
         /** 地图与音乐栏之间的间距（dp），与 MainActivity.syncRightPanel 保持一致 */
         private const val MUSIC_GAP_DP = 12
+        /** 分割条触摸热区宽度（dp），与 ensureDivider 中 barW 保持一致 */
+        private const val DIVIDER_BAR_W_DP = 28
 
         /** MainActivity.onNewIntent 识别地图自动返回的 Intent 标记 */
         const val EXTRA_AUTO_BACK = "nui_auto_back"

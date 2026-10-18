@@ -54,6 +54,7 @@ class SettingsDialog(context: Context) : Dialog(context) {
     private lateinit var panelAbout: View
     private lateinit var edMapLaunch: EditText
     private lateinit var edMapReturn: EditText
+    private lateinit var tvMapAppValue: TextView
     private lateinit var checkSystem: TextView
     private lateinit var checkDark: TextView
     private lateinit var checkLight: TextView
@@ -117,6 +118,12 @@ class SettingsDialog(context: Context) : Dialog(context) {
     /** 壁纸槽位显示文件名（由 MainActivity 注入，未设置返回 null） */
     var wallpaperDisplayName: ((com.nui.launcher.WallpaperController.Slot) -> String?)? = null
 
+    /** 当前绑定的悬浮地图名称（由 MainActivity 注入） */
+    var mapLabelProvider: (() -> String?)? = null
+
+    /** 点击"绑定地图应用"（由 MainActivity 注入，弹出地图选择器） */
+    var onPickMap: (() -> Unit)? = null
+
     /** 点击壁纸槽位（由 MainActivity 注入，弹出该槽位的壁纸菜单） */
     var onWallpaperPick: ((com.nui.launcher.WallpaperController.Slot) -> Unit)? = null
 
@@ -162,6 +169,7 @@ class SettingsDialog(context: Context) : Dialog(context) {
         panelAbout = findViewById(R.id.panelAbout)
         edMapLaunch = findViewById(R.id.edMapLaunch)
         edMapReturn = findViewById(R.id.edMapReturn)
+        tvMapAppValue = findViewById(R.id.tvMapAppValue)
         findViewById<View>(R.id.optRestart).setOnClickListener { restartDesktop() }
         // 左侧菜单可滚动时底部渐隐提示（DPI 大时"应用/关于"在屏外，提示用户下滑）
         findViewById<android.widget.ScrollView>(R.id.leftMenuScroll).setOnScrollChangeListener { _, _, _, _, _ ->
@@ -222,7 +230,8 @@ class SettingsDialog(context: Context) : Dialog(context) {
         tabAbout.setOnClickListener { selectTab(7) }
         selectTab(0)
 
-        // 地图：两个延迟配置，输入即时保存
+        // 地图：绑定地图应用 + 两个延迟配置，输入即时保存
+        findViewById<View>(R.id.optMapApp).setOnClickListener { onPickMap?.invoke() }
         edMapLaunch.setOnEditorActionListener { _, _, _ -> saveMapConfig(); true }
         edMapLaunch.setOnFocusChangeListener { _, hasFocus -> if (!hasFocus) saveMapConfig() }
         edMapReturn.setOnEditorActionListener { _, _, _ -> saveMapConfig(); true }
@@ -596,11 +605,15 @@ class SettingsDialog(context: Context) : Dialog(context) {
         android.os.Process.killProcess(android.os.Process.myPid())
     }
 
-    /** 读取地图延迟配置填充输入框 */
+    /** 读取地图配置：绑定应用名称 + 两个延迟输入框 */
     private fun renderMap() {
+        tvMapAppValue.text = mapLabelProvider?.invoke().orEmpty()
         edMapLaunch.setText(UiTheme.mapLaunchDelaySec(context).toString())
         edMapReturn.setText(UiTheme.mapReturnDelaySec(context).toString())
     }
+
+    /** 更换绑定地图后刷新面板显示 */
+    fun refreshMap() = renderMap()
 
     /** 保存输入框中的地图延迟配置 */
     private fun saveMapConfig() {
@@ -659,6 +672,9 @@ class SettingsDialog(context: Context) : Dialog(context) {
         findViewById<View>(R.id.dividerMap).setBackgroundColor(p.divider)
         findViewById<TextView>(R.id.tvMapLaunch).setTextColor(p.label)
         findViewById<TextView>(R.id.tvMapReturn).setTextColor(p.label)
+        findViewById<TextView>(R.id.tvMapAppTitle).setTextColor(p.label)
+        tvMapAppValue.setTextColor(p.value)
+        findViewById<TextView>(R.id.tvMapAppHint).setTextColor(p.value)
         findViewById<TextView>(R.id.tvMapHint).setTextColor(p.value)
         edMapLaunch.setTextColor(p.label)
         edMapReturn.setTextColor(p.label)

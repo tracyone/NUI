@@ -493,7 +493,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun bindDesktop(v: View) {
         desktopMapPanel = v.findViewById(R.id.mapPanel)
-        desktopMapPanel?.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> syncRightPanel() }
+        desktopMapPanel?.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            syncRightPanel()
+            // 布局变化时若在桌面页，确保分割条可见并定位（防止时序问题导致卡在 -10000）
+            if (binding.viewPager.currentItem == 1 && ::mapHost.isInitialized) {
+                mapHost.setDividerVisible(true)
+            }
+            mapHostRefreshDivider()
+        }
         desktopMapContainer = v.findViewById(R.id.mapContainer)
         desktopRightPanel = v.findViewById(R.id.rightPanel)
         desktopBtnSwitchMap = v.findViewById(R.id.btnSwitchMap)
@@ -542,8 +549,17 @@ class MainActivity : AppCompatActivity() {
         binding.viewPager.isUserInputEnabled = true
         // 等首帧 layout 后再跳到桌面(position 1)：初始同步 setCurrentItem 会让负一屏(0)
         // 的不透明近黑背景错位盖住全屏、dock 被误判为负一屏而隐藏
-        binding.viewPager.postDelayed({ binding.viewPager.setCurrentItem(1, false) }, 300)
+        binding.viewPager.postDelayed({
+            binding.viewPager.setCurrentItem(1, false)
+            // setCurrentItem(false) 不触发 onPageSelected，兜底确保桌面页分割条显示
+            if (::mapHost.isInitialized) mapHost.setDividerVisible(true)
+        }, 300)
         binding.viewPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
+            override fun onPageScrolled(position: Int, positionOffset: Float, positionOffsetPixels: Int) {
+                // 滚动过程中持续刷新竖条位置：ViewPager2 用 translationX 移动 fragment，
+                // 不触发 layoutChange，需在滚动回调里主动 updateDividerPosition。
+                if (::mapHost.isInitialized) mapHost.refreshDivider()
+            }
             override fun onPageSelected(position: Int) {
                 // 指示器：点索引 = 外层页索引（0=负一屏，1=桌面，2..N=应用各页）
                 updatePageIndicator(position)
@@ -570,6 +586,20 @@ class MainActivity : AppCompatActivity() {
                 // 离开桌面时关闭高德浮窗；回到桌面时浮窗几何由 IDLE 回调刷新
                 // （滑动动画中 getLocationOnScreen 会取到过渡坐标，导致浮窗与 dock 重叠）
                 if (::mapHost.isInitialized && position != 1) mapHost.closeFloat()
+                // 悬浮分割条：仅桌面页(1)显示，其它页移出屏幕。
+                // postDelayed 兜底：onPageSelected 可能在 mapHost 初始化前触发，
+                // 或 setCurrentItem(false) 后布局尚未稳定，延迟后再定位。
+                if (position == 1) {
+                    if (::mapHost.isInitialized) mapHost.setDividerVisible(true)
+                    binding.viewPager.postDelayed({
+                        if (!isDestroyed && !isFinishing && ::mapHost.isInitialized &&
+                            binding.viewPager.currentItem == 1) {
+                            mapHost.setDividerVisible(true)
+                        }
+                    }, 300)
+                } else if (::mapHost.isInitialized) {
+                    mapHost.setDividerVisible(false)
+                }
                 // 离开桌面页时隐藏导航/巡航信息卡（负一屏/应用列表不显示悬浮信息）
                 navInfoHost?.onPageChanged(position)
                 syncWeatherLayer(position)
@@ -889,8 +919,21 @@ class MainActivity : AppCompatActivity() {
         if (::mapHost.isInitialized) {
             mapHost.onResume()
             // 根据当前 page 决定悬浮地图显示状态（仅桌面显示浮窗）
-            if (binding.viewPager.currentItem == 1) mapHost.resumeFloat()
-            else mapHost.closeFloat()
+            if (binding.viewPager.currentItem == 1) {
+                mapHost.resumeFloat()
+                // 兜底：启动/回前台时确保桌面页分割条已显示
+                mapHost.setDividerVisible(true)
+            } else {
+                mapHost.closeFloat()
+            }
+            // 延迟兜底：setCurrentItem(1,false) 和布局稳定后再确认一次分割条状态，
+            // 防止 onPageSelected 时序问题导致分割条卡在 -10000（移出屏幕）
+            binding.root.postDelayed({
+                if (!isDestroyed && !isFinishing && ::mapHost.isInitialized &&
+                    binding.viewPager.currentItem == 1) {
+                    mapHost.setDividerVisible(true)
+                }
+            }, 1000)
         }
         if (::musicHost.isInitialized) {
             musicHost.refresh()
@@ -966,7 +1009,7 @@ class MainActivity : AppCompatActivity() {
         navInfoHost?.stop()
         if (::weatherVoice.isInitialized) weatherVoice.shutdown()
         if (::weatherLayer.isInitialized) weatherLayer.removeCallbacks(weatherLayerFadeRunnable)
-        if (::mapHost.isInitialized) mapHost.onDestroy()
+        if (::mapHost.isInitialized) { mapHost.hideDivider(); mapHost.onDestroy() }
         if (::musicHost.isInitialized) musicHost.onDestroy()
         super.onDestroy()
     }
@@ -977,19 +1020,7 @@ class MainActivity : AppCompatActivity() {
             if (binding.viewPager.currentItem == 1) binding.viewPager.currentItem = 2
             else binding.viewPager.currentItem = 1
         }
-        binding.dockApps.setOnLongClickListener {
-            if (binding.viewPager.currentItem == 1 && ::mapHost.isInitialized) {
-                mapHost.toggleAdjust()
-            }
-            true
-        }
         binding.dockBar.isClickable = true
-        binding.dockBar.setOnLongClickListener {
-            if (binding.viewPager.currentItem == 1 && ::mapHost.isInitialized) {
-                mapHost.toggleAdjust()
-            }
-            true
-        }
         renderDock()
     }
 
@@ -1266,7 +1297,7 @@ class MainActivity : AppCompatActivity() {
         val btnSwitchMap = desktopBtnSwitchMap ?: return
 
         mapHost = MapHost(this, mapContainer, mapPanel)
-        mapHost.onGeometryChanged = { binding.root.post { syncRightPanel() } }
+        mapHost.onGeometryChanged = { binding.root.post { syncRightPanel(); mapHostRefreshDivider() } }
         mapHost.onFloatShown = { if (::musicHost.isInitialized) musicHost.bringLyricFloatToFront() }
         mapHost.onAutoReturnDone = { flushPendingWeatherVoice() }
         mapHost.onPickMap = {
@@ -1283,24 +1314,50 @@ class MainActivity : AppCompatActivity() {
             )
         }
         mapHost.start(mapSources, autoLaunch = true)
+        // 触摸分割条（独立悬浮窗，不走 Activity.dispatchTouchEvent）也要重置闲置计时
+        mapHost.onDividerInteract = { onUserActive() }
+        // 创建分割条 overlay（只创建一次，之后非 page0 时移出屏幕、page0 时定位）
+        mapHost.showDivider()
 
-        btnSwitchMap.setOnClickListener {
-            mapHost.closeFloat()
-            MapPickerDialog.show(
-                context = this,
-                sources = mapSources,
-                currentId = mapHost.currentId,
-                onPick = { source ->
-                    mapHost.select(source, autoLaunch = true)
-                    NuiToast.show(this, "已切换为 ${source.label}", Toast.LENGTH_SHORT)
-                },
-                onDismiss = { mapHost.showFloat() },
-            )
-        }
+        btnSwitchMap.setOnClickListener { showMapPicker() }
     }
 
-    private fun setupNav() {
-        navHost = NavHost(this, desktopBtnNavHome!!, desktopBtnNavCompany!!)
+    /** 地图几何/布局变化后刷新悬浮分割条位置（mapHost 可能未初始化则跳过） */
+    private fun mapHostRefreshDivider() {
+        if (::mapHost.isInitialized) mapHost.refreshDivider()
+    }
+
+    /** 弹出地图选择器更换悬浮地图。[onPicked] 在选择后回调（设置面板用它刷新绑定名称）。
+     *  选择器显示期间隐藏悬浮地图与分割条：两者都是 TYPE_APPLICATION_OVERLAY，
+     *  会压在对话框之上，用户既看不清选项也点不到（竖条尤其明显）。 */
+    private fun showMapPicker(onPicked: () -> Unit = {}) {
+        if (!::mapHost.isInitialized) return
+        mapHost.closeFloat()
+        mapHost.setDividerVisible(false)
+        MapPickerDialog.show(
+            context = this,
+            sources = mapSources,
+            currentId = mapHost.currentId,
+            onPick = { source ->
+                mapHost.select(source, autoLaunch = true)
+                NuiToast.show(this, "已切换为 ${source.label}", Toast.LENGTH_SHORT)
+                onPicked()
+            },
+            onDismiss = {
+                if (binding.viewPager.currentItem == 1) {
+                    mapHost.showFloat()
+                    mapHost.setDividerVisible(true)
+                }
+            },
+        )
+    }
+
+    /** 桌面设置 → 地图 → 绑定地图应用 */
+    private fun showMapPickerForSettings(dlg: com.nui.launcher.settings.SettingsDialog) {
+        showMapPicker { dlg.refreshMap() }
+    }
+
+    private fun setupNav() {        navHost = NavHost(this, desktopBtnNavHome!!, desktopBtnNavCompany!!)
         navHost.onHideFloat = { mapHost.closeFloat() }
         navHost.onShowFloat = { if (binding.viewPager.currentItem == 1) mapHost.showFloat() }
         navHost.start()
@@ -1448,6 +1505,12 @@ class MainActivity : AppCompatActivity() {
                     dlg.wallpaperHasCustom = { slot -> wallpaper.hasCustom(slot) }
                     dlg.wallpaperDisplayName = { slot -> wallpaper.wallpaperDisplayName(slot) }
                     dlg.onWallpaperPick = { slot -> wallpaper.showMenu(slot) }
+                    // 地图：绑定应用名称 + 点击更换（原 dock 长按进入地图调整的入口已移除）
+                    dlg.mapLabelProvider = {
+                        if (!::mapHost.isInitialized) null
+                        else mapSources.firstOrNull { it.id == mapHost.currentId }?.label
+                    }
+                    dlg.onPickMap = { showMapPickerForSettings(dlg) }
                     // 设置弹窗内的触摸也重置闲置计时
                     dlg.onUserTouch = { onUserActive() }
                     dlg.onMinusWallpaperPick = { day -> wallpaper.showMinusMenu(day) }
@@ -1473,6 +1536,7 @@ class MainActivity : AppCompatActivity() {
                     dlg.show()
                     // 回调在构造后才赋值，构造内的首次 refreshWallpaper 拿不到负一屏状态，show 后补刷一次
                     dlg.refreshWallpaper()
+                    dlg.refreshMap()
                 },
             )
             val allApps = listOf(settingsEntry) + apps
@@ -1689,18 +1753,22 @@ class MainActivity : AppCompatActivity() {
         val gap = (12 * density).toInt()
         val minPanel = (180 * density).toInt()          // 音乐栏最小宽度，低于则整体消失
         val availableRight = sw - rightMargin
+        // 地图右缘上限：MapHost 内部会再扣除分割条所需右侧预留（gap + 竖条半宽），
+        // 这里取同一个值，避免地图铺满到屏幕右缘把竖条顶出、被高德浮窗盖住而拖不动
+        val mapRightCap = if (::mapHost.isInitialized) mapHost.mapRightLimit() else availableRight
         // 地图右缘（相对 Page0，全屏坐标系）
         val mlp = mp.layoutParams as FrameLayout.LayoutParams
         val mapRight = mlp.leftMargin + mp.width
+        // 面板可见时右缘贴 availableRight（贴屏幕右边距）；mapRightCap 只用于限制地图最大宽度
         val panelW = availableRight - gap - mapRight
-        Log.d("NUI.SyncRight", "sw=$sw density=$density mapLeft=${mlp.leftMargin} mapW=${mp.width} mapRight=$mapRight availableRight=$availableRight gap=$gap panelW=$panelW minPanel=$minPanel geometryLoaded=${if (::mapHost.isInitialized) mapHost.geometryLoaded else false}")
+        Log.d("NUI.SyncRight", "sw=$sw density=$density mapLeft=${mlp.leftMargin} mapW=${mp.width} mapRight=$mapRight mapRightCap=$mapRightCap availableRight=$availableRight gap=$gap panelW=$panelW minPanel=$minPanel geometryLoaded=${if (::mapHost.isInitialized) mapHost.geometryLoaded else false}")
         // 地图几何尚未加载完成时，不隐藏音乐栏、不扩展地图，避免首次启动把默认位置冲掉
         val geoReady = !::mapHost.isInitialized || mapHost.geometryLoaded
         if (panelW < minPanel && geoReady) {
             // 音乐栏太窄：隐藏，地图自动扩展到右缘（不留空）
             Log.d("NUI.SyncRight", "音乐栏宽度 $panelW < 最小 $minPanel，隐藏音乐栏，地图扩展到右缘")
             rp.visibility = android.view.View.GONE
-            val targetW = availableRight - mlp.leftMargin
+            val targetW = mapRightCap - mlp.leftMargin
             if (mlp.width < targetW - 2) {
                 mlp.width = targetW
                 mp.layoutParams = mlp
@@ -1887,6 +1955,15 @@ class MainActivity : AppCompatActivity() {
             window.decorView.postDelayed({
                 applySystemUi()
             }, 150)
+            // 焦点回到桌面窗口（对话框已关闭）且仍在桌面页时，恢复分割条
+            if (::mapHost.isInitialized && binding.viewPager.currentItem == 1) {
+                mapHost.setDividerVisible(true)
+            }
+        } else {
+            // 焦点被其它窗口抢走（对话框 / 系统弹窗 / 其它应用）：分割条是
+            // TYPE_APPLICATION_OVERLAY，会悬浮在这些窗口之上（竖条压在对话框中间，
+            // 难看且挡住点击），必须先隐藏。对话框关闭时上面的 hasFocus 分支会恢复。
+            if (::mapHost.isInitialized) mapHost.setDividerVisible(false)
         }
     }
 }
