@@ -110,15 +110,20 @@ class MapHost(
     private var iconOverlay: View? = null
     private var longPressPending = false
     private val longPressRunnable = Runnable { enterDividerAdjust() }
+    /** 分割条正被触摸（DOWN~UP 之间），置顶 re-add 会断触摸流，需避开 */
+    private var dividerTouching = false
+    /** 翻页过渡中 loc 异常时，落位后重试定位（否则竖条会永远停在屏外） */
+    private val dividerLocateRetry = Runnable { updateDividerPosition() }
 
     /** 分割条被触摸（按下/拖动）时回调，宿主用来重置"闲置自动进入负一屏"计时。
      *  分割条是独立悬浮窗，触摸不经过 Activity.dispatchTouchEvent，必须单独通知，
      *  否则用户开始拖动时闲置计时可能刚好到点，把页面切到负一屏、竖条中途消失。 */
     var onDividerInteract: (() -> Unit)? = null
 
-    /** 分割条贴右时所需的右侧预留（px）：竖条中央 = 地图右缘 + gap，半宽 = barW/2，
-     *  故地图右缘至少留出 gap + barW/2 的余量，竖条才能完整落在屏幕内、不被高德浮窗遮挡。 */
-    private val dividerRightReserve: Int get() = dp(MUSIC_GAP_DP) + dp(DIVIDER_BAR_W_DP) / 2
+    /** 分割条贴右时所需的右侧预留（px）：与右侧面板右边距一致（16dp），地图铺满时
+     *  右缘对齐屏幕右边距，白线（6dp）仍完整落在屏内且在高德浮窗右侧；
+     *  竖条热区（28dp）允许右侧探出屏外，不影响触摸（可见部分仍可点）。 */
+    private val dividerRightReserve: Int get() = dp(16)
 
     /** 地图右缘允许的最大屏幕坐标（px）：分割条拖动与右侧面板联动都用它，
      *  保证"地图铺满到最右"时竖条仍完整可见、可继续拖动（否则会被顶到屏幕右缘、
@@ -458,8 +463,11 @@ class MapHost(
                 container.post {
                     sendFloatBroadcast(src.floatShowAction)
                     container.postDelayed({ onFloatShown?.invoke() }, 600)
-                    // 竖条定位在音乐栏左缘（高德浮窗右缘之外），不与浮窗重叠，
-                    // 无需 bringDividerToFront 置顶（remove+add 反而可能导致 overlay 消失或断触摸流）
+                    // 高德浮窗是后加的 APPLICATION_OVERLAY，会盖在竖条之上。
+                    // 延迟把竖条置顶回来，保证可点（避开拖动中：dividerTouching/AdjustActive 守卫）。
+                    container.postDelayed({
+                        if (dividerShown && !dividerTouching && !dividerAdjustActive) bringDividerToFront()
+                    }, 800)
                 }
             }
     }
@@ -833,6 +841,8 @@ class MapHost(
                 dividerOverlay?.visibility = View.VISIBLE
                 dividerShown = true
                 updateDividerPosition()
+                // 重新显示时置顶到高德浮窗之上（浮窗同为 APPLICATION_OVERLAY、后加在上）
+                if (!dividerTouching && !dividerAdjustActive) bringDividerToFront()
             }
         } else {
             dividerShown = false
@@ -858,6 +868,7 @@ class MapHost(
 
     private fun ensureDivider() {
         if (dividerOverlay != null) return
+        val barW = dp(DIVIDER_BAR_W_DP)
         val bar = FrameLayout(context).apply {
             // 半透明触摸热区 + 中间可视细条
             addView(View(context).apply {
@@ -876,10 +887,16 @@ class MapHost(
             }, FrameLayout.LayoutParams(
                 dp(6),
                 dp(120),
-                Gravity.CENTER,
-            ))
+                Gravity.CENTER_VERTICAL,
+            ).apply {
+                // 竖条整体（触摸热区）中心贴音乐栏左缘，保证大部分落在高德浮窗右侧可点；
+                // 白色细条左移半个间隙并补偿高德浮窗外扩的 4px，使其对齐
+                // "地图浮窗右缘 ~ 音乐栏左缘" 之间可见间隙的中央。
+                val whiteW = dp(6)
+                val overhangDp = (4 / context.resources.displayMetrics.density).toInt()
+                leftMargin = barW / 2 - whiteW / 2 - dp(MUSIC_GAP_DP) / 2 + overhangDp / 2
+            })
         }
-        val barW = dp(DIVIDER_BAR_W_DP)
         val lp = WindowManager.LayoutParams(
             barW,
             android.view.ViewGroup.LayoutParams.MATCH_PARENT,
@@ -938,6 +955,11 @@ class MapHost(
                 lp.x = -10000
                 runCatching { wm.updateViewLayout(bar, lp) }
             }
+            // 翻页过渡中（页面还在滑动、未落位）loc 会短暂异常；此时若不做延迟重试，
+            // 竖条会永远停在 -10000，回到桌面也不出现。落位后（600ms）再定位一次；
+            // 仍异常（非桌面页已隐藏 → dividerShown=false）时重试会自动空转，不会死循环。
+            bar.removeCallbacks(dividerLocateRetry)
+            bar.postDelayed(dividerLocateRetry, 600)
             return
         }
         val gap = dp(MUSIC_GAP_DP)
@@ -958,6 +980,7 @@ class MapHost(
             MotionEvent.ACTION_DOWN -> {
                 // 注意：不能在 DOWN 里 removeView/addView 分割条（置顶会中断触摸流，
                 // 后续 MOVE 会被派发给下层 ViewPager 导致误切页）。置顶只发生在非触摸时机。
+                dividerTouching = true
                 onDividerInteract?.invoke()
                 val lpDown = mapPanel.layoutParams as FrameLayout.LayoutParams
                 dividerStartX = e.rawX
@@ -1019,7 +1042,11 @@ class MapHost(
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 bar.removeCallbacks(longPressRunnable)
                 longPressPending = false
+                dividerTouching = false
                 if (dividerAdjustActive) exitDividerAdjust()
+                // 松手后高德浮窗会重新出现（后加在竖条之上），延迟把竖条置顶回来，
+                // 保证下一次还能在浮窗之上抓到竖条。
+                bar.postDelayed({ if (!dividerTouching && !dividerAdjustActive) bringDividerToFront() }, 350)
                 true
             }
             else -> false
@@ -1040,8 +1067,19 @@ class MapHost(
         dividerAdjustActive = false
         hideDividerIcon()
         saveGeometryForDivider()
-        primeCache()
-        showFloat()
+        // 快速拖动松手后，最后一帧的联动（音乐栏宽度/浮窗几何）可能停在中途状态
+        //（表现为地图与音乐栏之间露出一截间隙，切页/时间刷新后才恢复）。
+        // 主动刷新两次兜底：post 等布局完成后刷新一次，300ms 后再刷一次，
+        // 等价于用户手动"切一下 page / 等时间更新"的恢复效果。
+        mapPanel.post {
+            if (dividerAdjustActive) return@post
+            primeCache()
+            showFloat()
+            onGeometryChanged?.invoke()
+        }
+        mapPanel.postDelayed({
+            if (!dividerAdjustActive) onGeometryChanged?.invoke()
+        }, 300)
     }
 
     /** 调整模式期间在地图区域中央显示绑定地图应用的图标（悬浮 overlay）。

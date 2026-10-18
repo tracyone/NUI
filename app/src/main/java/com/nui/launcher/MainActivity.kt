@@ -1756,9 +1756,11 @@ class MainActivity : AppCompatActivity() {
         // 地图右缘上限：MapHost 内部会再扣除分割条所需右侧预留（gap + 竖条半宽），
         // 这里取同一个值，避免地图铺满到屏幕右缘把竖条顶出、被高德浮窗盖住而拖不动
         val mapRightCap = if (::mapHost.isInitialized) mapHost.mapRightLimit() else availableRight
-        // 地图右缘（相对 Page0，全屏坐标系）
+        // 地图右缘（相对 Page0，全屏坐标系）。
+        // 用 mlp.width 而非 mp.width：拖动时 applyGeometry 刚改了 layoutParams，
+        // 但 layout 尚未执行、mp.width 还是旧值，会导致音乐栏宽度滞后、要切页才刷新。
         val mlp = mp.layoutParams as FrameLayout.LayoutParams
-        val mapRight = mlp.leftMargin + mp.width
+        val mapRight = mlp.leftMargin + mlp.width
         // 面板可见时右缘贴 availableRight（贴屏幕右边距）；mapRightCap 只用于限制地图最大宽度
         val panelW = availableRight - gap - mapRight
         Log.d("NUI.SyncRight", "sw=$sw density=$density mapLeft=${mlp.leftMargin} mapW=${mp.width} mapRight=$mapRight mapRightCap=$mapRightCap availableRight=$availableRight gap=$gap panelW=$panelW minPanel=$minPanel geometryLoaded=${if (::mapHost.isInitialized) mapHost.geometryLoaded else false}")
@@ -1783,6 +1785,12 @@ class MainActivity : AppCompatActivity() {
             if (lp.width != panelW) {
                 lp.width = panelW
                 rp.layoutParams = lp
+            } else if (rp.width != panelW) {
+                // layoutParams 已是目标值但视图没落地：快速拖动松手后，最后一帧的
+                // requestLayout 发生在布局回调里会被系统吞掉，而后续刷新因宽度相等
+                // 走不到上面的写入分支、连 requestLayout 都不发 → 间隙永远停在中途帧。
+                // 这里补发一次强制重新布局（切页/时间刷新恢复正常的等价物）。
+                rp.requestLayout()
             }
         }
         // 地图右缘上限：音乐栏消失后地图可铺到屏幕右缘-16dp
