@@ -9,8 +9,11 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.util.Log
+import android.view.Gravity
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
@@ -1297,8 +1300,8 @@ class MainActivity : AppCompatActivity() {
         val btnSwitchMap = desktopBtnSwitchMap ?: return
 
         mapHost = MapHost(this, mapContainer, mapPanel)
-        mapHost.onGeometryChanged = { binding.root.post { syncRightPanel(); mapHostRefreshDivider() } }
-        mapHost.onFloatShown = { if (::musicHost.isInitialized) musicHost.bringLyricFloatToFront() }
+        mapHost.onGeometryChanged = { binding.root.post { syncRightPanel(); mapHostRefreshDivider(); positionSwapHandles() } }
+        mapHost.onFloatShown = { if (::musicHost.isInitialized) musicHost.bringLyricFloatToFront(); bringSwapHandlesToFront() }
         mapHost.onAutoReturnDone = { flushPendingWeatherVoice() }
         mapHost.onPickMap = {
             mapHost.closeFloat()
@@ -1316,6 +1319,8 @@ class MainActivity : AppCompatActivity() {
         mapHost.start(mapSources, autoLaunch = true)
         // 触摸分割条（独立悬浮窗，不走 Activity.dispatchTouchEvent）也要重置闲置计时
         mapHost.onDividerInteract = { onUserActive() }
+        // 底部互换横条常驻，跟随分割条显隐（分割条在非桌面页/对话框/失焦时隐藏，横条同步隐藏）
+        mapHost.onDividerVisibilityChanged = { visible -> if (visible) showSwapHandles() else hideSwapHandles() }
         // 创建分割条 overlay（只创建一次，之后非 page0 时移出屏幕、page0 时定位）
         mapHost.showDivider()
 
@@ -1761,17 +1766,58 @@ class MainActivity : AppCompatActivity() {
         // 用 mlp.width 而非 mp.width：拖动时 applyGeometry 刚改了 layoutParams，
         // 但 layout 尚未执行、mp.width 还是旧值，会导致音乐栏宽度滞后、要切页才刷新。
         val mlp = mp.layoutParams as FrameLayout.LayoutParams
-        val mapRight = mlp.leftMargin + mlp.width
-        // 面板可见时右缘贴 availableRight（贴屏幕右边距）；mapRightCap 只用于限制地图最大宽度
-        val panelW = availableRight - gap - mapRight
-        Log.d("NUI.SyncRight", "sw=$sw density=$density mapLeft=${mlp.leftMargin} mapW=${mp.width} mapRight=$mapRight mapRightCap=$mapRightCap availableRight=$availableRight gap=$gap panelW=$panelW minPanel=$minPanel geometryLoaded=${if (::mapHost.isInitialized) mapHost.geometryLoaded else false}")
-        // 地图几何尚未加载完成时，不隐藏音乐栏、不扩展地图，避免首次启动把默认位置冲掉
+        val mapLeft = mlp.leftMargin
+        val mapRight = mapLeft + mlp.width
+        val swappedMode = ::mapHost.isInitialized && mapHost.swapped
         val geoReady = !::mapHost.isInitialized || mapHost.geometryLoaded
+
+        if (swappedMode) {
+            // ===== 互换模式：音乐栏在左，地图在右 =====
+            // 面板左缘贴 dock 右侧（120dp，与地图默认左缘一致，不能压到 dock 栏）；
+            // 宽度 = mapLeft - gap - leftEdge
+            val leftEdge = (120 * density).toInt()
+            val panelW = mapLeft - gap - leftEdge
+            Log.d("NUI.SyncRight", "swapped sw=$sw mapLeft=$mapLeft mapW=${mlp.width} mapRight=$mapRight panelW=$panelW minPanel=$minPanel")
+            if (panelW < minPanel && geoReady) {
+                // 音乐栏太窄：隐藏，地图自动扩展到左缘（不留空）
+                rp.visibility = android.view.View.GONE
+                val rightEdge = mapRight
+                if (mapLeft > leftEdge + 2) {
+                    mlp.leftMargin = leftEdge
+                    mlp.width = rightEdge - leftEdge
+                    mp.layoutParams = mlp
+                }
+                mp.post { mapHost?.refreshFloat() }
+            } else {
+                rp.visibility = android.view.View.VISIBLE
+                val lp = rp.layoutParams as FrameLayout.LayoutParams
+                // 面板贴左边：gravity 改为 top|start，leftMargin = leftEdge
+                val wantGravity = Gravity.TOP or Gravity.START
+                if (lp.gravity != wantGravity || lp.leftMargin != leftEdge) {
+                    lp.gravity = wantGravity
+                    lp.leftMargin = leftEdge
+                    rp.layoutParams = lp
+                }
+                if (lp.width != panelW) {
+                    lp.width = panelW
+                    rp.layoutParams = lp
+                } else if (rp.width != panelW) {
+                    // 快速拖动松手后最后一帧 requestLayout 可能被吞（同正常模式的补救）
+                    rp.requestLayout()
+                }
+            }
+            return
+        }
+
+        // ===== 正常模式：地图在左，音乐栏在右 =====
+        val panelW = availableRight - gap - mapRight
+        Log.d("NUI.SyncRight", "sw=$sw density=$density mapLeft=$mapLeft mapW=${mlp.width} mapRight=$mapRight mapRightCap=$mapRightCap availableRight=$availableRight gap=$gap panelW=$panelW minPanel=$minPanel geometryLoaded=$geoReady")
+        // 地图几何尚未加载完成时，不隐藏音乐栏、不扩展地图，避免首次启动把默认位置冲掉
         if (panelW < minPanel && geoReady) {
             // 音乐栏太窄：隐藏，地图自动扩展到右缘（不留空）
             Log.d("NUI.SyncRight", "音乐栏宽度 $panelW < 最小 $minPanel，隐藏音乐栏，地图扩展到右缘")
             rp.visibility = android.view.View.GONE
-            val targetW = mapRightCap - mlp.leftMargin
+            val targetW = mapRightCap - mapLeft
             if (mlp.width < targetW - 2) {
                 mlp.width = targetW
                 mp.layoutParams = mlp
@@ -1782,7 +1828,14 @@ class MainActivity : AppCompatActivity() {
         } else {
             Log.d("NUI.SyncRight", "音乐栏可见，宽度=$panelW")
             rp.visibility = android.view.View.VISIBLE
-            val lp = rp.layoutParams
+            val lp = rp.layoutParams as FrameLayout.LayoutParams
+            // 面板贴右边：gravity 恢复 top|end，leftMargin 归零（从互换模式回来时）
+            val wantGravity = Gravity.TOP or Gravity.END
+            if (lp.gravity != wantGravity || lp.leftMargin != 0) {
+                lp.gravity = wantGravity
+                lp.leftMargin = 0
+                rp.layoutParams = lp
+            }
             if (lp.width != panelW) {
                 lp.width = panelW
                 rp.layoutParams = lp
@@ -1970,7 +2023,184 @@ class MainActivity : AppCompatActivity() {
             // 焦点被其它窗口抢走（对话框 / 系统弹窗 / 其它应用）：分割条是
             // TYPE_APPLICATION_OVERLAY，会悬浮在这些窗口之上（竖条压在对话框中间，
             // 难看且挡住点击），必须先隐藏。对话框关闭时上面的 hasFocus 分支会恢复。
+            //（底部互换横条由 onDividerVisibilityChanged 联动隐藏，无需单独处理）
             if (::mapHost.isInitialized) mapHost.setDividerVisible(false)
+        }
+    }
+
+    // ===== 底部拖动手柄（灰色横条）：水平拖动超过阈值 → 地图与音乐栏左右互换位置 =====
+    // 两个 overlay 小窗（各自 140dp×14dp），常驻显示、跟随分割条显隐（onDividerVisibilityChanged）。
+    // 横条落在"窗口底边与屏幕底边之间的空隙"里，不遮挡窗口内容。
+
+    private var swapHandleMap: View? = null
+    private var swapHandlePanel: View? = null
+    private var swapHandlesVisible = false
+    /** 手柄拖动：本次拖动是否已触发过互换（防止一次拖动反复横跳） */
+    private var swapDragTriggered = false
+    private var swapHandleDownX = 0f
+    private var swapHandleStartWinX = 0
+
+    private val SWAP_HANDLE_TRIGGER_DP = 96
+    /** 手柄窗口宽/高（dp）：高度压在窗口底部空隙里，故做得扁 */
+    private val SWAP_HANDLE_W_DP = 140
+    private val SWAP_HANDLE_H_DP = 14
+
+    /** 物理屏幕高度（含系统栏区域），用于把横条定位到窗口底边与屏幕底边的空隙 */
+    private val realScreenH: Int by lazy {
+        val m = android.util.DisplayMetrics()
+        @Suppress("DEPRECATION") windowManager.defaultDisplay.getRealMetrics(m)
+        m.heightPixels
+    }
+
+    private fun dpSwap(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    /** 创建手柄窗口内容：灰色胶囊横条（窗口内水平垂直居中） */
+    private fun createSwapHandleContent(): View {
+        val w = dpSwap(SWAP_HANDLE_W_DP)
+        val h = dpSwap(SWAP_HANDLE_H_DP)
+        return FrameLayout(this).apply {
+            addView(View(this@MainActivity).apply {
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                    cornerRadius = dpSwap(2).toFloat()
+                    setColor(0xCCAAAAAA.toInt())   // 灰色横条
+                }
+            }, FrameLayout.LayoutParams(dpSwap(96), dpSwap(4)).apply {
+                gravity = Gravity.CENTER
+            })
+            layoutParams = android.view.ViewGroup.LayoutParams(w, h)
+        }
+    }
+
+    /** 显示/刷新两个窗口底部的拖动手柄（常驻）。分割条显示时由 onDividerVisibilityChanged 触发。 */
+    fun showSwapHandles() {
+        if (binding.viewPager.currentItem != 1 || !::mapHost.isInitialized) return
+        if (!Settings.canDrawOverlays(this)) return
+
+        val mp = desktopMapPanel ?: return
+        positionSwapHandle(isMap = true, target = mp)
+        val rp = desktopRightPanel
+        if (rp != null && rp.visibility == android.view.View.VISIBLE && rp.width > 0) {
+            positionSwapHandle(isMap = false, target = rp)
+        } else {
+            removeSwapHandle(isMap = false)
+        }
+        swapHandlesVisible = true
+    }
+
+    /** 刷新两个手柄位置（几何变化后调用）；手柄未显示时不动。 */
+    private fun positionSwapHandles() {
+        if (!swapHandlesVisible) return
+        desktopMapPanel?.let { positionSwapHandle(isMap = true, target = it) }
+        val rp = desktopRightPanel
+        if (rp != null && rp.visibility == android.view.View.VISIBLE && rp.width > 0) {
+            positionSwapHandle(isMap = false, target = rp)
+        } else {
+            removeSwapHandle(isMap = false)
+        }
+    }
+
+    private fun positionSwapHandle(isMap: Boolean, target: View) {
+        val handle = ensureSwapHandle(isMap)
+        val loc = IntArray(2)
+        target.getLocationOnScreen(loc)
+        // 页面过渡中 target 位置异常 → 跳过本次定位，下次事件会修正
+        if (loc[0] <= 0 || target.width <= 0) return
+        val lp = handle.layoutParams as android.view.WindowManager.LayoutParams
+        lp.x = loc[0] + target.width / 2 - lp.width / 2
+        // 横条放进"窗口底边 ~ 屏幕底边"的空隙：手柄窗口在空隙中垂直居中；
+        // 空隙比手柄矮时（默认仅 8dp）向上最多探入窗口底部几 px（窗口透明无视觉影响）。
+        val winBottom = loc[1] + target.height
+        val gapH = (realScreenH - winBottom).coerceAtLeast(0)
+        lp.y = winBottom + (gapH - lp.height) / 2
+        runCatching { windowManager.updateViewLayout(handle, lp) }
+    }
+
+    private fun ensureSwapHandle(isMap: Boolean): View {
+        val existing = if (isMap) swapHandleMap else swapHandlePanel
+        if (existing != null) return existing
+        val handle = createSwapHandleContent()
+        val lp = android.view.WindowManager.LayoutParams(
+            dpSwap(SWAP_HANDLE_W_DP), dpSwap(SWAP_HANDLE_H_DP),
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O)
+                android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else @Suppress("DEPRECATION") android.view.WindowManager.LayoutParams.TYPE_PHONE,
+            android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            android.graphics.PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 0; y = 0
+        }
+        handle.setOnTouchListener(swapHandleTouch)
+        runCatching { windowManager.addView(handle, lp) }
+        if (isMap) swapHandleMap = handle else swapHandlePanel = handle
+        return handle
+    }
+
+    private val swapHandleTouch = View.OnTouchListener { v, e ->
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                swapDragTriggered = false
+                swapHandleDownX = e.rawX
+                swapHandleStartWinX = (v.layoutParams as android.view.WindowManager.LayoutParams).x
+                onUserActive()
+                true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                onUserActive()
+                val lp = v.layoutParams as android.view.WindowManager.LayoutParams
+                lp.x = (swapHandleStartWinX + (e.rawX - swapHandleDownX)).toInt()
+                    .coerceIn(0, resources.displayMetrics.widthPixels - lp.width)
+                runCatching { windowManager.updateViewLayout(v, lp) }
+                if (!swapDragTriggered &&
+                    kotlin.math.abs(e.rawX - swapHandleDownX) > dpSwap(SWAP_HANDLE_TRIGGER_DP)) {
+                    swapDragTriggered = true
+                    mapHost.swapped = !mapHost.swapped
+                }
+                true
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                // 松手后手柄回到对应窗口底部居中（互换后窗口位置已变，需重新定位）
+                binding.root.post {
+                    if (v === swapHandleMap) {
+                        desktopMapPanel?.let { positionSwapHandle(isMap = true, target = it) }
+                    } else {
+                        desktopRightPanel?.let { positionSwapHandle(isMap = false, target = it) }
+                    }
+                }
+                true
+            }
+            else -> false
+        }
+    }
+
+    private fun removeSwapHandle(isMap: Boolean) {
+        val handle = if (isMap) swapHandleMap else swapHandlePanel
+        handle?.let { runCatching { windowManager.removeView(it) } }
+        if (isMap) swapHandleMap = null else swapHandlePanel = null
+    }
+
+    /** 隐藏两个拖动手柄（分割条隐藏时由 onDividerVisibilityChanged 联动调用） */
+    fun hideSwapHandles() {
+        if (!swapHandlesVisible) return
+        swapHandlesVisible = false
+        removeSwapHandle(isMap = true)
+        removeSwapHandle(isMap = false)
+    }
+
+    /** 手柄置顶（浮窗出现后调用，避免被盖住） */
+    fun bringSwapHandlesToFront() {
+        if (!swapHandlesVisible) return
+        listOfNotNull(swapHandleMap, swapHandlePanel).forEach { h ->
+            val old = h.layoutParams as android.view.WindowManager.LayoutParams
+            runCatching { windowManager.removeView(h) }
+            val lp = android.view.WindowManager.LayoutParams(
+                old.width, old.height, old.type, old.flags, old.format
+            ).apply {
+                gravity = old.gravity; x = old.x; y = old.y
+            }
+            runCatching { windowManager.addView(h, lp) }
         }
     }
 }

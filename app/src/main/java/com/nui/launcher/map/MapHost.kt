@@ -99,6 +99,63 @@ class MapHost(
     private var dividerShown = false
     private var dividerStartX = 0f
     private var dividerStartMapW = 0
+    private var dividerStartLeft = 0
+    private var dividerStartRight = 0
+    /** 竖条白色细线引用（互换模式下白线水平位置随左右关系动态偏移） */
+    private var dividerWhiteLine: View? = null
+    /** 互换模式：true = 音乐栏在左、地图在右；false（默认）= 地图在左、音乐栏在右。
+     *  与几何一样持久化，重启后保持。 */
+    var swapped: Boolean = prefs.getBoolean(KEY_SWAPPED, false)
+        set(value) {
+            if (field == value) return
+            field = value
+            prefs.edit { putBoolean(KEY_SWAPPED, value) }
+            transformGeometryForSwap(value)
+            onGeometryChanged?.invoke()
+        }
+
+    /** 切换互换模式时真正调换两个窗口的位置（只动位置关系，不动高度）：
+     *  正常 → 互换：音乐栏保持原宽度搬到 dock 右侧（不能压到 dock 栏），地图移到右边、右缘锚定铺满上限；
+     *  互换 → 正常：音乐栏保持原宽度搬回右缘，地图左缘恢复贴 dock、宽度填满到音乐栏。
+     *  音乐栏当前处于隐藏（地图铺满）状态时只移动地图，音乐栏保持隐藏。 */
+    private fun transformGeometryForSwap(toSwapped: Boolean) {
+        val lp = mapPanel.layoutParams as FrameLayout.LayoutParams
+        val sw = realScreenW
+        val gap = dp(MUSIC_GAP_DP)
+        val rightMargin = dp(16)
+        val leftEdge = dockEdgeX()   // 左侧可用边界：dock 右侧（互换模式下音乐栏/铺满地图都不能压 dock）
+        val minPanel = dp(MUSIC_PANEL_MIN_WIDTH_DP)
+        if (toSwapped) {
+            // 换前音乐栏宽度（正常模式公式：右边距内 - 间距 - 地图右缘）；<minPanel 表示音乐栏已隐藏
+            val panelW = (sw - rightMargin) - gap - (lp.leftMargin + lp.width)
+            if (panelW >= minPanel) {
+                val newLeft = leftEdge + panelW + gap
+                lp.leftMargin = newLeft
+                lp.width = (mapRightLimit() - newLeft).coerceAtLeast(MIN_SIZE)
+            } else {
+                // 音乐栏隐藏中：地图铺满整行（左缘=dock 右侧，右缘=铺满上限）
+                lp.leftMargin = leftEdge
+                lp.width = (mapRightLimit() - leftEdge).coerceAtLeast(MIN_SIZE)
+            }
+        } else {
+            // 互换模式下的音乐栏宽度 = 地图左缘 - 间距 - 左侧可用边界
+            val panelW = lp.leftMargin - gap - leftEdge
+            val dockX = dockEdgeX()
+            lp.leftMargin = dockX
+            lp.width = if (panelW >= minPanel) {
+                ((sw - rightMargin) - gap - panelW - dockX).coerceAtLeast(MIN_SIZE)
+            } else {
+                (mapRightLimit() - dockX).coerceAtLeast(MIN_SIZE)
+            }
+        }
+        mapPanel.layoutParams = lp
+        saveGeometry()
+        refreshFloat()
+    }
+
+    /** 左侧可用边界（px）：dock 栏 96dp + 安全间距 24dp = 120dp，与 loadGeometry 默认地图左缘一致。
+     *  正常模式地图左缘、互换模式音乐栏左缘/地图铺满左缘都不能越过它（否则压到 dock 栏）。 */
+    private fun dockEdgeX() = dp(96) + dp(24)
     /** 分割条已吸附到最右（音乐栏隐藏、地图铺满）；滞回阈值内保持吸附，防手指抖动来回跳 */
     private var dividerSnappedRight = false
     private var dividerLastMoveX = 0f
@@ -117,6 +174,9 @@ class MapHost(
      *  分割条是独立悬浮窗，触摸不经过 Activity.dispatchTouchEvent，必须单独通知，
      *  否则用户开始拖动时闲置计时可能刚好到点，把页面切到负一屏、竖条中途消失。 */
     var onDividerInteract: (() -> Unit)? = null
+
+    /** 分割条显隐变化回调（宿主用来联动底部互换横条：横条常驻、跟随分割条显隐） */
+    var onDividerVisibilityChanged: ((Boolean) -> Unit)? = null
 
     /** 铺满时地图右缘距屏幕右缘的预留（px）：12dp。高德浮窗右缘比地图卡片外扩约 4px，
      *  剩下 8px 屏幕空隙恰好放 6dp 白线（上下各留 1px），浮窗尽量用足右侧空间；
@@ -828,6 +888,7 @@ class MapHost(
                 // 重新显示时置顶到高德浮窗之上（浮窗同为 APPLICATION_OVERLAY、后加在上）
                 if (!dividerTouching && !dividerAdjustActive) bringDividerToFront()
             }
+            onDividerVisibilityChanged?.invoke(true)
         } else {
             dividerShown = false
             dividerAdjustActive = false
@@ -837,6 +898,7 @@ class MapHost(
                 runCatching { wm.updateViewLayout(it, lp) }
             }
             hideDividerIcon()
+            onDividerVisibilityChanged?.invoke(false)
         }
     }
 
@@ -845,7 +907,9 @@ class MapHost(
         dividerAdjustActive = false
         dividerOverlay?.let { runCatching { wm.removeView(it) } }
         dividerOverlay = null
+        dividerWhiteLine = null
         hideDividerIcon()
+        onDividerVisibilityChanged?.invoke(false)
     }
 
     fun isDividerShown() = dividerShown
@@ -866,7 +930,7 @@ class MapHost(
                 background = android.graphics.drawable.GradientDrawable().apply {
                     shape = android.graphics.drawable.GradientDrawable.RECTANGLE
                     cornerRadius = dp(3).toFloat()
-                    setColor(0xE6FFFFFF.toInt())
+                    setColor(0xE6AAAAAA.toInt())   // 灰色（原白色太扎眼）
                 }
             }, FrameLayout.LayoutParams(
                 dp(6),
@@ -876,11 +940,14 @@ class MapHost(
                 // 竖条整体（触摸热区）中心贴音乐栏左缘，保证大部分落在高德浮窗右侧可点；
                 // 白色细条左移半个间隙并补偿高德浮窗外扩的 4px，使其对齐
                 // "地图浮窗右缘 ~ 音乐栏左缘" 之间可见间隙的中央。
+                // swapped 模式（音乐栏在左）下白线位置由 updateDividerPosition 动态计算。
                 val whiteW = dp(6)
                 val overhangDp = (4 / context.resources.displayMetrics.density).toInt()
                 leftMargin = barW / 2 - whiteW / 2 - dp(MUSIC_GAP_DP) / 2 + overhangDp / 2
             })
         }
+        // 保留白线引用：swapped 切换时 updateDividerPosition 需动态改其 leftMargin
+        dividerWhiteLine = (bar.getChildAt(1))
         val lp = WindowManager.LayoutParams(
             barW,
             android.view.ViewGroup.LayoutParams.MATCH_PARENT,
@@ -947,14 +1014,30 @@ class MapHost(
             return
         }
         val gap = dp(MUSIC_GAP_DP)
-        // 竖条中央对齐音乐栏左缘（= mapPanel 右缘 + gap）。不能钳制到屏内：铺满时若钳制，
-        // 白线会被拉进高德浮窗内部（浮窗右缘=地图右缘+4）造成重叠；白线位置（热区内固定偏移）
-        // 恰好落在 [浮窗右缘, 屏幕右缘] 的 8px 空隙中央，热区右侧探出屏外无碍触摸。
-        val musicLeft = loc[0] + mapPanel.width + gap
-        val targetX = (musicLeft - lp.width / 2).coerceAtLeast(0)
+        // 竖条中央对齐"音乐栏与地图的边界"：正常模式 = mapPanel 右缘 + gap；互换模式 = mapPanel 左缘 - gap。
+        // 不能钳制到屏内：铺满时若钳制，白线会被拉进高德浮窗内部造成重叠；热区探出屏外无碍触摸。
+        val boundary = if (swapped) loc[0] - gap else loc[0] + mapPanel.width + gap
+        val targetX = (boundary - lp.width / 2).coerceAtLeast(0)
         if (lp.x != targetX) {
             lp.x = targetX
             runCatching { wm.updateViewLayout(bar, lp) }
+        }
+        // 白线水平位置：白线应落在地图与音乐栏之间的可见间隙正中（相对热区的 leftMargin）。
+        // 正常模式：间隙在地图右侧，中心 = mapPanel右缘 + gap/2 + 浮窗外扩补偿。
+        // 互换模式：间隙在地图左侧，中心 = mapPanel左缘 - gap/2（左侧无浮窗外扩）。
+        dividerWhiteLine?.let { wl ->
+            val wlLp = wl.layoutParams as FrameLayout.LayoutParams
+            val whiteW = dp(6)
+            val lineCenterAbs = if (swapped) {
+                loc[0] - gap / 2
+            } else {
+                loc[0] + mapPanel.width + gap / 2 + (4 / context.resources.displayMetrics.density).toInt() / 2
+            }
+            val wantMargin = (lineCenterAbs - targetX - whiteW / 2).coerceAtLeast(0)
+            if (wlLp.leftMargin != wantMargin) {
+                wlLp.leftMargin = wantMargin
+                wl.layoutParams = wlLp
+            }
         }
     }
 
@@ -971,10 +1054,17 @@ class MapHost(
                 val lpDown = mapPanel.layoutParams as FrameLayout.LayoutParams
                 dividerStartX = e.rawX
                 dividerStartMapW = lpDown.width
+                dividerStartLeft = lpDown.leftMargin
+                dividerStartRight = lpDown.leftMargin + lpDown.width
                 dividerLastMoveX = e.rawX
-                // 起点已是铺满状态（音乐栏隐藏、地图占满右侧）时保持吸附，避免一按下就抖动
-                val limitW0 = mapRightLimit() - lpDown.leftMargin
-                dividerSnappedRight = dividerStartMapW >= limitW0 - 1
+                // 起点已是铺满状态（音乐栏隐藏、地图占满）时保持吸附，避免一按下就抖动
+                // 正常模式吸附右端（宽度=limitW）；互换模式吸附左端（leftMargin=左边距）
+                dividerSnappedRight = if (swapped) {
+                    dividerStartLeft <= dockEdgeX() + 1
+                } else {
+                    val limitW0 = mapRightLimit() - lpDown.leftMargin
+                    dividerStartMapW >= limitW0 - 1
+                }
                 longPressPending = true
                 bar.removeCallbacks(longPressRunnable)
                 bar.postDelayed(longPressRunnable, LONG_PRESS_MS)
@@ -986,41 +1076,75 @@ class MapHost(
                 if (!dividerAdjustActive && longPressPending) enterDividerAdjust()
                 if (dividerAdjustActive) {
                     val lp = mapPanel.layoutParams as FrameLayout.LayoutParams
-                    // 地图右缘上限（音乐栏隐藏后地图可铺满到这里；已扣除竖条所需右侧预留）
-                    val limitW = (mapRightLimit() - lp.leftMargin).coerceAtLeast(MIN_SIZE)
-                    // 还能容下音乐栏时的地图最大宽度，超过就会被 syncRightPanel 判定为"音乐栏太窄"而隐藏
-                    val keepPanelMaxW = (limitW - dp(MUSIC_GAP_DP) - dp(MUSIC_PANEL_MIN_WIDTH_DP))
-                        .coerceAtLeast(MIN_SIZE)
-                    var newW = dividerStartMapW + (e.rawX - dividerStartX).toInt()
-                    if (dividerSnappedRight) {
-                        // 已吸附铺满：保持铺满，明确向左拖过阈值才退出（滞回，防手指抖动来回跳）。
-                        // 退出时直接落到"音乐栏刚好还能显示"的宽度（而不是让地图缩到中间、音乐栏还没
-                        // 回来的空白区），并重置基准，之后继续向左拖就是平滑收缩、音乐栏同步变宽。
-                        if (dividerStartX - e.rawX > snapExitThreshold) {
-                            dividerSnappedRight = false
-                            newW = keepPanelMaxW
-                            dividerStartMapW = keepPanelMaxW
+                    if (swapped) {
+                        // ===== 互换模式：音乐栏在左，地图在右。拖动手条改变地图左缘（左Margin），右缘固定。 =====
+                        val leftEdge = dockEdgeX()   // 左侧可用边界：dock 右侧（铺满/音乐栏贴边都不能压 dock）
+                        // 还能容下音乐栏时的最大 mapLeft：leftEdge + gap + minPanel
+                        val keepPanelMaxLeft = leftEdge + dp(MUSIC_GAP_DP) + dp(MUSIC_PANEL_MIN_WIDTH_DP)
+                        var newLeft = dividerStartLeft + (e.rawX - dividerStartX).toInt()
+                        if (dividerSnappedRight) {
+                            // 已吸附铺满：保持铺满，明确向右拖过阈值才退出（滞回，防手指抖动来回跳）
+                            if (e.rawX - dividerStartX > snapExitThreshold) {
+                                dividerSnappedRight = false
+                                newLeft = keepPanelMaxLeft
+                                dividerStartLeft = keepPanelMaxLeft
+                                dividerStartX = e.rawX
+                            } else {
+                                newLeft = leftEdge
+                            }
+                        } else if (e.rawX < dividerLastMoveX && newLeft < keepPanelMaxLeft) {
+                            // 向左拖且会挤掉音乐栏 → 吸附铺满
+                            dividerSnappedRight = true
+                            newLeft = leftEdge
+                            dividerStartLeft = leftEdge
                             dividerStartX = e.rawX
-                        } else {
-                            newW = limitW
                         }
-                    } else if (e.rawX > dividerLastMoveX && newW > keepPanelMaxW) {
-                        // 向右拖且会挤掉音乐栏 → 吸附铺满。必须在这里一步到位：
-                        // syncRightPanel 会一边隐藏音乐栏一边把地图拉满，慢拖时和拖动逐帧互相打架，
-                        // 结果就是"音乐栏没了但右边留空、还拖不动"。吸附后重置基准，退出吸附不跳变。
-                        dividerSnappedRight = true
-                        newW = limitW
-                        dividerStartMapW = limitW
-                        dividerStartX = e.rawX
-                    }
-                    dividerLastMoveX = e.rawX
-                    newW = newW.coerceIn(MIN_SIZE, limitW)
-                    if (newW != lp.width) {
-                        lp.width = newW
-                        mapPanel.layoutParams = lp
-                        applyGeometry(null, null, newW, null)
-                        updateDividerPosition()
-                        updateDividerIconPosition()
+                        dividerLastMoveX = e.rawX
+                        newLeft = newLeft.coerceIn(leftEdge, dividerStartRight - MIN_SIZE)
+                        val newW = dividerStartRight - newLeft
+                        if (newLeft != lp.leftMargin) {
+                            applyGeometry(newLeft, null, newW, null)
+                            updateDividerPosition()
+                            updateDividerIconPosition()
+                        }
+                    } else {
+                        // ===== 正常模式：地图在左，音乐栏在右。拖动手条改变地图宽度，左缘固定。 =====
+                        // 地图右缘上限（音乐栏隐藏后地图可铺满到这里；已扣除竖条所需右侧预留）
+                        val limitW = (mapRightLimit() - lp.leftMargin).coerceAtLeast(MIN_SIZE)
+                        // 还能容下音乐栏时的地图最大宽度，超过就会被 syncRightPanel 判定为"音乐栏太窄"而隐藏
+                        val keepPanelMaxW = (limitW - dp(MUSIC_GAP_DP) - dp(MUSIC_PANEL_MIN_WIDTH_DP))
+                            .coerceAtLeast(MIN_SIZE)
+                        var newW = dividerStartMapW + (e.rawX - dividerStartX).toInt()
+                        if (dividerSnappedRight) {
+                            // 已吸附铺满：保持铺满，明确向左拖过阈值才退出（滞回，防手指抖动来回跳）。
+                            // 退出时直接落到"音乐栏刚好还能显示"的宽度（而不是让地图缩到中间、音乐栏还没
+                            // 回来的空白区），并重置基准，之后继续向左拖就是平滑收缩、音乐栏同步变宽。
+                            if (dividerStartX - e.rawX > snapExitThreshold) {
+                                dividerSnappedRight = false
+                                newW = keepPanelMaxW
+                                dividerStartMapW = keepPanelMaxW
+                                dividerStartX = e.rawX
+                            } else {
+                                newW = limitW
+                            }
+                        } else if (e.rawX > dividerLastMoveX && newW > keepPanelMaxW) {
+                            // 向右拖且会挤掉音乐栏 → 吸附铺满。必须在这里一步到位：
+                            // syncRightPanel 会一边隐藏音乐栏一边把地图拉满，慢拖时和拖动逐帧互相打架，
+                            // 结果就是"音乐栏没了但右边留空、还拖不动"。吸附后重置基准，退出吸附不跳变。
+                            dividerSnappedRight = true
+                            newW = limitW
+                            dividerStartMapW = limitW
+                            dividerStartX = e.rawX
+                        }
+                        dividerLastMoveX = e.rawX
+                        newW = newW.coerceIn(MIN_SIZE, limitW)
+                        if (newW != lp.width) {
+                            lp.width = newW
+                            mapPanel.layoutParams = lp
+                            applyGeometry(null, null, newW, null)
+                            updateDividerPosition()
+                            updateDividerIconPosition()
+                        }
                     }
                 }
                 true
@@ -1123,6 +1247,7 @@ class MapHost(
         private const val KEY_SOURCE = "float_map_source_id"
         private const val KEY_GEOMETRY = "map_geometry"
         private const val KEY_GEOM_V2 = "geometry_v2" // 新版几何标记（dock 变窄后重置旧位置）
+        private const val KEY_SWAPPED = "map_swapped"   // 地图与音乐栏左右位置是否互换
         private const val EDGE_ZONE_DP = 28   // 右/下边缘把手宽度
         private val MIN_SIZE = 240 // px，缩放下限
         /** 长按分割条进入调整模式（隐藏地图、显示图标）的阈值 */
