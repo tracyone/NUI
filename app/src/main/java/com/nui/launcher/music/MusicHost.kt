@@ -196,6 +196,68 @@ class MusicHost(
     var onHideFloat: (() -> Unit)? = null
     var onShowFloat: (() -> Unit)? = null
 
+    // ===== 音乐浮窗：请求绑定的音乐 App 在音乐窗口区域内悬浮显示 =====
+    // 与悬浮地图共用同一套 touka 悬浮插件广播协议：酷我车机版内置该插件
+    // （tech/touka/floatplugin/FloatApp 监听 com.autonavi.plus.showmap / closemap，
+    //  extras x/y/w/h 为窗口边界 x1,y1,x2,y2）。必须 setPackage 指定绑定音乐包名——
+    //  同装高德时两者监听同一对 action，不指定包名会互相抢浮窗。
+    // 是否启用由设置「音乐悬浮显示」决定；App 内置插件时才会真正悬浮，否则广播被忽略。
+    /** 音乐窗口几何（边界格式 x1,y1,x2,y2），由宿主提供；返回 null 表示窗口不可用 */
+    var musicPanelBoundsProvider: (() -> IntArray?)? = null
+    /** 当前是否已请求音乐 App 悬浮显示 */
+    private var musicFloatRequested = false
+    /** 几何变化时防抖重发（拖动地图会逐帧改变音乐栏宽度，避免每帧广播） */
+    private val musicFloatResend = Runnable { sendMusicFloatBroadcast(true) }
+    /** 上次悬浮几何广播发送时刻（elapsedRealtime），用于拖动跟随的节流 */
+    private var lastFloatSendAt = 0L
+
+    /** 拖动地图分割条期间音乐浮窗几何跟随：节流重发（至少间隔 150ms 实发一次，
+     *  与防抖不同——连续拖动中不会被无限推迟）。仅在浮窗已请求显示时有效。 */
+    fun requestFloatRefresh() {
+        if (!musicFloatRequested) return
+        val since = android.os.SystemClock.elapsedRealtime() - lastFloatSendAt
+        if (since >= 150L) {
+            sendMusicFloatBroadcast(true)
+        } else {
+            handler.removeCallbacks(musicFloatResend)
+            handler.postDelayed(musicFloatResend, 150L - since)
+        }
+    }
+
+    /** 请求/取消绑定的音乐 App 在音乐窗口内悬浮显示。
+     *  visible=true 且已开启设置、有绑定 App → 发悬浮广播（已显示时按最新几何防抖重发）；
+     *  否则发关闭广播（幂等，未显示时也安全）。 */
+    fun setMusicFloatVisible(visible: Boolean) {
+        val want = visible && prefs.getString(KEY_APP, null) != null && floatEnabled(context)
+        if (want && musicFloatRequested) {
+            handler.removeCallbacks(musicFloatResend)
+            handler.postDelayed(musicFloatResend, 150L)
+            return
+        }
+        if (want == musicFloatRequested) return
+        musicFloatRequested = want
+        handler.removeCallbacks(musicFloatResend)
+        if (want) hideLyricFloat()  // 音乐 App 悬浮显示期间不显示 NUI 悬浮歌词
+        sendMusicFloatBroadcast(want)
+    }
+
+    private fun sendMusicFloatBroadcast(show: Boolean) {
+        val pkg = prefs.getString(KEY_APP, null) ?: return
+        val intent = Intent(if (show) ACTION_SHOW_MAP else ACTION_CLOSE_MAP)
+        if (show) {
+            val b = musicPanelBoundsProvider?.invoke() ?: return
+            // 边界比音乐栏外扩 4px：音乐 App 浮窗可能有内边距，边缘会露出 NUI 卡片背景
+            val inset = 4
+            intent.putExtra("x", b[0] - inset)
+            intent.putExtra("y", b[1] - inset)
+            intent.putExtra("w", b[2] + inset)
+            intent.putExtra("h", b[3] + inset)
+        }
+        intent.setPackage(pkg)
+        runCatching { context.sendBroadcast(intent) }
+        if (show) lastFloatSendAt = android.os.SystemClock.elapsedRealtime()
+    }
+
     fun start() {
         renderEmpty()
         val f = IntentFilter(MusicListenerService.ACTION_NOTIFY)
@@ -867,6 +929,9 @@ class MusicHost(
         currentController?.unregisterCallback(metadataCallback)
         currentController = null
         runCatching { lbm.unregisterReceiver(notifyReceiver) }
+        // 关闭音乐浮窗：Activity 销毁时不能留下孤儿浮窗
+        handler.removeCallbacks(musicFloatResend)
+        setMusicFloatVisible(false)
         hideLyricFloat()
     }
 
@@ -1051,7 +1116,8 @@ class MusicHost(
     }
 
     private fun updateLyricFloat() {
-        if (!desktopVisible || lyrics.isEmpty() || !playingNow) { hideLyricFloat(); return }
+        // 音乐 App 悬浮显示中：其界面已占据音乐窗口区域（含歌词），NUI 悬浮歌词再叠加会重复/遮挡
+        if (!desktopVisible || lyrics.isEmpty() || !playingNow || musicFloatRequested) { hideLyricFloat(); return }
         // 设置页改了背景不透明度：移除旧悬浮窗，下一次显示时按新值重建
         if (lastLyricBgAlpha != MusicHost.lyricBgAlpha(context)) {
             hideLyricFloat()
@@ -1234,6 +1300,10 @@ class MusicHost(
         private const val KEY_APP = "music_app"
         private const val KEY_LYRIC_BG_ALPHA = "lyric_bg_alpha"
         private const val KEY_STYLE = "music_style"
+        private const val KEY_FLOAT = "music_float"
+        /** 悬浮地图/音乐 App 浮窗广播（touka 插件协议，酷我车机版内置） */
+        private const val ACTION_SHOW_MAP = "com.autonavi.plus.showmap"
+        private const val ACTION_CLOSE_MAP = "com.autonavi.plus.closemap"
         /** 切歌后封面缓冲期：metadata 封面滞后到达时，缓冲期内维持大布局避免上下首之间来回跳 */
         private const val COVER_GRACE_MS = 2500L
         /** 已预热过的音乐应用包名（首次播放前启动一次，确保进程在运行、metadata/歌词可用） */
@@ -1261,6 +1331,17 @@ class MusicHost(
         fun setLyricBgAlpha(context: Context, percent: Int) {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit().putInt(KEY_LYRIC_BG_ALPHA, percent.coerceIn(0, 100)).apply()
+        }
+
+        /** 读取「音乐悬浮显示」开关（默认关） */
+        fun floatEnabled(context: Context): Boolean =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean(KEY_FLOAT, false)
+
+        /** 保存「音乐悬浮显示」开关 */
+        fun setFloatEnabled(context: Context, enabled: Boolean) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putBoolean(KEY_FLOAT, enabled).apply()
         }
 
         // 常见音乐 App 包名（用于启动卡选择列表，含车机版。QQ 音乐系列覆盖手机版/车机版/TV版/平板版/爱趣听）

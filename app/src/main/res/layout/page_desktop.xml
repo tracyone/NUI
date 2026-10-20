@@ -12,7 +12,7 @@
         android:layout_marginStart="116dp"
         android:layout_marginTop="8dp"
         app:cardCornerRadius="24dp"
-        app:cardElevation="10dp"
+        app:cardElevation="0dp"
         app:cardBackgroundColor="@android:color/transparent"
         app:strokeWidth="0dp">
 
@@ -45,7 +45,7 @@
         android:padding="16dp"
         android:layout_marginTop="8dp"
         android:layout_marginBottom="8dp"
-        android:layout_marginEnd="16dp"
+        android:layout_marginEnd="8dp"
         android:background="@drawable/bg_panel">
 
         <!-- 导航按钮：回家 / 公司 -->

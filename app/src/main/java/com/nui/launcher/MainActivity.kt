@@ -610,6 +610,16 @@ class MainActivity : AppCompatActivity() {
                 if (::musicHost.isInitialized) {
                     musicHost.setFloatAreaVisible(position == 0 || position == 1)
                 }
+                // 音乐浮窗：仅桌面页(1)请求绑定的音乐 App 在该窗口悬浮显示，其它页关闭
+                if (position == 1) {
+                    binding.viewPager.postDelayed({
+                        if (!isDestroyed && !isFinishing && binding.viewPager.currentItem == 1) {
+                            syncMusicFloat()
+                        }
+                    }, 300)
+                } else {
+                    syncMusicFloat()
+                }
                 // 负一屏动态壁纸：滑到本页才确保起播（离屏预加载时 TextureView 可能拿不到 surface），
                 // 离开本页暂停解码省电。post 一帧等页面 layout 到位、view 有尺寸。
                 if (position == 0) {
@@ -633,6 +643,12 @@ class MainActivity : AppCompatActivity() {
                     // 回桌面先恢复浮窗（closeFloat 已置隐藏态），再按新几何刷新
                     mapHost.resumeFloat()
                     mapHost.refreshFloat()
+                    // 页面已静止：手柄在过渡中可能未定位（target 未挂载），此处重新落位
+                    showSwapHandles()
+                }
+                if (state == ViewPager2.SCROLL_STATE_IDLE && binding.viewPager.currentItem == 1) {
+                    // 页面静止后再请求音乐浮窗：布局已稳定，几何取数才准确
+                    syncMusicFloat()
                 }
             }
         })
@@ -944,6 +960,8 @@ class MainActivity : AppCompatActivity() {
             musicHost.setFloatAreaVisible(
                 binding.viewPager.currentItem == 0 || binding.viewPager.currentItem == 1
             )
+            // 音乐浮窗：回前台后按当前 page 恢复（设置里改了开关也能在此生效）
+            binding.root.postDelayed({ syncMusicFloat() }, 300)
         }
         // 设置页可能改了应用列表图标比例，返回时刷新：仅重绑应用页（桌面页 ViewHolder 复用）
         // 延后一帧执行：返回时 ViewPager2 正在 relayout，立即 notify 会在页面宽度未就绪时
@@ -1001,7 +1019,11 @@ class MainActivity : AppCompatActivity() {
             mapHost.onPause()
             mapHost.cancelPendingShow()
         }
-        if (::musicHost.isInitialized) musicHost.setFloatAreaVisible(false)
+        if (::musicHost.isInitialized) {
+            musicHost.setFloatAreaVisible(false)
+            // 退后台关闭音乐浮窗，避免悬浮在其他 App / 系统弹窗之上
+            musicHost.setMusicFloatVisible(false)
+        }
         // 退到后台暂停闲置计时（回前台 onResume 重启）
         autoMinusHandler.removeCallbacksAndMessages(null)
     }
@@ -1136,7 +1158,11 @@ class MainActivity : AppCompatActivity() {
         applyDockVisual()
 
         // 地图卡片：dock 右侧留出 12dp 统一间距（参考氢桌面比例）
+        // 互换模式下地图锚定在右侧，左边界由互换几何决定，不能被 dock 形态覆盖
+        // （否则会把"地图在右、音乐栏在左"的几何改回"贴 dock"，导致音乐栏宽度算成负值被隐藏）。
+        val swapMode = ::mapHost.isInitialized && mapHost.swapped
         desktopMapPanel?.let { mp ->
+            if (swapMode) return@let
             val lp = mp.layoutParams as FrameLayout.LayoutParams
             val left = if (edge) dockW + 12 else 8 + dockW + 12
             if (lp.leftMargin != (left * dp).toInt()) {
@@ -1300,11 +1326,12 @@ class MainActivity : AppCompatActivity() {
         val btnSwitchMap = desktopBtnSwitchMap ?: return
 
         mapHost = MapHost(this, mapContainer, mapPanel)
-        mapHost.onGeometryChanged = { binding.root.post { syncRightPanel(); mapHostRefreshDivider(); positionSwapHandles() } }
+        mapHost.onGeometryChanged = { binding.root.post { syncRightPanel(); mapHostRefreshDivider(); positionSwapHandles(); syncMusicFloat(); if (::musicHost.isInitialized) musicHost.requestFloatRefresh() } }
         mapHost.onFloatShown = { if (::musicHost.isInitialized) musicHost.bringLyricFloatToFront(); bringSwapHandlesToFront() }
         mapHost.onAutoReturnDone = { flushPendingWeatherVoice() }
         mapHost.onPickMap = {
             mapHost.closeFloat()
+            if (::musicHost.isInitialized) musicHost.setMusicFloatVisible(false)
             MapPickerDialog.show(
                 context = this,
                 sources = mapSources,
@@ -1313,7 +1340,7 @@ class MainActivity : AppCompatActivity() {
                     mapHost.select(source, autoLaunch = true)
                     NuiToast.show(this, "已切换为 ${source.label}", Toast.LENGTH_SHORT)
                 },
-                onDismiss = { mapHost.showFloat() },
+                onDismiss = { mapHost.showFloat(); syncMusicFloat() },
             )
         }
         mapHost.start(mapSources, autoLaunch = true)
@@ -1332,6 +1359,29 @@ class MainActivity : AppCompatActivity() {
         if (::mapHost.isInitialized) mapHost.refreshDivider()
     }
 
+    /** 桌面音乐面板的屏幕边界（x1,y1,x2,y2）；面板隐藏/未布局时返回 null。
+     *  直接作为音乐悬浮窗口边界（面板全宽）：悬浮音乐内容会自适应窗口尺寸
+     *  （实测正常模式拖动面板变宽时悬浮区域跟着变大、无上限），窗口必须与
+     *  面板等大——窗口窄于面板会露出 NUI 自己的音乐卡（此前误加"内容固定宽"
+     *  的封顶导致互换模式露出卡片左半边，已撤）。 */
+    private fun rightPanelBounds(): IntArray? {
+        val rp = desktopRightPanel ?: return null
+        if (rp.visibility != View.VISIBLE || rp.width <= 0 || rp.height <= 0) return null
+        val loc = IntArray(2)
+        rp.getLocationOnScreen(loc)
+        if (loc[0] <= 0 || loc[1] <= 0) return null
+        return intArrayOf(loc[0], loc[1], loc[0] + rp.width, loc[1] + rp.height)
+    }
+
+    /** 同步音乐浮窗显隐：仅桌面页(1)且音乐面板可见时请求绑定的音乐 App 在该窗口悬浮显示。
+     *  设置「音乐悬浮显示」未开启、无绑定 App 或 App 无悬浮插件时为幂等空操作。 */
+    private fun syncMusicFloat() {
+        if (!::musicHost.isInitialized) return
+        val onDesktop = binding.viewPager.currentItem == 1
+        val panelVisible = desktopRightPanel?.visibility == View.VISIBLE
+        musicHost.setMusicFloatVisible(onDesktop && panelVisible)
+    }
+
     /** 弹出地图选择器更换悬浮地图。[onPicked] 在选择后回调（设置面板用它刷新绑定名称）。
      *  选择器显示期间隐藏悬浮地图与分割条：两者都是 TYPE_APPLICATION_OVERLAY，
      *  会压在对话框之上，用户既看不清选项也点不到（竖条尤其明显）。 */
@@ -1339,6 +1389,8 @@ class MainActivity : AppCompatActivity() {
         if (!::mapHost.isInitialized) return
         mapHost.closeFloat()
         mapHost.setDividerVisible(false)
+        // 音乐浮窗同为外部 overlay，对话框期间必须关闭，否则压在选择器之上
+        if (::musicHost.isInitialized) musicHost.setMusicFloatVisible(false)
         MapPickerDialog.show(
             context = this,
             sources = mapSources,
@@ -1353,6 +1405,7 @@ class MainActivity : AppCompatActivity() {
                     mapHost.showFloat()
                     mapHost.setDividerVisible(true)
                 }
+                syncMusicFloat()
             },
         )
     }
@@ -1363,8 +1416,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupNav() {        navHost = NavHost(this, desktopBtnNavHome!!, desktopBtnNavCompany!!)
-        navHost.onHideFloat = { mapHost.closeFloat() }
-        navHost.onShowFloat = { if (binding.viewPager.currentItem == 1) mapHost.showFloat() }
+        navHost.onHideFloat = { mapHost.closeFloat(); if (::musicHost.isInitialized) musicHost.setMusicFloatVisible(false) }
+        navHost.onShowFloat = { if (binding.viewPager.currentItem == 1) { mapHost.showFloat(); syncMusicFloat() } }
         navHost.start()
         // 导航信息显示：导航中右上角按钮区切换为导航卡（转向/距离/时间/道路/速度）
         navInfoHost = com.nui.launcher.nav.NavInfoHost(
@@ -1402,11 +1455,18 @@ class MainActivity : AppCompatActivity() {
             musicHost.onDestroy()
         }
         musicHost = MusicHost(this, desktopMusicContainer!!)
-        musicHost.onHideFloat = { mapHost.closeFloat() }
-        musicHost.onShowFloat = { if (binding.viewPager.currentItem == 1) mapHost.showFloat() }
+        musicHost.onHideFloat = { mapHost.closeFloat(); musicHost.setMusicFloatVisible(false) }
+        musicHost.onShowFloat = {
+            if (binding.viewPager.currentItem == 1) {
+                mapHost.showFloat()
+                syncMusicFloat()
+            }
+        }
         musicHost.floatBoundsProvider = {
             if (::mapHost.isInitialized) mapHost.floatBounds() else null
         }
+        // 音乐浮窗几何：桌面音乐面板的屏幕边界（供"音乐悬浮显示"广播使用）
+        musicHost.musicPanelBoundsProvider = { rightPanelBounds() }
         // 负一屏横条音乐区：同步歌名/歌手/封面/播放状态
         musicHost.onMinusMusic = { title, artist, cover, playing ->
             minusSong?.text = title.ifEmpty { "点击打开音乐" }
@@ -1519,6 +1579,7 @@ class MainActivity : AppCompatActivity() {
                     // 设置弹窗内的触摸也重置闲置计时
                     dlg.onUserTouch = { onUserActive() }
                     dlg.onMinusWallpaperPick = { day -> wallpaper.showMinusMenu(day) }
+                    dlg.onMusicFloatChanged = { syncMusicFloat() }
                     dlg.minusWallpaperStatus = { day ->
                         wallpaper.minusWallpaperDisplayName(day) ?: "跟随桌面"
                     }
@@ -1754,7 +1815,7 @@ class MainActivity : AppCompatActivity() {
         val mp = desktopMapPanel ?: return
         val density = resources.displayMetrics.density
         val sw = resources.displayMetrics.widthPixels
-        val rightMargin = (16 * density).toInt()
+        val rightMargin = (8 * density).toInt()
         val gap = (12 * density).toInt()
         val minPanel = (180 * density).toInt()          // 音乐栏最小宽度，低于则整体消失
         val availableRight = sw - rightMargin
@@ -1773,11 +1834,12 @@ class MainActivity : AppCompatActivity() {
 
         if (swappedMode) {
             // ===== 互换模式：音乐栏在左，地图在右 =====
-            // 面板左缘贴 dock 右侧（120dp，与地图默认左缘一致，不能压到 dock 栏）；
+            // 面板左缘贴 dock 右侧 + 12dp：与正常模式地图左缘（applyDockStyle 的 dockW+12）
+            // 完全一致，保证首次启动与互换后的左侧间隙观感相同；不能压到 dock 栏。
             // 宽度 = mapLeft - gap - leftEdge
-            val leftEdge = (120 * density).toInt()
+            val dockLeft = if (UiTheme.dockStyle(this) == UiTheme.DockStyle.EDGE) 0 else 8
+            val leftEdge = ((dockLeft + 96 + 12) * density).toInt()
             val panelW = mapLeft - gap - leftEdge
-            Log.d("NUI.SyncRight", "swapped sw=$sw mapLeft=$mapLeft mapW=${mlp.width} mapRight=$mapRight panelW=$panelW minPanel=$minPanel")
             if (panelW < minPanel && geoReady) {
                 // 音乐栏太窄：隐藏，地图自动扩展到左缘（不留空）
                 rp.visibility = android.view.View.GONE
@@ -1806,16 +1868,14 @@ class MainActivity : AppCompatActivity() {
                     rp.requestLayout()
                 }
             }
+            syncMusicFloat()
             return
         }
-
         // ===== 正常模式：地图在左，音乐栏在右 =====
         val panelW = availableRight - gap - mapRight
-        Log.d("NUI.SyncRight", "sw=$sw density=$density mapLeft=$mapLeft mapW=${mlp.width} mapRight=$mapRight mapRightCap=$mapRightCap availableRight=$availableRight gap=$gap panelW=$panelW minPanel=$minPanel geometryLoaded=$geoReady")
         // 地图几何尚未加载完成时，不隐藏音乐栏、不扩展地图，避免首次启动把默认位置冲掉
         if (panelW < minPanel && geoReady) {
             // 音乐栏太窄：隐藏，地图自动扩展到右缘（不留空）
-            Log.d("NUI.SyncRight", "音乐栏宽度 $panelW < 最小 $minPanel，隐藏音乐栏，地图扩展到右缘")
             rp.visibility = android.view.View.GONE
             val targetW = mapRightCap - mapLeft
             if (mlp.width < targetW - 2) {
@@ -1847,6 +1907,8 @@ class MainActivity : AppCompatActivity() {
                 rp.requestLayout()
             }
         }
+        // 音乐栏宽度/显隐变化后同步音乐浮窗几何（面板隐藏时会关闭浮窗）
+        syncMusicFloat()
     }
 
     /** 有效的系统 Dock 显示状态：负一屏（position 0）强制隐藏系统 Dock（不管用户设置），
@@ -2102,10 +2164,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun positionSwapHandle(isMap: Boolean, target: View) {
         val handle = ensureSwapHandle(isMap)
+        // 视图未挂载/无尺寸时定位无意义：手柄保持创建时的屏外位置，等页面稳定后由
+        // onPageScrollStateChanged(IDLE) 的 showSwapHandles() 重新定位。
+        if (!target.isAttachedToWindow || target.width <= 0) return
         val loc = IntArray(2)
         target.getLocationOnScreen(loc)
-        // 页面过渡中 target 位置异常 → 跳过本次定位，下次事件会修正
-        if (loc[0] <= 0 || target.width <= 0) return
         val lp = handle.layoutParams as android.view.WindowManager.LayoutParams
         lp.x = loc[0] + target.width / 2 - lp.width / 2
         // 横条放进"窗口底边 ~ 屏幕底边"的空隙：手柄窗口在空隙中垂直居中；
@@ -2130,7 +2193,9 @@ class MainActivity : AppCompatActivity() {
             android.graphics.PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = 0; y = 0
+            // 创建时先移到屏幕外：定位前视图可能未挂载（翻页过渡），若用 (0,0) 会
+            // 在左上角闪一条横条；定位成功后 updateViewLayout 会把它移到窗口底部。
+            x = -10000; y = 0
         }
         handle.setOnTouchListener(swapHandleTouch)
         runCatching { windowManager.addView(handle, lp) }

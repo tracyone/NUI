@@ -122,7 +122,7 @@ class MapHost(
         val lp = mapPanel.layoutParams as FrameLayout.LayoutParams
         val sw = realScreenW
         val gap = dp(MUSIC_GAP_DP)
-        val rightMargin = dp(16)
+        val rightMargin = dp(8)
         val leftEdge = dockEdgeX()   // 左侧可用边界：dock 右侧（互换模式下音乐栏/铺满地图都不能压 dock）
         val minPanel = dp(MUSIC_PANEL_MIN_WIDTH_DP)
         if (toSwapped) {
@@ -153,9 +153,15 @@ class MapHost(
         refreshFloat()
     }
 
-    /** 左侧可用边界（px）：dock 栏 96dp + 安全间距 24dp = 120dp，与 loadGeometry 默认地图左缘一致。
-     *  正常模式地图左缘、互换模式音乐栏左缘/地图铺满左缘都不能越过它（否则压到 dock 栏）。 */
-    private fun dockEdgeX() = dp(96) + dp(24)
+    /** 左侧可用边界（px）：dock 栏 96dp + 间距 12dp = 108dp，与正常模式地图左缘
+     *  （MainActivity.applyDockStyle 的 dockW+12）保持一致。
+     *  正常模式地图左缘、互换模式音乐栏左缘/地图铺满左缘都不能越过它（否则压到 dock 栏）。
+     *  注意：这里必须是 12dp 而不是 24dp，否则互换后音乐栏离 dock 多出 12dp 空隙，
+     *  与首次启动（正常模式）的观感不一致。悬浮 dock 样式下 dock 自身左移 8dp，需一并计入。 */
+    private fun dockEdgeX(): Int {
+        val dockLeft = if (UiTheme.dockStyle(context) == UiTheme.DockStyle.EDGE) 0 else dp(8)
+        return dockLeft + dp(96) + dp(12)
+    }
     /** 分割条已吸附到最右（音乐栏隐藏、地图铺满）；滞回阈值内保持吸附，防手指抖动来回跳 */
     private var dividerSnappedRight = false
     private var dividerLastMoveX = 0f
@@ -477,7 +483,9 @@ class MapHost(
             cachedX = x; cachedY = y; cachedW = w; cachedH = h
         }
         Log.d(TAG, "sendFloat: x=$x y=$y w(border)=$w h(border)=$h (cached: $cachedX,$cachedY,$cachedW,$cachedH)")
-        // 高德浮窗边界比 mapPanel 外扩 4px：悬浮窗可能比卡片窄/有内边距，边缘会露出卡片深色背景
+        // 浮窗边界比 mapPanel 四边外扩 4px：防浮窗比卡片窄时边缘露底。
+        // 注意不要内缩：开关浮窗像素对比实测浮窗右缘外壁纸亮度与无浮窗时完全一致，
+        // 高德浮窗并无深色边/投影；浅色模式下的竖向阴影来自分割条热区黑底（已改透明）。
         val inset = 4
         val intent = Intent(action).apply {
             putExtra("x", x - inset)
@@ -803,16 +811,14 @@ class MapHost(
         // 布局公式（与 MainActivity.syncRightPanel 保持一致）：
         //   屏幕宽度 = 左边距 + 地图宽度 + 间距 + 音乐栏宽度 + 右边距
         //   音乐栏默认 240dp（大于最小 180dp，保证舒适可见）
-        val dockWidth = dp(96)       // dock 栏宽度
-        val leftGap = dp(24)         // dock 与地图之间的安全间距
-        val x = dockWidth + leftGap  // = 120dp，不遮盖 dock 栏
+        val x = dockEdgeX()          // dock 右缘 + 12dp，不遮盖 dock 栏
         val y = dp(8)
         val sw = realScreenW
         val sh = realScreenH
         val density = context.resources.displayMetrics.density
         val musicPanelW = dp(240)   // 音乐栏默认宽度（>180dp 最小阈值，保证可见）
         val gap = dp(12)             // 地图与音乐栏之间的间距
-        val rightMargin = dp(16)     // 屏幕右边距
+        val rightMargin = dp(8)      // 屏幕右边距（与 rightPanel marginEnd 一致）
         // 地图宽度 = 屏幕宽度 - 左边距 - 间距 - 音乐栏宽度 - 右边距
         val defaultW = (sw - x - gap - musicPanelW - rightMargin).coerceAtLeast(MIN_SIZE)
         val defaultH = (sh - y - dp(16)).coerceAtLeast(MIN_SIZE)   // 上下各 8dp
@@ -918,10 +924,10 @@ class MapHost(
         if (dividerOverlay != null) return
         val barW = dp(DIVIDER_BAR_W_DP)
         val bar = FrameLayout(context).apply {
-            // 半透明触摸热区 + 中间可视细条
-            addView(View(context).apply {
-                setBackgroundColor(0x22000000.toInt()) // 极淡黑底，提示可拖动区域
-            }, FrameLayout.LayoutParams(
+            // 触摸热区保持全透明：此前有 13% 黑底（0x22000000）"提示可拖动区域"，
+            // 但浅色模式下它是地图与音乐栏交界处一条明显的竖向暗带（被误认为阴影）。
+            // 可视提示由中央灰色细条承担，热区本身不需要可见。
+            addView(View(context), FrameLayout.LayoutParams(
                 android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                 android.view.ViewGroup.LayoutParams.MATCH_PARENT,
             ))
@@ -1023,15 +1029,15 @@ class MapHost(
             runCatching { wm.updateViewLayout(bar, lp) }
         }
         // 白线水平位置：白线应落在地图与音乐栏之间的可见间隙正中（相对热区的 leftMargin）。
-        // 正常模式：间隙在地图右侧，中心 = mapPanel右缘 + gap/2 + 浮窗外扩补偿。
-        // 互换模式：间隙在地图左侧，中心 = mapPanel左缘 - gap/2（左侧无浮窗外扩）。
+        // 正常模式：间隙 = 浮窗右缘(卡右+4) ~ 面板左缘(卡右+12)，中心 = 卡右+8 = +gap/2 + 2；
+        // 互换模式：间隙 = 面板右缘(卡左-12) ~ 浮窗左缘(卡左-4)，中心 = 卡左-8 = -gap/2 - 2。
         dividerWhiteLine?.let { wl ->
             val wlLp = wl.layoutParams as FrameLayout.LayoutParams
             val whiteW = dp(6)
             val lineCenterAbs = if (swapped) {
-                loc[0] - gap / 2
+                loc[0] - gap / 2 - 2
             } else {
-                loc[0] + mapPanel.width + gap / 2 + (4 / context.resources.displayMetrics.density).toInt() / 2
+                loc[0] + mapPanel.width + gap / 2 + 2
             }
             val wantMargin = (lineCenterAbs - targetX - whiteW / 2).coerceAtLeast(0)
             if (wlLp.leftMargin != wantMargin) {
@@ -1154,6 +1160,8 @@ class MapHost(
                 longPressPending = false
                 dividerTouching = false
                 if (dividerAdjustActive) exitDividerAdjust()
+                // 松手后再触发一次几何回调：此时布局已稳定，音乐浮窗按最终几何重发一次
+                onGeometryChanged?.invoke()
                 // 松手后高德浮窗会重新出现（后加在竖条之上），延迟把竖条置顶回来，
                 // 保证下一次还能在浮窗之上抓到竖条。
                 bar.postDelayed({ if (!dividerTouching && !dividerAdjustActive) bringDividerToFront() }, 350)

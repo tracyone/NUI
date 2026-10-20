@@ -136,6 +136,9 @@ class SettingsDialog(context: Context) : Dialog(context) {
     /** 负一屏指定槽位壁纸状态文字（由 MainActivity 注入，"跟随桌面/已设置"） */
     var minusWallpaperStatus: ((day: Boolean) -> String)? = null
 
+    /** 「音乐悬浮显示」开关变化（由 MainActivity 注入，立即同步音乐浮窗） */
+    var onMusicFloatChanged: (() -> Unit)? = null
+
     private var currentTab = 0
 
     /** 弹窗窗口焦点监听（用于系统栏标志重设，API<26 用 ViewTreeObserver） */
@@ -416,6 +419,13 @@ class SettingsDialog(context: Context) : Dialog(context) {
             renderMusicStyle()
         }
         renderMusicStyle()
+        // 音乐悬浮显示：请求绑定的音乐 App（内置 touka 悬浮插件，如酷我车机版）在音乐窗口内悬浮
+        findViewById<View>(R.id.optMusicFloat).setOnClickListener {
+            MusicHost.setFloatEnabled(context, !MusicHost.floatEnabled(context))
+            renderMusicFloat()
+            onMusicFloatChanged?.invoke()
+        }
+        renderMusicFloat()
         render()
     }
 
@@ -649,6 +659,9 @@ class SettingsDialog(context: Context) : Dialog(context) {
         findViewById<TextView>(R.id.tvOptMusicVinyl).setTextColor(p.label)
         findViewById<TextView>(R.id.checkMusicClassic).setTextColor(p.accent)
         findViewById<TextView>(R.id.checkMusicVinyl).setTextColor(p.accent)
+        findViewById<TextView>(R.id.tvOptMusicFloat).setTextColor(p.label)
+        findViewById<TextView>(R.id.checkMusicFloat).setTextColor(p.accent)
+        findViewById<TextView>(R.id.musicFloatHint).setTextColor(p.value)
         tvOptSystem.setTextColor(p.label)
         tvOptDark.setTextColor(p.label)
         tvOptLight.setTextColor(p.label)
@@ -775,6 +788,12 @@ class SettingsDialog(context: Context) : Dialog(context) {
             if (s == MusicHost.MusicStyle.CLASSIC) View.VISIBLE else View.GONE
         findViewById<View>(R.id.checkMusicVinyl).visibility =
             if (s == MusicHost.MusicStyle.VINYL) View.VISIBLE else View.GONE
+    }
+
+    /** 音乐悬浮显示开关状态（勾选框） */
+    private fun renderMusicFloat() {
+        findViewById<View>(R.id.checkMusicFloat).visibility =
+            if (MusicHost.floatEnabled(context)) View.VISIBLE else View.GONE
     }
 
     /** 男声能力检测：系统 TTS 无男声音色时置灰不可点；若当前已选男声则回退女声（不播报）。
