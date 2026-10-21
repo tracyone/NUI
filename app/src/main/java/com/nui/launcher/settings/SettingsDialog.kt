@@ -434,10 +434,16 @@ class SettingsDialog(context: Context) : Dialog(context) {
         window?.apply {
             setGravity(Gravity.END or Gravity.BOTTOM)
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-            // 右侧面板：宽度占除 dock 栏外的区域，高度全屏
+            // 右侧面板：宽度占除 dock 栏外的区域，高度全屏。
+            // 左缘与 dock 栏保持 12dp 间距，计算口径与桌面地图/应用网格一致：
+            // 贴边形态 dock 占 96dp；圆角悬浮形态另有 8dp 左边距，否则弹窗会压住 dock 栏。
             val dm = context.resources.displayMetrics
-            val dockWidth = (100 * dm.density).toInt()
-            setLayout(dm.widthPixels - dockWidth, ViewGroup.LayoutParams.MATCH_PARENT)
+            val dockRightDp = if (UiTheme.dockStyle(context) == UiTheme.DockStyle.EDGE) {
+                96f + 12
+            } else {
+                8f + 96f + 12
+            }
+            setLayout(dm.widthPixels - (dockRightDp * dm.density).toInt(), ViewGroup.LayoutParams.MATCH_PARENT)
             clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
         }
         // 系统栏策略与主桌面一致：状态栏 / 系统 Dock 分别跟随设置开关，

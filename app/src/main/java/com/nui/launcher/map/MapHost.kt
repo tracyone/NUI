@@ -88,9 +88,15 @@ class MapHost(
     private var startWidth = 0
     private var startHeight = 0
     private var resizeMode = ResizeMode.NONE
-    /** 地图底部上限（px）：系统底部 Dock（导航栏）显示时由外部传入（屏幕高-导航栏高-8dp），
-     *  保证悬浮地图不进入系统 Dock 区域；0=不限制（可拖到屏幕最底部）。 */
-    private var bottomLimit = 0
+    /** 系统栏上下 inset（px）：状态栏/导航栏显示时由外部传入，用于把地图高度限定在内容区内。
+     *  mapPanel 的 topMargin/height 是相对父布局（页面）的坐标，而父布局顶部 = topInset、
+     *  底部 = realScreenH - bottomInset。若直接用 realScreenH 算高度，系统栏显示时地图会
+     *  溢进状态栏/导航栏区域（表现为"上下紧贴、横条被导航栏盖住"）。 */
+    private var topInset = 0
+    private var bottomInset = 0
+    /** 高德浮窗相对 mapPanel 四边外扩的像素（防浮窗比卡片窄时露底）。
+     *  视觉间隙 = 卡片边距 - inset，故设定卡片边距时要把 inset 加回去，才能让浮窗与音乐栏的 8dp 间隙对齐。 */
+    private val floatInsetPx = 4
     /** 几何是否已加载完成（loadGeometry 执行完毕），用于防止 syncRightPanel 在默认位置生效前扩展地图 */
     var geometryLoaded = false
 
@@ -197,39 +203,51 @@ class MapHost(
         return realScreenW - dividerRightReserve
     }
 
-    /** 设置地图底部上限（px，屏幕坐标系）；系统 Dock 显示时调用，0=不限制 */
-    fun setBottomLimit(px: Int) {
-        bottomLimit = px
+    /** 内容区高度（px，mapPanel 父布局坐标系）。
+     *  直接取父布局（页面）实测高度：它已经扣除了系统栏与 root 的让位 padding，
+     *  不会像"realScreenH - inset"那样在窗口非沉浸（内容区已被系统栏压缩）时重复扣减，
+     *  造成地图高度超出页面而被裁成上下紧贴。父布局尚未布局（height=0）时退回物理屏高减 inset。 */
+    private fun contentHeightPx(): Int {
+        val parentH = (mapPanel.parent as? android.view.View)?.height ?: 0
+        return if (parentH > 0) parentH else (realScreenH - topInset - bottomInset)
+    }
+
+    /** 按内容区高度校正地图上下边距/高度，使浮窗上下间隙恒定。 */
+    private fun applyVerticalBounds() {
         val lp = mapPanel.layoutParams as FrameLayout.LayoutParams
-        val sh = realScreenH
-        if (px <= 0) {
-            // 解除限制：恢复地图底边到屏幕底部（8dp 边距）。
-            // 此前直接 return，地图保持被压缩的高度，导致高德浮窗底边永远停在系统栏上方无法超过。
-            // 用布局参数（topMargin+height）计算，不依赖 getLocationOnScreen，
-            // 保证在设置页（地图卡片离屏）切换开关时也能正确恢复。
-            val maxBottomY = sh - dp(8)
-            val bottomY = lp.topMargin + lp.height
-            if (bottomY < maxBottomY) {
-                val newH = (maxBottomY - lp.topMargin).coerceAtLeast(MIN_SIZE)
-                if (lp.height != newH) {
-                    lp.height = newH
-                    mapPanel.layoutParams = lp
-                    onGeometryChanged?.invoke()
-                    refreshFloat()
-                }
-            }
-            return
+        val margin = dp(VERTICAL_MARGIN_DP) + floatInsetPx
+        val maxBottom = contentHeightPx() - margin   // 父坐标系下地图底边的上限
+        var changed = false
+        if (lp.topMargin < margin) {
+            lp.topMargin = margin
+            changed = true
         }
         val bottomY = lp.topMargin + lp.height
-        if (bottomY > px) {
-            val newH = (px - lp.topMargin).coerceAtLeast(MIN_SIZE)
-            if (lp.height != newH) {
+        if (bottomY > maxBottom || (bottomInset == 0 && bottomY < maxBottom)) {
+            // 超出内容区：收缩；无导航栏且此前被压矮：拉伸回内容区底边（保持铺满观感）
+            val newH = (maxBottom - lp.topMargin).coerceAtLeast(MIN_SIZE)
+            if (newH != lp.height) {
                 lp.height = newH
-                mapPanel.layoutParams = lp
-                onGeometryChanged?.invoke()
-                refreshFloat()
+                changed = true
             }
         }
+        if (changed) {
+            mapPanel.layoutParams = lp
+            onGeometryChanged?.invoke()
+            refreshFloat()
+        }
+    }
+
+    /** 设置系统栏上下 inset（px），由 MainActivity 在状态栏/导航栏显隐变化时调用。
+     *  地图高度 = 内容区高度 - 2*(VERTICAL_MARGIN_DP + floatInsetPx)，使浮窗视觉上与右侧
+     *  音乐窗口（音乐卡片）的上下边缘对齐，不溢进系统栏、也不紧贴屏幕边缘。
+     *  root padding 在同一帧随 inset 变化，父布局高度是异步更新的：立即应用一次后，
+     *  再在布局完成后按真实父高度校正一次。 */
+    fun setVerticalInsets(topPx: Int, bottomPx: Int) {
+        topInset = topPx
+        bottomInset = bottomPx
+        applyVerticalBounds()
+        mapPanel.post { applyVerticalBounds() }
     }
 
     /** 外部（如 dock 形态切换）导致地图卡片位置变化后，刷新高德浮窗几何并重发显示广播 */
@@ -482,11 +500,10 @@ class MapHost(
             if (container.width <= 0 || container.height <= 0) return
             cachedX = x; cachedY = y; cachedW = w; cachedH = h
         }
-        Log.d(TAG, "sendFloat: x=$x y=$y w(border)=$w h(border)=$h (cached: $cachedX,$cachedY,$cachedW,$cachedH)")
-        // 浮窗边界比 mapPanel 四边外扩 4px：防浮窗比卡片窄时边缘露底。
+        // 浮窗边界比 mapPanel 四边外扩 floatInsetPx：防浮窗比卡片窄时边缘露底。
         // 注意不要内缩：开关浮窗像素对比实测浮窗右缘外壁纸亮度与无浮窗时完全一致，
         // 高德浮窗并无深色边/投影；浅色模式下的竖向阴影来自分割条热区黑底（已改透明）。
-        val inset = 4
+        val inset = floatInsetPx
         val intent = Intent(action).apply {
             putExtra("x", x - inset)
             putExtra("y", y - inset)
@@ -761,11 +778,13 @@ class MapHost(
      *  这里地图右边可铺到屏幕宽 - 20dp。 */
     private fun clampSizeFixed(x: Int, y: Int, w: Int, h: Int): IntArray {
         val sw = realScreenW
-        val sh = realScreenH
+        // 内容区高度（页面实测高度，已扣除系统栏/让位 padding），地图底边不得超出内容区
+        val availableH = contentHeightPx()
+        val margin = dp(VERTICAL_MARGIN_DP) + floatInsetPx
         // 右侧：地图右缘上限 = 屏幕宽 - 分割条预留（铺满时音乐栏已隐藏，可越过音乐栏贴边位置）
         val maxRight = mapRightLimit()
-        // 底部：系统 Dock 显示时不超过 bottomLimit（避开导航栏），否则不碰到底边 8dp
-        val maxBottom = if (bottomLimit > 0) bottomLimit else sh - dp(8)
+        // 底部：内容区底边 - 间隙（避开导航栏且与音乐栏底边对齐）
+        val maxBottom = availableH - margin
         var nw = w.coerceAtLeast(MIN_SIZE)
         var nh = h.coerceAtLeast(MIN_SIZE)
         if (x + nw > maxRight) nw = (maxRight - x).coerceAtLeast(MIN_SIZE)
@@ -812,7 +831,8 @@ class MapHost(
         //   屏幕宽度 = 左边距 + 地图宽度 + 间距 + 音乐栏宽度 + 右边距
         //   音乐栏默认 240dp（大于最小 180dp，保证舒适可见）
         val x = dockEdgeX()          // dock 右缘 + 12dp，不遮盖 dock 栏
-        val y = dp(8)
+        val margin = dp(VERTICAL_MARGIN_DP) + floatInsetPx
+        val y = margin
         val sw = realScreenW
         val sh = realScreenH
         val density = context.resources.displayMetrics.density
@@ -821,7 +841,8 @@ class MapHost(
         val rightMargin = dp(8)      // 屏幕右边距（与 rightPanel marginEnd 一致）
         // 地图宽度 = 屏幕宽度 - 左边距 - 间距 - 音乐栏宽度 - 右边距
         val defaultW = (sw - x - gap - musicPanelW - rightMargin).coerceAtLeast(MIN_SIZE)
-        val defaultH = (sh - y - dp(16)).coerceAtLeast(MIN_SIZE)   // 上下各 8dp
+        // 高度 = 内容区高度 - 上下各(间隙 + inset)，浮窗视觉上与音乐窗口上下边缘对齐
+        val defaultH = (contentHeightPx() - 2 * margin).coerceAtLeast(MIN_SIZE)
         Log.d(TAG, "loadGeometry: 使用默认几何 sw=$sw sh=$sh density=$density x=$x y=$y defaultW=$defaultW defaultH=$defaultH (音乐栏应=$musicPanelW)")
         val c = clampSizeFixed(x, y, defaultW, defaultH)
         applyGeometry(c[0], c[1], c[2], c[3])
@@ -838,12 +859,14 @@ class MapHost(
         }
     }
 
-    /** 强制地图上下边距为 8dp（保留左右位置和宽度），避免上下留空过大 */
+    /** 强制地图上下边距与音乐窗口对齐（间隙 + 浮窗外扩补偿），保留左右位置和宽度。
+     *  用页面实测内容区高度而非物理屏高，否则系统栏显示时地图会溢进状态栏/导航栏。 */
     private fun normalizeVerticalMargins() {
         val lp = mapPanel.layoutParams as FrameLayout.LayoutParams
-        val sh = realScreenH
-        val targetTop = dp(8)
-        val targetH = (sh - targetTop - dp(8)).coerceAtLeast(MIN_SIZE)
+        val availableH = contentHeightPx()
+        val margin = dp(VERTICAL_MARGIN_DP) + floatInsetPx
+        val targetTop = margin
+        val targetH = (availableH - 2 * margin).coerceAtLeast(MIN_SIZE)
         if (lp.topMargin != targetTop || lp.height != targetH) {
             lp.topMargin = targetTop
             lp.height = targetH
@@ -1268,6 +1291,9 @@ class MapHost(
         private const val MUSIC_PANEL_MIN_WIDTH_DP = 180
         /** 地图与音乐栏之间的间距（dp），与 MainActivity.syncRightPanel 保持一致 */
         private const val MUSIC_GAP_DP = 12
+        /** 悬浮地图距内容区上下边缘的视觉间隙（dp）：与右侧音乐窗口面板的 marginTop/Bottom 一致（8dp）。
+         *  浮窗比卡片外扩 floatInsetPx，故卡片边距 = 该值 + floatInsetPx，保证浮窗可见间隙正好 8dp。 */
+        private const val VERTICAL_MARGIN_DP = 8
         /** 分割条触摸热区宽度（dp），与 ensureDivider 中 barW 保持一致 */
         private const val DIVIDER_BAR_W_DP = 28
 

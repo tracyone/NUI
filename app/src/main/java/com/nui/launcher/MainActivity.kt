@@ -521,8 +521,8 @@ class MainActivity : AppCompatActivity() {
                 setupMap(); setupNav(); setupMusic(); setupWallpaper(); syncRightPanel()
                 applyDockStyle()
                 applyTheme()
-                // mapHost 就绪后按当前开关重算悬浮地图底部边界（onCreate/onResume 时
-                // mapHost 尚未初始化，applySystemDock 会跳过 setBottomLimit）
+                // mapHost 就绪后按当前开关重算悬浮地图上下边界（onCreate/onResume 时
+                // mapHost 尚未初始化，applySystemDock 会跳过 setVerticalInsets）
                 applySystemDock()
                 // 加载应用分页并挂到外层 PagerAdapter（页面 1..N 为应用各页）
                 loadAppGrid()
@@ -890,6 +890,16 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        // 按 Home 键回到桌面：先关闭桌面设置弹窗，再走常规返回逻辑。
+        // 否则弹窗窗口会一直压在最上层（系统只管回到 Home Activity，不会关应用内 Dialog），
+        // 悬浮地图重新拉起后用户既回不到桌面、音乐窗口也被弹窗遮住。
+        if (intent.action == Intent.ACTION_MAIN && intent.hasCategory(Intent.CATEGORY_HOME)) {
+            settingsDialog?.let {
+                it.dismissImmediate()
+                settingsDialog = null
+                android.util.Log.d("NUI.Main", "onNewIntent: HOME -> dismiss settings")
+            }
+        }
         // 地图（高德）自动返回：只保持当前 page，不切 page0/page1，也不做外部返回恢复
         if (intent.getBooleanExtra(com.nui.launcher.map.MapHost.EXTRA_AUTO_BACK, false)) {
             launchedExternalApp = false
@@ -1097,11 +1107,13 @@ class MainActivity : AppCompatActivity() {
         desktopMapPanel?.setCardBackgroundColor(android.graphics.Color.TRANSPARENT)
         desktopBtnSwitchMap?.imageTintList = ColorStateList.valueOf(p.textPrimary)
 
-        // 右侧面板：背景 + 导航图标/文字 + 时钟
+        // 右侧面板：背景 + 导航图标/文字 + 时钟。
+        // dock 贴边形态时面板也改为矩形（与贴边 dock 的贯穿式风格一致），悬浮形态保留 24dp 圆角。
+        val panelEdge = UiTheme.dockStyle(this) == UiTheme.DockStyle.EDGE
         desktopRightPanel?.let { rp ->
             rp.background = GradientDrawable().apply {
                 setColor(p.panelBg)
-                cornerRadius = 24 * density
+                cornerRadius = if (panelEdge) 0f else 24 * density
                 setStroke(1, p.divider)
             }
             rp.findViewById<ImageView>(R.id.navIconHome)?.setColorFilter(p.dockIconTint)
@@ -1113,7 +1125,11 @@ class MainActivity : AppCompatActivity() {
             rp.findViewById<TextView>(R.id.weatherText)?.setTextColor(p.textSecondary)
             rp.findViewById<TextView>(R.id.clockTime)?.setTextColor(p.textPrimary)
             rp.findViewById<TextView>(R.id.clockDate)?.setTextColor(p.textSecondary)
-            rp.findViewById<MaterialCardView>(R.id.musicPanel)?.setCardBackgroundColor(p.mapBg)
+            rp.findViewById<MaterialCardView>(R.id.musicPanel)?.let { mp ->
+                mp.setCardBackgroundColor(p.mapBg)
+                // 音乐窗口圆角随 dock 形态：贴边矩形 / 悬浮 16dp
+                mp.radius = if (panelEdge) 0f else 16 * density
+            }
         }
     }
 
@@ -1126,6 +1142,15 @@ class MainActivity : AppCompatActivity() {
             setColor(p.dockBg)
             cornerRadius = if (edge) 12 * dp else 28 * dp
             setStroke(1, p.divider)
+        }
+        // 右侧音乐面板圆角同步 dock 形态：贴边时矩形，悬浮时 24dp 圆角
+        desktopRightPanel?.let { rp ->
+            (rp.background as? android.graphics.drawable.GradientDrawable)?.let { bg ->
+                bg.cornerRadius = if (edge) 0f else 24 * dp
+                rp.background = bg
+            }
+            // 音乐窗口卡片本身也随形态变矩形/圆角
+            rp.findViewById<MaterialCardView>(R.id.musicPanel)?.radius = if (edge) 0f else 16 * dp
         }
     }
 
@@ -1972,17 +1997,13 @@ class MainActivity : AppCompatActivity() {
 
         applySystemUi()
 
-        // 悬浮地图底部限制：按当前配置主动计算并下发（不依赖 insets 回调时序），
-        // 修复切换系统 Dock 显隐后高德浮窗底边不恢复/不避让的问题
-        // 注意：用物理屏高度计算（displayMetrics 在非沉浸下已扣系统栏，再减导航栏会双重扣减）
+        // 悬浮地图上下 inset：状态栏/导航栏显示时把地图高度限定在内容区，
+        // 避免溢进系统栏（表现为上下紧贴、横条被导航栏盖住）。
         if (::mapHost.isInitialized) {
-            if (showDock) {
-                val sh = realScreenHeight()
-                val navH = getNavBarHeight()
-                mapHost.setBottomLimit(sh - navH - (8 * resources.displayMetrics.density).toInt())
-            } else {
-                mapHost.setBottomLimit(0)
-            }
+            mapHost.setVerticalInsets(
+                getStatusBarHeight(),
+                if (showDock) getNavBarHeight() else 0
+            )
         }
 
         // 系统栏显示时显式让位：按状态栏/导航栏 inset 给根布局加 padding，
@@ -2008,17 +2029,12 @@ class MainActivity : AppCompatActivity() {
                 appGridLoaded = false
                 loadAppGrid()
             }
-            // 悬浮地图（高德浮窗）同步避让底部系统 Dock：上限=物理屏高-导航栏高-8dp；
-            // Dock 隐藏时解除限制（可拖到屏幕最底部）
+            // 悬浮地图（高德浮窗）同步避让状态栏/导航栏：按内容区高度重算地图尺寸
             if (::mapHost.isInitialized) {
-                if (effectiveShowDock()) {
-                    // 导航栏高度统一用 getNavBarHeight()（含 nui_debug_navbar_h 模拟值），
-                    // 不用 inset：模拟器/无系统栏设备无真实 inset，用 inset 会把限制错误清掉
-                    val sh = realScreenHeight()
-                    mapHost.setBottomLimit(sh - getNavBarHeight() - (8 * resources.displayMetrics.density).toInt())
-                } else {
-                    mapHost.setBottomLimit(0)
-                }
+                mapHost.setVerticalInsets(
+                    if (UiTheme.showStatusBar(this)) top else 0,
+                    if (effectiveShowDock()) bottom else 0
+                )
             }
             insets
         }
@@ -2050,6 +2066,13 @@ class MainActivity : AppCompatActivity() {
             contentResolver, "nui_debug_navbar_h", 0)
         if (sim > 0) return sim
         val id = resources.getIdentifier("navigation_bar_height", "dimen", "android")
+        return if (id > 0) resources.getDimensionPixelSize(id) else 0
+    }
+
+    /** 状态栏高度（px）；状态栏未显示或获取失败返回 0 */
+    private fun getStatusBarHeight(): Int {
+        if (!UiTheme.showStatusBar(this)) return 0
+        val id = resources.getIdentifier("status_bar_height", "dimen", "android")
         return if (id > 0) resources.getDimensionPixelSize(id) else 0
     }
 
@@ -2171,10 +2194,11 @@ class MainActivity : AppCompatActivity() {
         target.getLocationOnScreen(loc)
         val lp = handle.layoutParams as android.view.WindowManager.LayoutParams
         lp.x = loc[0] + target.width / 2 - lp.width / 2
-        // 横条放进"窗口底边 ~ 屏幕底边"的空隙：手柄窗口在空隙中垂直居中；
-        // 空隙比手柄矮时（默认仅 8dp）向上最多探入窗口底部几 px（窗口透明无视觉影响）。
+        // 横条放进"窗口底边 ~ 内容区底边"的空隙：内容区底边 = 物理屏高 - 导航栏高度。
+        // 用屏幕底边会让手柄落进导航栏区域被系统栏盖住（系统 Dock 显示时横条消失的根因）。
         val winBottom = loc[1] + target.height
-        val gapH = (realScreenH - winBottom).coerceAtLeast(0)
+        val contentBottom = realScreenH - binding.root.paddingBottom
+        val gapH = (contentBottom - winBottom).coerceAtLeast(0)
         lp.y = winBottom + (gapH - lp.height) / 2
         runCatching { windowManager.updateViewLayout(handle, lp) }
     }
