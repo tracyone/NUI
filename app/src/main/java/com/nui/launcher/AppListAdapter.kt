@@ -141,13 +141,19 @@ class AppListAdapter(
         // 第三方应用按需从 PackageManager 懒加载（LruCache 命中秒显，分页滚动不卡顿）
         val icon = app.icon
         if (icon != null) {
-            val badge = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(0xFFFF7043.toInt())
+            // 自带完整图标的入口（如桌面设置：iOS 风格圆角方块）直接显示；
+            // 只有裸图形图标才套品牌橙圆底，避免破坏图标本身的造型。
+            if (app.onClick != null) {
+                holder.binding.appIcon.setImageDrawable(icon)
+            } else {
+                val badge = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(0xFFFF7043.toInt())
+                }
+                val insetPx = (sizePx * 0.22f).toInt()
+                val inner = InsetDrawable(icon.mutate(), insetPx, insetPx, insetPx, insetPx)
+                holder.binding.appIcon.setImageDrawable(LayerDrawable(arrayOf(badge, inner)))
             }
-            val insetPx = (sizePx * 0.22f).toInt()
-            val inner = InsetDrawable(icon.mutate(), insetPx, insetPx, insetPx, insetPx)
-            holder.binding.appIcon.setImageDrawable(LayerDrawable(arrayOf(badge, inner)))
         } else {
             holder.binding.appIcon.setImageBitmap(
                 IconUtils.loadBitmap(

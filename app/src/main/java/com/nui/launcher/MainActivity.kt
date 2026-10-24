@@ -1588,7 +1588,7 @@ class MainActivity : AppCompatActivity() {
             val settingsEntry = AppModel(
                 label = getString(R.string.desktop_settings),
                 packageName = packageName,
-                icon = androidx.core.content.ContextCompat.getDrawable(this, R.drawable.ic_dock_settings)!!,
+                icon = androidx.core.content.ContextCompat.getDrawable(this, R.drawable.ic_settings_ios)!!,
                 launchIntent = Intent(),
                 onClick = {
                     val dlg = com.nui.launcher.settings.SettingsDialog(this)
@@ -2194,10 +2194,21 @@ class MainActivity : AppCompatActivity() {
         target.getLocationOnScreen(loc)
         val lp = handle.layoutParams as android.view.WindowManager.LayoutParams
         lp.x = loc[0] + target.width / 2 - lp.width / 2
-        // 横条放进"窗口底边 ~ 内容区底边"的空隙：内容区底边 = 物理屏高 - 导航栏高度。
-        // 用屏幕底边会让手柄落进导航栏区域被系统栏盖住（系统 Dock 显示时横条消失的根因）。
+        // 横条放进"窗口底边 ~ 内容区底边"的空隙。
+        // 内容区底边取页面根布局（ViewPager 页）的实测屏幕底边：系统 Dock 显示时窗口被 resize，
+        // 页面高度已让出系统栏，与地图内容区口径一致（MapHost.contentHeightPx 同样取父布局实测高度）。
+        // 不能用 realScreenH - root.paddingBottom：Dock 显示时 FLAG_LAYOUT_NO_LIMITS 被取消，
+        // 系统按 resize 让位、不再下发 inset，root.paddingBottom=0，横条会被算进系统 Dock 区域，
+        // 在真机上被系统 Dock 窗口盖住而消失（本 bug 根因）。
+        val pageRoot = target.parent as? View
+        val contentBottom = if (pageRoot != null && pageRoot.height > 0) {
+            val ploc = IntArray(2)
+            pageRoot.getLocationOnScreen(ploc)
+            ploc[1] + pageRoot.height
+        } else {
+            realScreenH - binding.root.paddingBottom
+        }
         val winBottom = loc[1] + target.height
-        val contentBottom = realScreenH - binding.root.paddingBottom
         val gapH = (contentBottom - winBottom).coerceAtLeast(0)
         lp.y = winBottom + (gapH - lp.height) / 2
         runCatching { windowManager.updateViewLayout(handle, lp) }

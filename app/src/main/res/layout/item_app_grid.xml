@@ -15,7 +15,7 @@
             android:id="@+id/appIcon"
             android:layout_width="72dp"
             android:layout_height="72dp"
-            android:scaleType="centerInside"
+            android:scaleType="fitCenter"
             android:contentDescription="@string/app_icon" />
 
         <TextView
