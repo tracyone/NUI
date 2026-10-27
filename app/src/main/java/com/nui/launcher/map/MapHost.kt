@@ -255,23 +255,33 @@ class MapHost(
      *  引起布局变化时 refreshFloat 又把浮窗拉回来） */
     private var floatEnabled = false
 
-    fun refreshFloat() {
-        // 等待布局完成后再取几何，否则 getLocationOnScreen / width 可能是旧值或过渡值
-        // 用 OnLayoutChangeListener 确保在本次布局完成后取数；兜底 200ms 防止无布局变化时不触发
-        mapPanel.addOnLayoutChangeListener(object : android.view.View.OnLayoutChangeListener {
-            override fun onLayoutChange(v: android.view.View, left: Int, top: Int, right: Int, bottom: Int,
-                                         oldLeft: Int, oldTop: Int, oldRight: Int, oldBottom: Int) {
-                v.removeOnLayoutChangeListener(this)
-                if (!floatEnabled) return
-                primeCache()
-                showFloat()
-            }
-        })
-        mapPanel.postDelayed({
-            if (!floatEnabled) return@postDelayed
+    /** 布局刷新监听：refreshFloat 用一次性 listener 等本次布局完成后再取几何。
+     *  用成员字段 + 每次先移除/取消，防止切页多次调用时 listener 与兜底延迟累积，
+     *  导致每次布局都重复 showFloat（重发高德浮窗广播）加重车机卡顿。 */
+    private val refreshFloatLayoutListener = object : android.view.View.OnLayoutChangeListener {
+        override fun onLayoutChange(v: android.view.View, left: Int, top: Int, right: Int, bottom: Int,
+                                     oldLeft: Int, oldTop: Int, oldRight: Int, oldBottom: Int) {
+            v.removeOnLayoutChangeListener(this)
+            if (!floatEnabled) return
             primeCache()
             showFloat()
-        }, 200)
+        }
+    }
+
+    private val refreshFloatRunnable = Runnable {
+        if (!floatEnabled) return@Runnable
+        primeCache()
+        showFloat()
+    }
+
+    fun refreshFloat() {
+        // 等待布局完成后再取几何，否则 getLocationOnScreen / width 可能是旧值或过渡值
+        // 用 OnLayoutChangeListener 确保在本次布局完成后取数；兜底 200ms 防止无布局变化时不触发。
+        // 每次调用先移除旧的 listener/延迟，避免切页多次累积导致重复 showFloat。
+        mapPanel.removeOnLayoutChangeListener(refreshFloatLayoutListener)
+        mapPanel.removeCallbacks(refreshFloatRunnable)
+        mapPanel.addOnLayoutChangeListener(refreshFloatLayoutListener)
+        mapPanel.postDelayed(refreshFloatRunnable, 200)
     }
 
     private enum class ResizeMode { NONE, RIGHT, BOTTOM, BOTH }
@@ -1005,9 +1015,15 @@ class MapHost(
     }
 
     /** 把分割条重新 addView 置顶（高德浮窗同为 TYPE_APPLICATION_OVERLAY、后加会在上）。
-     *  切回桌面/拖动前调用，确保分割条悬浮于地图浮窗之上可见可拖。 */
+     *  切回桌面/拖动前调用，确保分割条悬浮于地图浮窗之上可见可拖。
+     *  【性能】removeView+addView 是双重跨进程 IPC，切页动画结束时多个调用点（onPageSelected、
+     *  postDelayed、IDLE refresh）会反复触发；加 500ms 限频合并，避免车机主线程被 IPC 阻塞导致动画掉帧。 */
+    private var lastBringDividerTs = 0L
     private fun bringDividerToFront() {
         val bar = dividerOverlay ?: return
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastBringDividerTs < 500) return
+        lastBringDividerTs = now
         val oldLp = bar.layoutParams as WindowManager.LayoutParams
         runCatching { wm.removeView(bar) }
         val lp = WindowManager.LayoutParams(oldLp.width, oldLp.height, oldLp.type,

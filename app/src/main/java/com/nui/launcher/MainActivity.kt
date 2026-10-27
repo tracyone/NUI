@@ -559,9 +559,9 @@ class MainActivity : AppCompatActivity() {
         }, 300)
         binding.viewPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageScrolled(position: Int, positionOffset: Float, positionOffsetPixels: Int) {
-                // 滚动过程中持续刷新竖条位置：ViewPager2 用 translationX 移动 fragment，
-                // 不触发 layoutChange，需在滚动回调里主动 updateDividerPosition。
-                if (::mapHost.isInitialized) mapHost.refreshDivider()
+                // 【性能】动画期间不刷竖条：refreshDivider/updateViewLayout 是跨进程 IPC，
+                // 动画中每帧调用会阻塞主线程导致掉帧尖峰；动画结束由 SCROLL_STATE_IDLE
+                // 的 refreshDivider 一次性落位（用户感知不到延迟）。
             }
             override fun onPageSelected(position: Int) {
                 // 指示器：点索引 = 外层页索引（0=负一屏，1=桌面，2..N=应用各页）
@@ -635,20 +635,31 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onPageScrollStateChanged(state: Int) {
-                // 页面完全静止后再刷新浮窗几何：HOME/应用列表按钮/滑动回桌面统一走这里，
-                // 保证取数时机一致（非滑动切换与滑动结束都触发 SCROLL_STATE_IDLE）
+                // 页面完全静止后再刷新浮窗几何：HOME/应用列表按钮/滑动回桌面统一走这里。
+                // 【性能】动画结束瞬间若立即执行窗口落位（浮窗/分割条/手柄），这些跨进程 IPC
+                // （relayoutWindow/pauseSurface/bringDivider/hideSwap）在车机上会集中阻塞主线程，
+                // 造成动画末尾掉帧尖峰。延迟 ~100ms 到动画后的空闲帧执行，动画末尾不再被阻塞，
+                // 窗口在动画结束后 100ms 内自然落位（用户感知不到）。
                 if (state == ViewPager2.SCROLL_STATE_IDLE &&
                     binding.viewPager.currentItem == 1 && ::mapHost.isInitialized
                 ) {
-                    // 回桌面先恢复浮窗（closeFloat 已置隐藏态），再按新几何刷新
-                    mapHost.resumeFloat()
-                    mapHost.refreshFloat()
-                    // 页面已静止：手柄在过渡中可能未定位（target 未挂载），此处重新落位
-                    showSwapHandles()
+                    binding.viewPager.postDelayed({
+                        if (!isDestroyed && !isFinishing && binding.viewPager.currentItem == 1) {
+                            // 回桌面先恢复浮窗（closeFloat 已置隐藏态），再按新几何刷新
+                            mapHost.resumeFloat()
+                            mapHost.refreshFloat()
+                            // 动画期间不刷竖条，静止后一次性落位
+                            mapHost.refreshDivider()
+                            // 页面已静止：手柄在过渡中可能未定位（target 未挂载），此处重新落位
+                            showSwapHandles()
+                        }
+                    }, 100)
                 }
                 if (state == ViewPager2.SCROLL_STATE_IDLE && binding.viewPager.currentItem == 1) {
-                    // 页面静止后再请求音乐浮窗：布局已稳定，几何取数才准确
-                    syncMusicFloat()
+                    // 页面静止后再请求音乐浮窗：布局已稳定，几何取数才准确；同样延迟到动画后执行
+                    binding.viewPager.postDelayed({
+                        if (!isDestroyed && !isFinishing && binding.viewPager.currentItem == 1) syncMusicFloat()
+                    }, 100)
                 }
             }
         })
@@ -2122,6 +2133,7 @@ class MainActivity : AppCompatActivity() {
     private var swapHandlesVisible = false
     /** 手柄拖动：本次拖动是否已触发过互换（防止一次拖动反复横跳） */
     private var swapDragTriggered = false
+
     private var swapHandleDownX = 0f
     private var swapHandleStartWinX = 0
 
