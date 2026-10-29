@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.graphics.Color
+import android.graphics.Typeface
 import android.media.MediaMetadata
 
 import android.media.session.MediaController
@@ -314,6 +315,9 @@ class MusicHost(
         if (c == null) { if (hasPermission) launchPreferredApp(); return }
         safe { c.transportControls.skipToNext() }
     }
+    /** 打开绑定的音乐 App 并停留在 App 内（桌面/负一屏音乐卡点击封面/卡片非按钮区：
+     *  用户要进 App 选歌/操作，不应被强制拉回桌面）。 */
+    fun openApp() = launchPreferredApp(autoReturn = false)
     fun prev() {
         val c = currentController
         if (c == null) { if (hasPermission) launchPreferredApp(); return }
@@ -382,7 +386,7 @@ class MusicHost(
         maybeFetchLyric()
 
         val p = UiTheme.palette(context)
-        // 有封面时作为音乐区背景铺满（直接设到 container 上，避免被卡片背景遮挡），无封面时清空
+        // 有封面时作为音乐区背景铺满，无封面时透明透出壁纸
         if (art != null) {
             container.background = android.graphics.drawable.BitmapDrawable(context.resources, art).apply {
                 gravity = android.view.Gravity.FILL
@@ -397,25 +401,28 @@ class MusicHost(
             renderCompactNoCover(title, artist, controller, playing = isPlaying(controller.playbackState), p)
             return
         }
+        val dark = UiTheme.isDark(context)
         val col = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding(dp(12), dp(14), dp(12), dp(14))
-            // 有封面时加半透明遮罩保证文字清晰，无封面时用默认背景色
-            setBackgroundColor(0x99000000.toInt())
+            // 全透明：去掉遮罩，封面/壁纸完全透出（文字靠阴影保证可读）
+            setBackgroundColor(0x00000000.toInt())
         }
-        // 有封面背景时文字用白色，无封面时用主题色
-        val titleColor = if (art != null) 0xFFFFFFFF.toInt() else p.textPrimary
-        val subColor = if (art != null) 0xCCCCCCFF.toInt() else p.textSecondary
+        // 浅外观黑色、深外观白色；统一加粗 + 加大
+        val titleColor = if (dark) 0xFFFFFFFF.toInt() else 0xFF000000.toInt()
+        val subColor = if (dark) 0xFFFFFFFF.toInt() else 0xFF000000.toInt()
         // 标题
         col.addView(TextView(context).apply {
-            text = title; setTextColor(titleColor); textSize = 15f
+            text = title; setTextColor(titleColor); textSize = 20f
+            setTypeface(null, Typeface.BOLD)
             maxLines = 1; ellipsize = TextUtils.TruncateAt.END
             gravity = Gravity.CENTER
         })
         // 艺术家
         col.addView(TextView(context).apply {
-            text = artist; setTextColor(subColor); textSize = 12f
+            text = artist; setTextColor(subColor); textSize = 16f
+            setTypeface(null, Typeface.BOLD)
             maxLines = 1; ellipsize = TextUtils.TruncateAt.END
             gravity = Gravity.CENTER
         }, LinearLayout.LayoutParams(
@@ -587,14 +594,18 @@ class MusicHost(
             gravity = Gravity.CENTER
             setPadding(dp(12), dp(18), dp(12), dp(18))
         }
+        val compactDark = UiTheme.isDark(context)
+        val compactColor = if (compactDark) 0xFFFFFFFF.toInt() else 0xFF000000.toInt()
         // 歌名
         col.addView(TextView(context).apply {
-            text = title; setTextColor(p.textPrimary); textSize = 15f
+            text = title; setTextColor(compactColor); textSize = 20f
+            setTypeface(null, Typeface.BOLD)
             maxLines = 1; ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER
         })
         // 歌手
         col.addView(TextView(context).apply {
-            text = artist; setTextColor(p.textSecondary); textSize = 12f
+            text = artist; setTextColor(compactColor); textSize = 16f
+            setTypeface(null, Typeface.BOLD)
             maxLines = 1; ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER
         }, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,

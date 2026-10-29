@@ -5,12 +5,14 @@ import android.content.Intent
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MotionEvent
@@ -278,6 +280,10 @@ class MainActivity : AppCompatActivity() {
         }
         minusBtnPlay?.setOnClickListener {
             if (::musicHost.isInitialized) musicHost.togglePlay()
+        }
+        // 音乐卡（封面/歌名/卡片非按钮区）点击 → 打开绑定的音乐 App（停留在 App 内）
+        v.findViewById<View>(R.id.minusMusicArea).setOnClickListener {
+            if (::musicHost.isInitialized) musicHost.openApp()
         }
         // 快捷入口：回家/公司/收藏，复用桌面导航按钮逻辑
         v.findViewById<View>(R.id.shortcutNavHome).setOnClickListener {
@@ -1130,12 +1136,14 @@ class MainActivity : AppCompatActivity() {
             rp.findViewById<ImageView>(R.id.navIconHome)?.setColorFilter(p.dockIconTint)
             rp.findViewById<ImageView>(R.id.navIconCompany)?.setColorFilter(p.dockIconTint)
             rp.findViewById<ImageView>(R.id.navIconFavorite)?.setColorFilter(p.dockIconTint)
-            rp.findViewById<TextView>(R.id.navLabelHome)?.setTextColor(p.textPrimary)
-            rp.findViewById<TextView>(R.id.navLabelCompany)?.setTextColor(p.textPrimary)
-            rp.findViewById<TextView>(R.id.navLabelFavorite)?.setTextColor(p.textPrimary)
-            rp.findViewById<TextView>(R.id.weatherText)?.setTextColor(p.textSecondary)
-            rp.findViewById<TextView>(R.id.clockTime)?.setTextColor(p.textPrimary)
-            rp.findViewById<TextView>(R.id.clockDate)?.setTextColor(p.textSecondary)
+            // 右侧面板文字：浅外观黑色、深外观白色；统一加粗 + 加大
+            val panelText = if (dark) 0xFFFFFFFF.toInt() else 0xFF000000.toInt()
+            rp.findViewById<TextView>(R.id.navLabelHome)?.let { it.setTextColor(panelText); it.setTypeface(null, Typeface.BOLD); it.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f) }
+            rp.findViewById<TextView>(R.id.navLabelCompany)?.let { it.setTextColor(panelText); it.setTypeface(null, Typeface.BOLD); it.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f) }
+            rp.findViewById<TextView>(R.id.navLabelFavorite)?.let { it.setTextColor(panelText); it.setTypeface(null, Typeface.BOLD); it.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f) }
+            rp.findViewById<TextView>(R.id.weatherText)?.let { it.setTextColor(panelText); it.setTypeface(null, Typeface.BOLD); it.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f) }
+            rp.findViewById<TextView>(R.id.clockTime)?.let { it.setTextColor(panelText); it.setTypeface(null, Typeface.BOLD); it.setTextSize(TypedValue.COMPLEX_UNIT_SP, 56f) }
+            rp.findViewById<TextView>(R.id.clockDate)?.let { it.setTextColor(panelText); it.setTypeface(null, Typeface.BOLD); it.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f) }
             rp.findViewById<MaterialCardView>(R.id.musicPanel)?.let { mp ->
                 mp.setCardBackgroundColor(p.mapBg)
                 // 音乐窗口圆角随 dock 形态：贴边矩形 / 悬浮 16dp
@@ -1151,7 +1159,7 @@ class MainActivity : AppCompatActivity() {
         val edge = UiTheme.dockStyle(this) == UiTheme.DockStyle.EDGE
         binding.dockBar.background = GradientDrawable().apply {
             setColor(p.dockBg)
-            cornerRadius = if (edge) 12 * dp else 28 * dp
+            cornerRadius = if (edge) 0f else 28 * dp
             setStroke(1, p.divider)
         }
         // 右侧音乐面板圆角同步 dock 形态：贴边时矩形，悬浮时 24dp 圆角
@@ -1162,6 +1170,11 @@ class MainActivity : AppCompatActivity() {
             }
             // 音乐窗口卡片本身也随形态变矩形/圆角
             rp.findViewById<MaterialCardView>(R.id.musicPanel)?.radius = if (edge) 0f else 16 * dp
+            // 导航标签文字样式同步（dock 形态切换时重新应用）
+            val panelText = if (dark) 0xFFFFFFFF.toInt() else 0xFF000000.toInt()
+            rp.findViewById<TextView>(R.id.navLabelHome)?.let { it.setTextColor(panelText); it.setTypeface(null, Typeface.BOLD); it.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f) }
+            rp.findViewById<TextView>(R.id.navLabelCompany)?.let { it.setTextColor(panelText); it.setTypeface(null, Typeface.BOLD); it.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f) }
+            rp.findViewById<TextView>(R.id.navLabelFavorite)?.let { it.setTextColor(panelText); it.setTypeface(null, Typeface.BOLD); it.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f) }
         }
     }
 

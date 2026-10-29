@@ -254,9 +254,9 @@ object UiTheme {
     )
 
     private val LIGHT = Palette(
-        panelBg = 0xB3F2F2F7.toInt(),   // 70% 不透明 iOS 浅灰（CarPlay 风格毛玻璃，避免过白）
-        dockBg = 0xB3E8E8ED.toInt(),    // 70% 不透明稍深浅灰
-        mapBg = 0xFFE8EDF2.toInt(),     // 浅色地图卡片
+        panelBg = 0x4DF2F2F7.toInt(),   // 30% 不透明，与 dock 栏透明度一致
+        dockBg = 0x4DE8E8ED.toInt(),    // 30% 不透明浅灰，与负一屏低栏透明度一致
+        mapBg = 0x4DE8EDF2.toInt(),     // 30% 不透明浅色音乐卡片，与 dock 栏透明度一致
         textPrimary = 0xFF1C1C1E.toInt(),
         textSecondary = 0xFF6E6E73.toInt(),
         divider = 0x26000000.toInt(),
