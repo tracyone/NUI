@@ -1086,6 +1086,8 @@ class MainActivity : AppCompatActivity() {
         applyDockStyle()
         renderDock()
         if (::wallpaper.isInitialized) wallpaper.applyForAppearance(UiTheme.isDark(this))
+        // 壁纸切换后圆角遮罩要重绘（四角楔形是用壁纸像素填充的）
+        if (::mapHost.isInitialized) mapHost.refreshCornerMask()
         if (::musicHost.isInitialized) musicHost.refresh()
         navInfoHost?.applyTheme()
         // 强制整个窗口重排+重绘：高德外观广播期间窗口未 relayout 时，
@@ -1205,6 +1207,13 @@ class MainActivity : AppCompatActivity() {
         }
         binding.dockBar.layoutParams = barLp
         applyDockVisual()
+
+        // 地图窗口圆角：外部地图浮窗无法直接裁剪，悬浮形态下用四角壁纸遮罩补齐圆角
+        if (::mapHost.isInitialized) {
+            val mapRadius = (24 * dp).toInt()
+            desktopMapPanel?.radius = if (edge) 0f else mapRadius.toFloat()
+            mapHost.setCornerMask(!edge, mapRadius)
+        }
 
         // 地图卡片：dock 右侧留出 12dp 统一间距（参考氢桌面比例）
         // 互换模式下地图锚定在右侧，左边界由互换几何决定，不能被 dock 形态覆盖
@@ -1375,7 +1384,9 @@ class MainActivity : AppCompatActivity() {
         val btnSwitchMap = desktopBtnSwitchMap ?: return
 
         mapHost = MapHost(this, mapContainer, mapPanel)
-        mapHost.onGeometryChanged = { binding.root.post { syncRightPanel(); mapHostRefreshDivider(); positionSwapHandles(); syncMusicFloat(); if (::musicHost.isInitialized) musicHost.requestFloatRefresh() } }
+        // 圆角遮罩需要壁纸像素：直接取根布局背景（WallpaperController 设置的即为铺满全屏的壁纸）
+        mapHost.wallpaperProvider = { binding.root.background }
+        mapHost.onGeometryChanged = { binding.root.post { syncRightPanel(); mapHostRefreshDivider(); positionSwapHandles(); syncMusicFloat(); if (::musicHost.isInitialized) musicHost.requestFloatRefresh(); mapHost.refreshCornerMask() } }
         mapHost.onFloatShown = { if (::musicHost.isInitialized) musicHost.bringLyricFloatToFront(); bringSwapHandlesToFront() }
         mapHost.onAutoReturnDone = { flushPendingWeatherVoice() }
         mapHost.onPickMap = {

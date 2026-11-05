@@ -411,6 +411,8 @@ class MapHost(
             MapSource.Type.EXTERNAL -> renderExternal(source)
             MapSource.Type.EXTERNAL_FLOAT -> renderFloat(source)
         }
+        // 数据源变化会影响是否需要圆角遮罩（只有外部浮窗需要）
+        refreshCornerMask()
     }
 
     private fun renderOsm() {
@@ -547,6 +549,8 @@ class MapHost(
                     // 延迟把竖条置顶回来，保证可点（避开拖动中：dividerTouching/AdjustActive 守卫）。
                     container.postDelayed({
                         if (dividerShown && !dividerTouching && !dividerAdjustActive) bringDividerToFront()
+                        // 浮窗重建后圆角遮罩也要重新 addView 才能压在上面
+                        if (cornerMaskVisible) applyCornerMask(force = true)
                     }, 800)
                 }
             }
@@ -577,6 +581,7 @@ class MapHost(
 
     fun onDestroy() {
         Log.d(TAG, "onDestroy")
+        removeCornerMask()
         destroyMap()
     }
 
@@ -894,6 +899,225 @@ class MapHost(
     /** 分割条拖动完成后保存当前几何（供外部 UI 调用，复用 saveGeometry 逻辑） */
     fun saveGeometryForDivider() = saveGeometry()
 
+    // ==================== 圆角遮罩（外观"悬浮（圆角）"下给外部地图浮窗补圆角）====================
+    // 外部地图（高德/百度）的浮窗是独立 APPLICATION_OVERLAY 窗口（FrameLayout + SurfaceView），
+    // NUI 无法直接裁剪它的 SurfaceView。这里在浮窗之上再叠一层透明 overlay：把"圆角矩形之外"
+    // 的四个角楔形区域用桌面壁纸重绘，视觉上等价于浮窗被裁成圆角（这些区域本来透出的就是壁纸）。
+    /** 四个角遮罩窗口（索引 = corner * MASK_LAYERS + layer）。
+     *  拆成 4 个小窗（而不是 1 个整窗）：整窗要铺满浮窗、且要做像素级壁纸取样，小窗只需 r×r，
+     *  内存/合成开销都可忽略。每个角叠 [MASK_LAYERS] 层的原因见下方常量注释。 */
+    private val cornerMaskViews = arrayOfNulls<CornerMaskView>(4 * MASK_LAYERS)
+    /** 非位图壁纸（纯色/渐变）按屏幕栅格化的缓存，drawable 换了才重建 */
+    private var rasterWallpaper: android.graphics.Bitmap? = null
+    private var rasterWallpaperSrc: android.graphics.drawable.Drawable? = null
+    /** 圆角遮罩开关（由 MainActivity 按 Dock 形态设置：悬浮圆角=开，贴边矩形=关） */
+    private var cornerMaskEnabled = false
+    /** 遮罩圆角半径（px），悬浮形态下由 MainActivity 传入 24dp */
+    private var cornerMaskRadiusPx = 0
+    private var cornerMaskVisible = false
+    /** 桌面壁纸 drawable（根布局背景，铺满全屏），由 MainActivity 注入 */
+    var wallpaperProvider: (() -> android.graphics.drawable.Drawable?)? = null
+
+    /** Dock 形态变化时调用：enabled=false（贴边矩形）关闭圆角遮罩 */
+    fun setCornerMask(enabled: Boolean, radiusPx: Int) {
+        cornerMaskEnabled = enabled && radiusPx > 0
+        cornerMaskRadiusPx = if (cornerMaskEnabled) radiusPx else 0
+        if (!cornerMaskEnabled) removeCornerMask()
+        else if (cornerMaskVisible) applyCornerMask()
+    }
+
+    /** 圆角半径：未启用（贴边形态）返回 0，表示不做遮罩 */
+    private fun cornerRadiusPx(): Int =
+        if (cornerMaskEnabled && cornerMaskRadiusPx > 0) cornerMaskRadiusPx else 0
+
+    /** 几何变化后重定位圆角遮罩（拖动/缩放/互换后调用） */
+    fun refreshCornerMask() {
+        if (cornerMaskVisible) applyCornerMask()
+    }
+
+    /** 与分割条同步显隐：非 page0 / 失焦 / 对话框时不显示（遮罩会压在壁纸或图标上） */
+    private fun setCornerMaskVisible(visible: Boolean) {
+        cornerMaskVisible = visible
+        if (!visible) { removeCornerMask(); return }
+        // force：外部地图可能刚重建过浮窗（新窗口在遮罩之上），必须 remove+add 才能重新置顶
+        applyCornerMask(force = true)
+        // mapPanel 可能尚未布局完成（cachedX/cachedW 仍为 0），与分割条一致做延迟重试
+        mapPanel.postDelayed({ if (cornerMaskVisible) applyCornerMask(force = true) }, 500)
+        mapPanel.postDelayed({ if (cornerMaskVisible) applyCornerMask(force = true) }, 1500)
+    }
+
+    private fun removeCornerMask() {
+        for (i in cornerMaskViews.indices) {
+            cornerMaskViews[i]?.let {
+                runCatching { wm.removeView(it) }
+                it.release()
+            }
+            cornerMaskViews[i] = null
+        }
+    }
+
+    /** 创建/重定位四个角窗（外部地图每次 showmap 都可能重建浮窗，需重新 addView 才压得住） */
+    private fun applyCornerMask(force: Boolean = false) {
+        if (!cornerMaskVisible) return
+        val radius = cornerRadiusPx()
+        if (radius <= 0) { removeCornerMask(); return }
+        // 只有外部地图浮窗（高德）需要补圆角：内嵌 OSM / 外部应用入口卡本身就在圆角卡片内
+        if (current?.type != MapSource.Type.EXTERNAL_FLOAT) { removeCornerMask(); return }
+        if (!Settings.canDrawOverlays(context)) return
+        // 浮窗几何 = mapPanel 四边外扩 floatInsetPx（与 sendFloatBroadcast 一致）
+        val x = cachedX - floatInsetPx
+        val y = cachedY - floatInsetPx
+        val w = (cachedW - cachedX) + floatInsetPx * 2
+        val h = (cachedH - cachedY) + floatInsetPx * 2
+        if (w <= radius * 2 || h <= radius * 2) return
+        // force：浮窗重建/置顶后旧角窗会被压到下面，必须 remove + add 重新置顶
+        if (force) removeCornerMask()
+        val src = resolveWallpaperBitmap() ?: return
+        val left = intArrayOf(x, x + w - radius)
+        val top = intArrayOf(y, y + h - radius)
+        for (corner in 0 until 4) {
+            val cx = left[corner % 2]
+            val cy = top[corner / 2]
+            val bmp = buildCornerBitmap(src, cx, cy, radius, corner) ?: continue
+            for (layer in 0 until MASK_LAYERS) {
+                val idx = corner * MASK_LAYERS + layer
+                val existing = cornerMaskViews[idx]
+                if (existing == null) {
+                    val v = CornerMaskView(context)
+                    v.setMask(bmp)
+                    try {
+                        wm.addView(v, cornerMaskLp(cx, cy, radius))
+                        cornerMaskViews[idx] = v
+                    } catch (e: Exception) {
+                        Log.e(TAG, "applyCornerMask: addView FAILED", e)
+                        v.setMask(null)
+                    }
+                } else {
+                    // 壁纸/主题/昼夜可能已换，重绘遮罩位图
+                    existing.setMask(bmp)
+                    val lp = existing.layoutParams as WindowManager.LayoutParams
+                    if (lp.x != cx || lp.y != cy || lp.width != radius || lp.height != radius) {
+                        lp.x = cx
+                        lp.y = cy
+                        lp.width = radius
+                        lp.height = radius
+                        runCatching { wm.updateViewLayout(existing, lp) }
+                    }
+                }
+            }
+        }
+    }
+
+    /** 角窗 LayoutParams：r×r、不可触摸（不抢地图触摸）；尺寸只覆盖圆角被裁掉的小方块 */
+    private fun cornerMaskLp(cx: Int, cy: Int, r: Int) = WindowManager.LayoutParams(
+        r, r,
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O)
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        else
+            @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE,
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+        PixelFormat.TRANSLUCENT,
+    ).apply {
+        gravity = Gravity.TOP or Gravity.START
+        this.x = cx
+        this.y = cy
+        alpha = 1.0f
+    }
+
+    /** 生成单个角遮罩位图：先铺该角 r×r 区域的壁纸像素，再把圆角内侧的四分之一圆挖空。
+     *  corner：0=左上 1=右上 2=左下 3=右下（与浮窗四个角一一对应）。 */
+    private fun buildCornerBitmap(
+        src: android.graphics.Bitmap, offX: Int, offY: Int, r: Int, corner: Int,
+    ): android.graphics.Bitmap? {
+        if (src.isRecycled || src.width < r || src.height < r) return null
+        // 贴边保护：浮窗极靠近屏幕边缘时源矩形可能越界，向内平移取样（视觉上不可辨）
+        val sx = offX.coerceIn(0, src.width - r)
+        val sy = offY.coerceIn(0, src.height - r)
+        val out = android.graphics.Bitmap.createBitmap(r, r, android.graphics.Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(out)
+        c.drawBitmap(
+            src,
+            android.graphics.Rect(sx, sy, sx + r, sy + r),
+            android.graphics.Rect(0, 0, r, r),
+            android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG),
+        )
+        // 挖掉圆角内侧的 1/4 圆（Antialias + CLEAR，得到平滑的圆角边缘）
+        val rr = r.toFloat()
+        val hole = android.graphics.Path()
+        when (corner) {
+            0 -> {
+                hole.arcTo(android.graphics.RectF(0f, 0f, 2 * rr, 2 * rr), 180f, 90f, true)
+                hole.lineTo(rr, rr)
+            }
+            1 -> {
+                hole.arcTo(android.graphics.RectF(-rr, 0f, rr, 2 * rr), 270f, 90f, true)
+                hole.lineTo(0f, rr)
+            }
+            2 -> {
+                hole.arcTo(android.graphics.RectF(0f, -rr, 2 * rr, rr), 90f, 90f, true)
+                hole.lineTo(rr, 0f)
+            }
+            else -> {
+                hole.arcTo(android.graphics.RectF(-rr, -rr, rr, rr), 0f, 90f, true)
+                hole.lineTo(0f, 0f)
+            }
+        }
+        hole.close()
+        c.drawPath(hole, android.graphics.Paint().apply {
+            isAntiAlias = true
+            xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR)
+        })
+        return out
+    }
+
+    /** 取当前桌面壁纸的"屏幕像素副本"：把根布局背景 drawable 按屏幕尺寸栅格化后按像素取样。
+     *  不能直接用 BitmapDrawable.bitmap：壁纸位图未必与屏幕等大（实测 1920×720 被缩放到
+     *  1280×720 的根布局上），直接按屏幕坐标取样会取到错位的位置。 */
+    private fun resolveWallpaperBitmap(): android.graphics.Bitmap? {
+        val bg = wallpaperProvider?.invoke() ?: return null
+        val cached = rasterWallpaper
+        if (cached != null && !cached.isRecycled && rasterWallpaperSrc === bg) return cached
+        return try {
+            val bmp = android.graphics.Bitmap.createBitmap(
+                realScreenW, realScreenH, android.graphics.Bitmap.Config.ARGB_8888,
+            )
+            val c = android.graphics.Canvas(bmp)
+            // 用副本绘制，避免改动共享 drawable（根布局）的 bounds
+            val d = bg.constantState?.newDrawable(context.resources) ?: bg
+            d.setBounds(0, 0, realScreenW, realScreenH)
+            d.draw(c)
+            if (cached != null && !cached.isRecycled) cached.recycle()
+            rasterWallpaper = bmp
+            rasterWallpaperSrc = bg
+            bmp
+        } catch (e: Exception) {
+            Log.e(TAG, "resolveWallpaperBitmap failed", e)
+            null
+        }
+    }
+
+    /** 把预生成的角遮罩位图直接贴到窗口上（不做任何额外透明度，避免与地图混色） */
+    private inner class CornerMaskView(ctx: Context) : View(ctx) {
+        private val paint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
+        private var mask: android.graphics.Bitmap? = null
+
+        fun setMask(bmp: android.graphics.Bitmap?) {
+            mask = bmp
+            invalidate()
+        }
+
+        fun release() {
+            mask = null
+        }
+
+        override fun onDraw(canvas: android.graphics.Canvas) {
+            val b = mask ?: return
+            if (b.isRecycled) return
+            canvas.drawBitmap(b, 0f, 0f, paint)
+        }
+    }
+
     // ==================== 常驻悬浮分割条（类似 iOS 分屏竖条）====================
     // 高德浮窗（TYPE_APPLICATION_OVERLAY）覆盖 mapPanel 右缘，布局内 view 会被其遮挡，
     // 故分割条用独立的悬浮 overlay，z 序高于高德浮窗，常驻显示、可拖动。
@@ -917,6 +1141,7 @@ class MapHost(
     /** 切换分割条可见性：非 page0 时直接移出屏幕（x=-10000），不 removeView 不 GONE，
      *  保持 overlay 稳定存在，避免反复创建/销毁导致丢失。page0 时定位到音乐栏左缘。 */
     fun setDividerVisible(visible: Boolean) {
+        setCornerMaskVisible(visible)
         if (visible) {
             if (dividerOverlay == null) {
                 showDivider()
@@ -942,6 +1167,7 @@ class MapHost(
     }
 
     fun hideDivider() {
+        setCornerMaskVisible(false)
         dividerShown = false
         dividerAdjustActive = false
         dividerOverlay?.let { runCatching { wm.removeView(it) } }
@@ -1312,6 +1538,11 @@ class MapHost(
         private const val VERTICAL_MARGIN_DP = 8
         /** 分割条触摸热区宽度（dp），与 ensureDivider 中 barW 保持一致 */
         private const val DIVIDER_BAR_W_DP = 28
+        /** 每个圆角的遮罩层数。不可触摸（FLAG_NOT_TOUCHABLE）的 overlay 在部分 ROM（实测
+         *  BlueStacks / Android 13）上会被系统把窗口 alpha 压到 0.8，导致角部壁纸与地图混色
+         *  （0.8×壁纸 + 0.2×地图）。叠 2 层 → 0.96，肉眼已不可辨；真机若 alpha=1.0，
+         *  两层完全重合，无任何副作用（切不可改成"可触摸窗口"来换 alpha=1.0，那会挡住地图角上的按钮）。 */
+        private const val MASK_LAYERS = 2
 
         /** MainActivity.onNewIntent 识别地图自动返回的 Intent 标记 */
         const val EXTRA_AUTO_BACK = "nui_auto_back"
