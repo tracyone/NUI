@@ -18,6 +18,7 @@ import android.view.ViewTreeObserver
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.SeekBar
@@ -267,10 +268,13 @@ class SettingsDialog(context: Context) : Dialog(context) {
         findViewById<View>(R.id.optDockEdge).setOnClickListener {
             UiTheme.setDockStyle(context, UiTheme.DockStyle.EDGE)
             renderAppearance()
+            // 面板自身立即跟随形态（不必等关闭弹窗后由桌面重排）
+            applyPanelShape()
         }
         findViewById<View>(R.id.optDockFloat).setOnClickListener {
             UiTheme.setDockStyle(context, UiTheme.DockStyle.FLOAT)
             renderAppearance()
+            applyPanelShape()
         }
         // 显示顶部状态栏（独立开关）：切换后立即生效
         optStatusBar.setOnClickListener {
@@ -434,16 +438,8 @@ class SettingsDialog(context: Context) : Dialog(context) {
         window?.apply {
             setGravity(Gravity.END or Gravity.BOTTOM)
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-            // 右侧面板：宽度占除 dock 栏外的区域，高度全屏。
-            // 左缘与 dock 栏保持 12dp 间距，计算口径与桌面地图/应用网格一致：
-            // 贴边形态 dock 占 96dp；圆角悬浮形态另有 8dp 左边距，否则弹窗会压住 dock 栏。
-            val dm = context.resources.displayMetrics
-            val dockRightDp = if (UiTheme.dockStyle(context) == UiTheme.DockStyle.EDGE) {
-                96f + 12
-            } else {
-                8f + 96f + 12
-            }
-            setLayout(dm.widthPixels - (dockRightDp * dm.density).toInt(), ViewGroup.LayoutParams.MATCH_PARENT)
+            // 面板几何/圆角跟随 Dock 形态（贴边矩形 / 悬浮圆角，上下右边距与 dock 一致）
+            applyPanelShape()
             clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
         }
         // 系统栏策略与主桌面一致：状态栏 / 系统 Dock 分别跟随设置开关，
@@ -639,12 +635,52 @@ class SettingsDialog(context: Context) : Dialog(context) {
         if (ret != null) UiTheme.setMapReturnDelaySec(context, ret)
     }
 
+    /**
+     * 设置面板的窗口几何与圆角跟随 Dock 形态（外观设置里的"悬浮 / 贴边"）：
+     * - 悬浮：面板四边各留 8dp（与 dock 栏的上/下边距一致），24dp 圆角；
+     * - 贴边：面板上下右齐平、直角，与贯穿式 dock 风格一致。
+     * 左缘始终与 dock 栏保持 12dp 间距（口径与桌面地图卡片/应用网格一致）。
+     */
+    private fun applyPanelShape() {
+        val dm = context.resources.displayMetrics
+        val edge = UiTheme.dockStyle(context) == UiTheme.DockStyle.EDGE
+        // 贴边形态 dock 占 96dp；圆角悬浮形态另有 8dp 左边距，否则面板会压住 dock 栏
+        val dockRightDp = if (edge) 96f + 12 else 8f + 96f + 12
+        window?.setLayout(
+            dm.widthPixels - (dockRightDp * dm.density).toInt(),
+            ViewGroup.LayoutParams.MATCH_PARENT,
+        )
+        val inset = if (edge) 0 else (8 * dm.density).toInt()
+        findViewById<View>(R.id.settingsRoot).let { root ->
+            val lp = (root.layoutParams as? FrameLayout.LayoutParams)
+                ?: FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                )
+            lp.setMargins(0, inset, inset, inset)
+            root.layoutParams = lp
+        }
+        applyPanelBackground(UiTheme.isDark(context))
+    }
+
+    /** 面板底色 + 圆角：悬浮形态 24dp 圆角，贴边形态直角（深浅外观切换时也要保持） */
+    private fun applyPanelBackground(dark: Boolean) {
+        val dp = context.resources.displayMetrics.density
+        val edge = UiTheme.dockStyle(context) == UiTheme.DockStyle.EDGE
+        val p = UiTheme.settingsPalette(dark)
+        findViewById<View>(R.id.settingsRoot).background = GradientDrawable().apply {
+            setColor(p.bg)
+            cornerRadius = if (edge) 0f else 24 * dp
+        }
+    }
+
     private fun applySettingsTheme() = applySettingsTheme(UiTheme.isDark(context))
 
     private fun applySettingsTheme(dark: Boolean) {
         val p = UiTheme.settingsPalette(dark)
         val dp = context.resources.displayMetrics.density
-        findViewById<View>(R.id.settingsRoot).setBackgroundColor(p.bg)
+        // 背景带圆角：跟随 Dock 形态（贴边直角 / 悬浮 24dp）
+        applyPanelBackground(dark)
         findViewById<TextView>(R.id.titleSettings).setTextColor(p.label)
         findViewById<ImageButton>(R.id.btnBack).imageTintList = ColorStateList.valueOf(p.label)
         findViewById<View>(R.id.contentCard).background = GradientDrawable().apply {
