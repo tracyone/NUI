@@ -270,6 +270,10 @@ class MapHost(
     private val showDedupMs = 3000L
     /** showFloat 请求合并窗口（ms）：同一时刻多个请求只保留最后一次，按最终几何发一次 */
     private val showCoalesceMs = 120L
+    /** showmap 请求序号 / 已发出序号 / 遮罩已置顶序号：用于 800ms 兜底判断是否需要补一次 */
+    private var showSeq = 0
+    private var lastSentSeq = 0
+    private var maskFixedSeq = 0
     /** 自动启动外部地图回桌面流程中：浮窗恢复统一由 goBackToNui 延迟 500ms 后发送，
      *  期间 onResume 的 resumeFloat 不再重复发广播（否则会连发两次，浮窗重建两次闪窗） */
     private var pendingReturnShow = false
@@ -575,11 +579,34 @@ class MapHost(
             // 关键：setPackage 只发给地图 App，否则酷我等其它 App 也会收到这个广播并按相同坐标创建自己的 FloatApp，覆盖在高德浮窗上
             pkg?.let { setPackage(it) }
         }
-        val sent = runCatching { context.sendBroadcast(intent) }.isSuccess
+        // 用有序广播：高德在 onReceive 里同步 addView 浮窗，结果回调到达时新窗口必然已经
+        // 盖在圆角遮罩之上，此刻立刻把遮罩重新压回最顶层，避免"先看到方角地图、0.8s 后才变圆角"。
+        val seq = ++showSeq
+        val resultReceiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(ctx: Context?, i: Intent?) {
+                if (!floatEnabled) return
+                // 浮窗窗口刚被 addView，压在所有 overlay 之上：立刻把分割条与圆角遮罩重新置顶，
+                // 这样回桌面时圆角是同步出现的，不会先露一帧方角
+                if (dividerShown && !dividerTouching && !dividerAdjustActive) bringDividerToFront()
+                if (cornerMaskVisible) applyCornerMask(force = true)
+                maskFixedSeq = seq
+                Log.d(TAG, "showmap result: 浮窗已创建，遮罩/竖条置顶 seq=$seq")
+            }
+        }
+        val sent = runCatching {
+            context.sendOrderedBroadcast(
+                intent, null, resultReceiver, null,
+                android.app.Activity.RESULT_OK, null, null
+            )
+        }.recoverCatching {
+            // 有序广播失败时退回普通广播，保证浮窗仍能显示（遮罩由 800ms 兜底补置顶）
+            context.sendBroadcast(intent)
+        }.isSuccess
         if (sent) {
             lastShowX = bx; lastShowY = by; lastShowW = bw; lastShowH = bh
             lastShowPkg = pkg
             lastShowAtMs = now
+            lastSentSeq = seq
             floatBroadcastShown = true
         }
         return sent
@@ -617,12 +644,13 @@ class MapHost(
         // 几何未变被去重跳过：浮窗没有重建/重定位，无需再重复置顶与补遮罩
         if (!sent) return@Runnable
         container.postDelayed({ onFloatShown?.invoke() }, 600)
-        // 高德浮窗是后加的 APPLICATION_OVERLAY，会盖在竖条之上。
-        // 延迟把竖条置顶回来，保证可点（避开拖动中：dividerTouching/AdjustActive 守卫）。
+        // 兜底：有序广播结果回调若没到（地图进程异常/广播丢失），0.8s 后再补一次置顶。
+        // 正常情况下回调已经立刻处理过，这里不再重复 remove/add（避免多余的窗口操作）。
         container.postDelayed({
-            if (dividerShown && !dividerTouching && !dividerAdjustActive) bringDividerToFront()
-            // 浮窗重建后圆角遮罩也要重新 addView 才能压在上面
-            if (cornerMaskVisible) applyCornerMask(force = true)
+            if (maskFixedSeq < lastSentSeq) {
+                if (dividerShown && !dividerTouching && !dividerAdjustActive) bringDividerToFront()
+                if (cornerMaskVisible) applyCornerMask(force = true)
+            }
         }, 800)
     }
 

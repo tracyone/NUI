@@ -1148,8 +1148,8 @@ class MainActivity : AppCompatActivity() {
             rp.findViewById<TextView>(R.id.clockDate)?.let { it.setTextColor(panelText); it.setTypeface(null, Typeface.BOLD); it.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f) }
             rp.findViewById<MaterialCardView>(R.id.musicPanel)?.let { mp ->
                 mp.setCardBackgroundColor(p.mapBg)
-                // 音乐窗口圆角随 dock 形态：贴边矩形 / 悬浮 16dp
-                mp.radius = if (panelEdge) 0f else 16 * density
+                // 音乐窗口圆角随 dock 形态：贴边矩形 / 悬浮 24dp（与地图卡片、右侧面板统一）
+                mp.radius = if (panelEdge) 0f else 24 * density
             }
         }
     }
@@ -1170,8 +1170,8 @@ class MainActivity : AppCompatActivity() {
                 bg.cornerRadius = if (edge) 0f else 24 * dp
                 rp.background = bg
             }
-            // 音乐窗口卡片本身也随形态变矩形/圆角
-            rp.findViewById<MaterialCardView>(R.id.musicPanel)?.radius = if (edge) 0f else 16 * dp
+            // 音乐窗口卡片本身也随形态变矩形/圆角（悬浮 24dp，与地图卡片、右侧面板统一）
+            rp.findViewById<MaterialCardView>(R.id.musicPanel)?.radius = if (edge) 0f else 24 * dp
             // 导航标签文字样式同步（dock 形态切换时重新应用）
             val panelText = if (dark) 0xFFFFFFFF.toInt() else 0xFF000000.toInt()
             rp.findViewById<TextView>(R.id.navLabelHome)?.let { it.setTextColor(panelText); it.setTypeface(null, Typeface.BOLD); it.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f) }
