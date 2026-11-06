@@ -255,20 +255,48 @@ class MapHost(
      *  引起布局变化时 refreshFloat 又把浮窗拉回来） */
     private var floatEnabled = false
 
+    /** 高德浮窗当前是否已由我们发出 showmap 且未被 closeFloat 关闭 */
+    private var floatBroadcastShown = false
+    /** 最近一次实际发出的浮窗几何（外扩后的边界格式）与目标包名，用于 showmap 幂等去重 */
+    private var lastShowX = Int.MIN_VALUE
+    private var lastShowY = Int.MIN_VALUE
+    private var lastShowW = Int.MIN_VALUE
+    private var lastShowH = Int.MIN_VALUE
+    private var lastShowPkg: String? = null
+    private var lastShowAtMs = 0L
+    /** 同几何 showmap 去重时间窗（ms）：回桌面时 resumeFloat / refreshFloat 的 layout 回调 /
+     *  200ms 兜底会在几十毫秒内连续请求，每次都发广播会让高德浮窗反复 relayout 产生闪烁。
+     *  窗口内几何不变就只发一次；超过该窗口仍重发，避免"高德进程刚启动、早先广播丢失"的情况。 */
+    private val showDedupMs = 3000L
+    /** showFloat 请求合并窗口（ms）：同一时刻多个请求只保留最后一次，按最终几何发一次 */
+    private val showCoalesceMs = 120L
+    /** 自动启动外部地图回桌面流程中：浮窗恢复统一由 goBackToNui 延迟 500ms 后发送，
+     *  期间 onResume 的 resumeFloat 不再重复发广播（否则会连发两次，浮窗重建两次闪窗） */
+    private var pendingReturnShow = false
+    /** 合并 showFloat 请求：回桌面时会由 resumeFloat / refreshFloat / onResume 等在同一时刻
+     *  多次请求，逐个立即发广播会让高德浮窗连续 addView/updateViewLayout 闪两下。
+     *  这里统一延迟一小段时间只发一次（带 force 合并），等几何稳定后按最终值发送。 */
+    private var showQueued = false
+    private var showForced = false
+
     /** 布局刷新监听：refreshFloat 用一次性 listener 等本次布局完成后再取几何。
      *  用成员字段 + 每次先移除/取消，防止切页多次调用时 listener 与兜底延迟累积，
-     *  导致每次布局都重复 showFloat（重发高德浮窗广播）加重车机卡顿。 */
-    private val refreshFloatLayoutListener = object : android.view.View.OnLayoutChangeListener {
+     *  导致每次布局都重复 showFloat（重发高德浮窗广播）加重车机卡顿。
+     *  listener 与 200ms 兜底互斥：任一先触发即取消另一方，一次 refreshFloat 最多只发一次。 */
+    private val refreshFloatLayoutListener: android.view.View.OnLayoutChangeListener =
+        object : android.view.View.OnLayoutChangeListener {
         override fun onLayoutChange(v: android.view.View, left: Int, top: Int, right: Int, bottom: Int,
                                      oldLeft: Int, oldTop: Int, oldRight: Int, oldBottom: Int) {
             v.removeOnLayoutChangeListener(this)
+            v.removeCallbacks(refreshFloatRunnable)
             if (!floatEnabled) return
             primeCache()
             showFloat()
         }
     }
 
-    private val refreshFloatRunnable = Runnable {
+    private val refreshFloatRunnable: Runnable = Runnable {
+        mapPanel.removeOnLayoutChangeListener(refreshFloatLayoutListener)
         if (!floatEnabled) return@Runnable
         primeCache()
         showFloat()
@@ -395,9 +423,15 @@ class MapHost(
                 autoReturnPending = false
                 onAutoReturnDone?.invoke()
             }
-            // 回 NUI 后再恢复浮窗
+            // 回 NUI 后再恢复浮窗：等地图进程从后台稳定下来再发一次 showmap（force 跳过去重，
+            // 因为高德可能已自行 hideMap，必须重建）；此时 onResume 的 resumeFloat 会被跳过，
+            // 避免"立即创建 → 500ms 后再定位"的两次窗口操作造成闪窗。
             if (src.type == MapSource.Type.EXTERNAL_FLOAT) {
-                container.postDelayed({ showFloat() }, 500L)
+                pendingReturnShow = true
+                container.postDelayed({
+                    pendingReturnShow = false
+                    showFloat(force = true)
+                }, 500L)
             }
         }
     }
@@ -501,30 +535,54 @@ class MapHost(
         cachedH = cachedY + mapPanel.height
     }
 
-    private fun sendFloatBroadcast(action: String?) {
-        if (action == null) return
+    /**
+     * 发送 showmap 广播。
+     * @param force true=忽略去重强制发送（如自动启动地图回桌面后的恢复）
+     * @return 是否真正发出了广播（几何未变且在去重窗口内会跳过，返回 false）
+     */
+    private fun sendFloatBroadcast(action: String?, force: Boolean = false): Boolean {
+        if (action == null) return false
         var x = cachedX; var y = cachedY; var w = cachedW; var h = cachedH
         if (w <= 0) {
             val loc = IntArray(2)
             container.getLocationOnScreen(loc)
             x = loc[0]; y = loc[1]
             w = x + container.width; h = y + container.height
-            if (container.width <= 0 || container.height <= 0) return
+            if (container.width <= 0 || container.height <= 0) return false
             cachedX = x; cachedY = y; cachedW = w; cachedH = h
         }
         // 浮窗边界比 mapPanel 四边外扩 floatInsetPx：防浮窗比卡片窄时边缘露底。
         // 注意不要内缩：开关浮窗像素对比实测浮窗右缘外壁纸亮度与无浮窗时完全一致，
         // 高德浮窗并无深色边/投影；浅色模式下的竖向阴影来自分割条热区黑底（已改透明）。
         val inset = floatInsetPx
-        val intent = Intent(action).apply {
-            putExtra("x", x - inset)
-            putExtra("y", y - inset)
-            putExtra("w", w + inset)
-            putExtra("h", h + inset)
-            // 关键：setPackage 只发给地图 App，否则酷我等其它 App 也会收到这个广播并按相同坐标创建自己的 FloatApp，覆盖在高德浮窗上
-            current?.packageName?.let { setPackage(it) }
+        val bx = x - inset
+        val by = y - inset
+        val bw = w + inset
+        val bh = h + inset
+        val pkg = current?.packageName
+        val now = android.os.SystemClock.elapsedRealtime()
+        val unchanged = floatBroadcastShown && bx == lastShowX && by == lastShowY &&
+            bw == lastShowW && bh == lastShowH && pkg == lastShowPkg
+        if (!force && unchanged && now - lastShowAtMs in 0 until showDedupMs) {
+            Log.d(TAG, "showmap skip: 几何未变（${now - lastShowAtMs}ms 内）")
+            return false
         }
-        runCatching { context.sendBroadcast(intent) }
+        val intent = Intent(action).apply {
+            putExtra("x", bx)
+            putExtra("y", by)
+            putExtra("w", bw)
+            putExtra("h", bh)
+            // 关键：setPackage 只发给地图 App，否则酷我等其它 App 也会收到这个广播并按相同坐标创建自己的 FloatApp，覆盖在高德浮窗上
+            pkg?.let { setPackage(it) }
+        }
+        val sent = runCatching { context.sendBroadcast(intent) }.isSuccess
+        if (sent) {
+            lastShowX = bx; lastShowY = by; lastShowW = bw; lastShowH = bh
+            lastShowPkg = pkg
+            lastShowAtMs = now
+            floatBroadcastShown = true
+        }
+        return sent
     }
 
     /** 悬浮地图几何（边界格式 x1,y1,x2,y2），未显示过返回 null */
@@ -534,26 +592,47 @@ class MapHost(
 
     fun closeFloat() {
         floatEnabled = false
+        floatBroadcastShown = false
+        cancelQueuedShow()
         val closeAction = current?.floatCloseAction ?: return
+        // 关闭广播每次都发：NUI 进程重启后自身状态已重置，但高德浮窗可能仍在，必须能关掉
         runCatching { context.sendBroadcast(Intent(closeAction)) }
     }
 
-    fun showFloat() {
+    private fun cancelQueuedShow() {
+        showQueued = false
+        showForced = false
+        container.removeCallbacks(showNowRunnable)
+    }
+
+    /** 合并后的真正发送动作：取最新几何发一次 showmap，并安排浮窗置顶/圆角遮罩重压 */
+    private val showNowRunnable: Runnable = Runnable {
+        showQueued = false
+        val forced = showForced
+        showForced = false
+        if (!floatEnabled) return@Runnable
+        val src = current?.takeIf { it.type == MapSource.Type.EXTERNAL_FLOAT } ?: return@Runnable
+        primeCache()
+        val sent = sendFloatBroadcast(src.floatShowAction, forced)
+        // 几何未变被去重跳过：浮窗没有重建/重定位，无需再重复置顶与补遮罩
+        if (!sent) return@Runnable
+        container.postDelayed({ onFloatShown?.invoke() }, 600)
+        // 高德浮窗是后加的 APPLICATION_OVERLAY，会盖在竖条之上。
+        // 延迟把竖条置顶回来，保证可点（避开拖动中：dividerTouching/AdjustActive 守卫）。
+        container.postDelayed({
+            if (dividerShown && !dividerTouching && !dividerAdjustActive) bringDividerToFront()
+            // 浮窗重建后圆角遮罩也要重新 addView 才能压在上面
+            if (cornerMaskVisible) applyCornerMask(force = true)
+        }, 800)
+    }
+
+    fun showFloat(force: Boolean = false) {
         floatEnabled = true
-        current?.takeIf { it.type == MapSource.Type.EXTERNAL_FLOAT }
-            ?.let { src ->
-                container.post {
-                    sendFloatBroadcast(src.floatShowAction)
-                    container.postDelayed({ onFloatShown?.invoke() }, 600)
-                    // 高德浮窗是后加的 APPLICATION_OVERLAY，会盖在竖条之上。
-                    // 延迟把竖条置顶回来，保证可点（避开拖动中：dividerTouching/AdjustActive 守卫）。
-                    container.postDelayed({
-                        if (dividerShown && !dividerTouching && !dividerAdjustActive) bringDividerToFront()
-                        // 浮窗重建后圆角遮罩也要重新 addView 才能压在上面
-                        if (cornerMaskVisible) applyCornerMask(force = true)
-                    }, 800)
-                }
-            }
+        if (current?.type != MapSource.Type.EXTERNAL_FLOAT) return
+        if (force) showForced = true
+        if (showQueued) return
+        showQueued = true
+        container.postDelayed(showNowRunnable, showCoalesceMs)
     }
 
     fun onResume() {
@@ -565,8 +644,13 @@ class MapHost(
         // no-op
     }
 
-    /** 回到桌面：恢复高德悬浮窗（保留简单实现，兼容调用方） */
+    /** 回到桌面：恢复高德悬浮窗（保留简单实现，兼容调用方）。
+     *  自动启动地图回桌面的恢复广播由 goBackToNui 延迟统一发送，这里跳过避免连发两次。 */
     fun resumeFloat() {
+        if (pendingReturnShow) {
+            floatEnabled = true
+            return
+        }
         showFloat()
     }
 
@@ -581,6 +665,7 @@ class MapHost(
 
     fun onDestroy() {
         Log.d(TAG, "onDestroy")
+        cancelQueuedShow()
         removeCornerMask()
         destroyMap()
     }
@@ -937,13 +1022,21 @@ class MapHost(
 
     /** 与分割条同步显隐：非 page0 / 失焦 / 对话框时不显示（遮罩会压在壁纸或图标上） */
     private fun setCornerMaskVisible(visible: Boolean) {
+        // 状态未变时（切页/回前台会重复调用 setDividerVisible）不做 force 移除+重加：
+        // 反复重建 8 个遮罩窗本身就会让四角闪一下。只补建缺失的角窗/更新位置；
+        // 浮窗重建后的置顶由 showFloat 的 800ms 延迟统一处理。
+        if (cornerMaskVisible == visible) {
+            if (visible) applyCornerMask()
+            return
+        }
         cornerMaskVisible = visible
         if (!visible) { removeCornerMask(); return }
         // force：外部地图可能刚重建过浮窗（新窗口在遮罩之上），必须 remove+add 才能重新置顶
         applyCornerMask(force = true)
-        // mapPanel 可能尚未布局完成（cachedX/cachedW 仍为 0），与分割条一致做延迟重试
-        mapPanel.postDelayed({ if (cornerMaskVisible) applyCornerMask(force = true) }, 500)
-        mapPanel.postDelayed({ if (cornerMaskVisible) applyCornerMask(force = true) }, 1500)
+        // mapPanel 可能尚未布局完成（cachedX/cachedW 仍为 0），与分割条一致做延迟重试。
+        // 非 force：此时浮窗尚未重建（回桌面后由 showFloat 负责置顶），只需定位/补建。
+        mapPanel.postDelayed({ if (cornerMaskVisible) applyCornerMask() }, 500)
+        mapPanel.postDelayed({ if (cornerMaskVisible) applyCornerMask() }, 1500)
     }
 
     private fun removeCornerMask() {
