@@ -982,6 +982,21 @@ class MusicHost(
         }
     }
 
+    /** 跳转到指定播放位置（毫秒） */
+    fun seekTo(ms: Long) {
+        val c = currentController ?: return
+        safe { c.transportControls.seekTo(ms) }
+    }
+
+    /** 当前会话播放进度：(已播毫秒, 总时长毫秒)。无会话或时长未知返回 null（供负一屏进度条使用）。 */
+    fun playbackProgress(): Pair<Long, Long>? {
+        val c = currentController ?: return null
+        val dur = c.metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
+        if (dur <= 0L) return null
+        val pos = c.playbackState?.position ?: return null
+        return pos.coerceIn(0L, dur) to dur
+    }
+
     /** 重新 addView 把歌词窗提到最上层（盖住高德浮窗） */
     fun bringLyricFloatToFront() {
         val view = lyricFloatView ?: return

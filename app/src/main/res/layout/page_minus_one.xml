@@ -150,30 +150,80 @@
                 android:scaleType="centerCrop"
                 android:contentDescription="封面" />
 
+            <!-- 歌名与歌手并列一行（baseline 对齐），只占一行高度；右侧进度区 weight=1 随文字长度伸缩 -->
             <LinearLayout
-                android:layout_width="0dp"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="vertical"
-                android:layout_marginEnd="8dp">
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginEnd="18dp">
 
                 <TextView
                     android:id="@+id/minusSong"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:maxWidth="280dp"
                     android:maxLines="1"
                     android:ellipsize="end"
-                    android:textSize="15sp"
+                    android:textSize="28sp"
+                    android:textStyle="bold"
                     tools:text="歌曲名" />
 
                 <TextView
                     android:id="@+id/minusArtist"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:maxWidth="160dp"
                     android:maxLines="1"
                     android:ellipsize="end"
-                    android:textSize="12sp"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
                     tools:text="歌手" />
+            </LinearLayout>
+
+            <!-- 中段留白利用：已播时间 + 横向播放进度条 + 总时长（占据歌名到播放键之间的空余宽度） -->
+            <LinearLayout
+                android:id="@+id/minusProgressArea"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="14dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/minusPosTime"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:layout_marginEnd="10dp"
+                    android:textSize="15sp"
+                    android:textStyle="bold"
+                    tools:text="00:32" />
+
+                <SeekBar
+                    android:id="@+id/minusProgress"
+                    android:layout_width="0dp"
+                    android:layout_height="44dp"
+                    android:layout_weight="1"
+                    android:max="1000"
+                    android:progress="0"
+                    android:paddingTop="19dp"
+                    android:paddingBottom="19dp"
+                    android:splitTrack="false"
+                    android:progressDrawable="@drawable/seek_minus_track"
+                    android:thumb="@drawable/seek_minus_thumb" />
+
+                <TextView
+                    android:id="@+id/minusDurTime"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:layout_marginStart="10dp"
+                    android:textSize="15sp"
+                    android:textStyle="bold"
+                    tools:text="03:15" />
             </LinearLayout>
 
             <ImageView

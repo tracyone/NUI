@@ -124,6 +124,13 @@ class MainActivity : AppCompatActivity() {
     private var minusBtnPlay: ImageView? = null
     private var minusRoot: View? = null
     private var minusBigClock: View? = null
+    /** 负一屏横条播放进度刷新（每秒一次，仅在负一屏可见时更新） */
+    private val minusProgressHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var minusProgressTick: Runnable? = null
+    /** 负一屏进度条是否正在被用户拖动（拖动期间暂停自动刷新） */
+    private var minusSeeking = false
+    /** 负一屏当前会话总时长（毫秒），拖动结束按比例 seek */
+    private var minusDurationMs = 0L
     // 闲置自动进入负一屏（类似屏保）：用户无操作达设定分钟后切到负一屏
     private val autoMinusHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var autoMinusRunnable: Runnable? = null
@@ -302,6 +309,98 @@ class MainActivity : AppCompatActivity() {
         if (::musicHost.isInitialized) musicHost.refresh()
         // 大号时钟等负一屏偏好
         applyMinusPrefs()
+        // 横条播放进度：进入负一屏立即刷新一次，之后每秒轮询
+        startMinusProgressTick()
+        updateMinusProgress()
+        // 进度条支持拖动/点按跳转
+        minusRoot?.findViewById<android.widget.SeekBar>(R.id.minusProgress)?.apply {
+            // 按住进度条时禁止 ViewPager2 横向拦截，否则拖动会被翻页手势抢走
+            setOnTouchListener { v, e ->
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_DOWN ->
+                        v.parent?.requestDisallowInterceptTouchEvent(true)
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                        v.parent?.requestDisallowInterceptTouchEvent(false)
+                }
+                false
+            }
+            setOnSeekBarChangeListener(
+                object : android.widget.SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(
+                        sb: android.widget.SeekBar?,
+                        value: Int,
+                        fromUser: Boolean,
+                    ) {
+                        if (!fromUser) return
+                        minusSeeking = true
+                        minusRoot?.findViewById<TextView>(R.id.minusPosTime)?.text =
+                            formatPlayTime(minusDurationMs * value / 1000L)
+                    }
+
+                    override fun onStartTrackingTouch(sb: android.widget.SeekBar?) {
+                        minusSeeking = true
+                    }
+
+                    override fun onStopTrackingTouch(sb: android.widget.SeekBar?) {
+                        val dur = minusDurationMs
+                        if (dur > 0L && ::musicHost.isInitialized) {
+                            musicHost.seekTo(dur * (sb?.progress ?: 0) / 1000L)
+                        }
+                        minusSeeking = false
+                    }
+                }
+            )
+        }
+    }
+
+    /** 启动负一屏进度轮询（幂等：Activity 重建时复用同一个 runnable） */
+    private fun startMinusProgressTick() {
+        if (minusProgressTick != null) return
+        val r = object : Runnable {
+            override fun run() {
+                updateMinusProgress()
+                minusProgressHandler.postDelayed(this, 1000L)
+            }
+        }
+        minusProgressTick = r
+        minusProgressHandler.post(r)
+    }
+
+    /** 刷新负一屏横条进度条与已播/总时长（负一屏不可见时不做事，避免无谓刷新） */
+    private fun updateMinusProgress() {
+        val root = minusRoot ?: return
+        if (!root.isShown) return
+        val bar = root.findViewById<android.widget.SeekBar>(R.id.minusProgress) ?: return
+        val posTv = root.findViewById<TextView>(R.id.minusPosTime) ?: return
+        val durTv = root.findViewById<TextView>(R.id.minusDurTime) ?: return
+        val progress = if (::musicHost.isInitialized) musicHost.playbackProgress() else null
+        if (progress == null) {
+            minusDurationMs = 0L
+            if (!minusSeeking) {
+                bar.progress = 0
+                posTv.text = "00:00"
+            }
+            durTv.text = "00:00"
+        } else {
+            val (pos, dur) = progress
+            minusDurationMs = dur
+            durTv.text = formatPlayTime(dur)
+            // 用户正在拖动时不要覆盖其预览位置
+            if (!minusSeeking) {
+                bar.progress = ((pos * 1000L) / dur).toInt().coerceIn(0, 1000)
+                posTv.text = formatPlayTime(pos)
+            }
+        }
+    }
+
+    /** 毫秒 → mm:ss（超过 1 小时用 h:mm:ss） */
+    private fun formatPlayTime(ms: Long): String {
+        val totalSec = (ms / 1000L).coerceAtLeast(0L)
+        val h = totalSec / 3600
+        val m = (totalSec % 3600) / 60
+        val s = totalSec % 60
+        return if (h > 0) String.format("%d:%02d:%02d", h, m, s)
+        else String.format("%02d:%02d", m, s)
     }
 
     /** 负一屏壁纸：follow=跟随桌面（root 壁纸透出，根背景透明）/ image=独立静态图 / video=独立视频。
@@ -362,15 +461,26 @@ class MainActivity : AppCompatActivity() {
         }
         // 低栏变透明后文字加淡阴影，保证亮壁纸上可读
         val shadow = if (dark) 0x66000000.toInt() else 0x40000000.toInt()
+        val posTv = minusRoot?.findViewById<TextView>(R.id.minusPosTime)
+        val durTv = minusRoot?.findViewById<TextView>(R.id.minusDurTime)
         for (tv in listOfNotNull(
-            minusSong, minusArtist,
+            minusSong, minusArtist, posTv, durTv,
             minusRoot?.findViewById<TextView>(R.id.minusTime),
             minusRoot?.findViewById<TextView>(R.id.minusDate),
         )) {
             tv.setShadowLayer(4f, 0f, 2f, shadow)
         }
         minusSong?.setTextColor(pal.textPrimary)
-        minusArtist?.setTextColor(pal.textSecondary)
+        // 歌手同用主文字色：次级灰在半透横条+亮壁纸上对比不足（与日期同处理）
+        minusArtist?.setTextColor(pal.textPrimary)
+        posTv?.setTextColor(pal.textPrimary)
+        durTv?.setTextColor(pal.textPrimary)
+        // 播放进度：绿色进度 + 半透明轨道（轨道要够明显，否则透亮壁纸上几乎看不见）
+        minusRoot?.findViewById<android.widget.ProgressBar>(R.id.minusProgress)?.apply {
+            progressTintList = ColorStateList.valueOf(0xFF34C759.toInt())
+            progressBackgroundTintList =
+                ColorStateList.valueOf(if (dark) 0x77FFFFFF.toInt() else 0x55000000.toInt())
+        }
         minusRoot?.findViewById<TextView>(R.id.minusTime)?.setTextColor(pal.textPrimary)
         // 日期与时间同色同加粗（用户反馈次级灰看不清）
         minusRoot?.findViewById<TextView>(R.id.minusDate)?.setTextColor(pal.textPrimary)
@@ -1063,6 +1173,8 @@ class MainActivity : AppCompatActivity() {
         if (::weatherLayer.isInitialized) weatherLayer.removeCallbacks(weatherLayerFadeRunnable)
         if (::mapHost.isInitialized) { mapHost.hideDivider(); mapHost.onDestroy() }
         if (::musicHost.isInitialized) musicHost.onDestroy()
+        minusProgressTick?.let { minusProgressHandler.removeCallbacks(it) }
+        minusProgressTick = null
         super.onDestroy()
     }
 
@@ -1541,6 +1653,8 @@ class MainActivity : AppCompatActivity() {
             minusBtnPlay?.setImageResource(
                 if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
             )
+            // 切歌/暂停后立即刷新进度，不等下一次每秒轮询
+            updateMinusProgress()
         }
         // 负一屏横条歌词：当前行（下一行并入）
         musicHost.start()
