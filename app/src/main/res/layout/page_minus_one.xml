@@ -71,6 +71,19 @@
             android:shadowColor="#4D000000"
             android:shadowRadius="12"
             android:shadowDy="2" />
+
+        <!-- 农历 + 节日 + 当日节气（例：农历九月廿九 · 立冬），由 LunarCalendar 计算 -->
+        <TextView
+            android:id="@+id/minusLunar"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textColor="#CCFFFFFF"
+            android:textSize="26sp"
+            android:shadowColor="#4D000000"
+            android:shadowRadius="12"
+            android:shadowDy="2"
+            tools:text="农历九月廿九 · 立冬" />
     </LinearLayout>
 
     <!-- 底部扁平横条：背景色/字体色由代码按外观设置（与 dock 一致） -->
@@ -263,31 +276,6 @@
                 android:src="@android:drawable/ic_media_next" />
         </LinearLayout>
 
-        <!-- 右：时间 + 日期（扁平横条内不显示天气） -->
-        <LinearLayout
-            android:id="@+id/minusClockArea"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:gravity="end">
-
-            <TextClock
-                android:id="@+id/minusTime"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:format12Hour="HH:mm"
-                android:format24Hour="HH:mm"
-                android:textSize="26sp"
-                android:textStyle="bold" />
-
-            <TextClock
-                android:id="@+id/minusDate"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:format12Hour="M月d日 EEE"
-                android:format24Hour="M月d日 EEE"
-                android:textSize="13sp"
-                android:textStyle="bold" />
-        </LinearLayout>
+        <!-- 右：底栏不再显示时间（大时钟已有时刻/日期），让进度条占满剩余宽度 -->
     </LinearLayout>
 </FrameLayout>

@@ -129,6 +129,8 @@ class MainActivity : AppCompatActivity() {
     private var minusProgressTick: Runnable? = null
     /** 负一屏进度条是否正在被用户拖动（拖动期间暂停自动刷新） */
     private var minusSeeking = false
+    /** 已展示的农历日期 key（"y-m-d"），跨天才重算农历/节气文本 */
+    private var lastLunarKey = ""
     /** 负一屏当前会话总时长（毫秒），拖动结束按比例 seek */
     private var minusDurationMs = 0L
     // 闲置自动进入负一屏（类似屏保）：用户无操作达设定分钟后切到负一屏
@@ -310,6 +312,8 @@ class MainActivity : AppCompatActivity() {
         // 大号时钟等负一屏偏好
         applyMinusPrefs()
         // 横条播放进度：进入负一屏立即刷新一次，之后每秒轮询
+        lastLunarKey = ""
+        updateMinusLunar()
         startMinusProgressTick()
         updateMinusProgress()
         // 进度条支持拖动/点按跳转
@@ -371,6 +375,8 @@ class MainActivity : AppCompatActivity() {
         val root = minusRoot ?: return
         if (!root.isShown) return
         val bar = root.findViewById<android.widget.SeekBar>(R.id.minusProgress) ?: return
+        // 农历/节日/节气按天刷新（每秒 tick 里做日期比较，跨天才真正重算）
+        updateMinusLunar()
         val posTv = root.findViewById<TextView>(R.id.minusPosTime) ?: return
         val durTv = root.findViewById<TextView>(R.id.minusDurTime) ?: return
         val progress = if (::musicHost.isInitialized) musicHost.playbackProgress() else null
@@ -465,8 +471,6 @@ class MainActivity : AppCompatActivity() {
         val durTv = minusRoot?.findViewById<TextView>(R.id.minusDurTime)
         for (tv in listOfNotNull(
             minusSong, minusArtist, posTv, durTv,
-            minusRoot?.findViewById<TextView>(R.id.minusTime),
-            minusRoot?.findViewById<TextView>(R.id.minusDate),
         )) {
             tv.setShadowLayer(4f, 0f, 2f, shadow)
         }
@@ -481,9 +485,6 @@ class MainActivity : AppCompatActivity() {
             progressBackgroundTintList =
                 ColorStateList.valueOf(if (dark) 0x77FFFFFF.toInt() else 0x55000000.toInt())
         }
-        minusRoot?.findViewById<TextView>(R.id.minusTime)?.setTextColor(pal.textPrimary)
-        // 日期与时间同色同加粗（用户反馈次级灰看不清）
-        minusRoot?.findViewById<TextView>(R.id.minusDate)?.setTextColor(pal.textPrimary)
         // 三颗导航彩色圆内的图标：与 page0 运行时一致染 dockIconTint
         val tint = ColorStateList.valueOf(pal.dockIconTint)
         for (id in intArrayOf(R.id.shortcutNavHome, R.id.shortcutNavCompany, R.id.shortcutNavFavorite)) {
@@ -507,7 +508,8 @@ class MainActivity : AppCompatActivity() {
     private fun applyBigClockGlass() {
         val timeTv = minusBigClock?.findViewById<TextView>(R.id.minusBigTime)
         val dateTv = minusBigClock?.findViewById<TextView>(R.id.minusBigDate)
-        for (tv in listOfNotNull(timeTv, dateTv)) {
+        val lunarTv = minusBigClock?.findViewById<TextView>(R.id.minusLunar)
+        for (tv in listOfNotNull(timeTv, dateTv, lunarTv)) {
             val p: android.graphics.Paint = tv.paint
             p.strokeWidth = if (tv === timeTv) 3f else 2f
             p.style = android.graphics.Paint.Style.FILL_AND_STROKE
@@ -521,6 +523,19 @@ class MainActivity : AppCompatActivity() {
             tv.setShadowLayer(6f, 0f, 2f, 0x26000000.toInt())
             tv.invalidate()
         }
+    }
+
+    /** 刷新大时钟农历/节日/节气行（按天变化，跨天时才重算） */
+    private fun updateMinusLunar() {
+        val tv = minusRoot?.findViewById<TextView>(R.id.minusLunar) ?: return
+        val c = java.util.Calendar.getInstance()
+        val y = c.get(java.util.Calendar.YEAR)
+        val m = c.get(java.util.Calendar.MONTH) + 1
+        val d = c.get(java.util.Calendar.DAY_OF_MONTH)
+        val key = "$y-$m-$d"
+        if (key == lastLunarKey) return
+        lastLunarKey = key
+        tv.text = LunarCalendar.describe(y, m, d)
     }
 
     /** （重新）安排闲置自动进入负一屏；开关关、已在负一屏、或导航中时不安排。
