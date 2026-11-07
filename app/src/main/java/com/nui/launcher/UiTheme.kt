@@ -24,6 +24,27 @@ object UiTheme {
     private const val KEY_AUTO_MINUS = "auto_minus"
     private const val KEY_AUTO_MINUS_MINUTES = "auto_minus_minutes" // 旧：分钟存储（兼容读取迁移）
     private const val KEY_AUTO_MINUS_SECONDS = "auto_minus_seconds" // 新：秒存储，支持 30 秒起步
+    private const val KEY_MINUS_CLOCK_TX = "minus_clock_tx"          // 大时钟相对默认位置的偏移（dp）
+    private const val KEY_MINUS_CLOCK_TY = "minus_clock_ty"
+    private const val KEY_MINUS_CLOCK_SCALE = "minus_clock_scale"    // 大时钟字号缩放（1.0=默认）
+
+    /** 负一屏大时钟的位置偏移（dp）与字号缩放：[0]=tx、[1]=ty、[2]=scale */
+    fun minusClockTransform(ctx: Context): FloatArray {
+        val sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return floatArrayOf(
+            sp.getFloat(KEY_MINUS_CLOCK_TX, 0f),
+            sp.getFloat(KEY_MINUS_CLOCK_TY, 0f),
+            sp.getFloat(KEY_MINUS_CLOCK_SCALE, 1f).coerceIn(0.55f, 2f),
+        )
+    }
+
+    fun setMinusClockTransform(ctx: Context, txDp: Float, tyDp: Float, scale: Float) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putFloat(KEY_MINUS_CLOCK_TX, txDp)
+            .putFloat(KEY_MINUS_CLOCK_TY, tyDp)
+            .putFloat(KEY_MINUS_CLOCK_SCALE, scale.coerceIn(0.55f, 2f))
+            .apply()
+    }
 
     /** 界面 DPI（应用内覆盖，0=跟随系统）。车机 ROM 常报 240dpi 导致 NUI 界面文字偏大/放不下，
      *  通过降低 dpi 让所有 dp/sp 按更小比例渲染，等效"显示缩放"，从根本上解决文字过大。 */

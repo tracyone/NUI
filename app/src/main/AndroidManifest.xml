@@ -25,6 +25,13 @@
         <package android:name="com.kugou.android.lite" />
         <package android:name="com.spotify.music" />
         <package android:name="com.android.mediacenter" />
+        <!-- 负一屏大时钟点按打开日历：Android 11+ 需声明可见性 -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.APP_CALENDAR" />
+        </intent>
+        <package android:name="com.android.calendar" />
+        <package android:name="com.google.android.calendar" />
     </queries>
 
     <application

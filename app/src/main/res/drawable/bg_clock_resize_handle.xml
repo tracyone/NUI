@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- iOS 风格：右下角灰色圆角 L 形把手（与外框细白线明显不同，一眼看出这里能拖拽缩放）。
+     两臂中线落在 viewport 的 47/56 处，MainActivity 依此把臂中线对到白框线上。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="56dp"
+    android:height="56dp"
+    android:viewportWidth="56"
+    android:viewportHeight="56">
+    <path
+        android:pathData="M47,13 L47,47 L13,47"
+        android:strokeWidth="13"
+        android:strokeColor="#D9B4B4B4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

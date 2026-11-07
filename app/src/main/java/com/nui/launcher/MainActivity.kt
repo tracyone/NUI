@@ -124,6 +124,35 @@ class MainActivity : AppCompatActivity() {
     private var minusBtnPlay: ImageView? = null
     private var minusRoot: View? = null
     private var minusBigClock: View? = null
+    /** 大时钟手势：点按开日历 / 长按不松手拖动移动 / 长按松手进入调大小 */
+    private val clockHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var clockLongPress: Runnable? = null
+    private var clockLongPressed = false
+    /** 长按后手的位移是否已超过 touchSlop（区分"拖动了"还是"原地点按"） */
+    private var clockMoved = false
+    private var clockDownRawX = 0f
+    private var clockDownRawY = 0f
+    private var clockStartTx = 0f
+    private var clockStartTy = 0f
+    /** 长按松手后进入"调整大小"模式：拖动右下角圆点缩放，点按完成 */
+    private var clockResizing = false
+    /** 调整大小时叠加在大时钟外沿的提示外框 */
+    private var clockEditFrame: View? = null
+    /** 外框右下角的拖拽把手（明显的"可缩放"标记） */
+    private var clockEditHandle: View? = null
+    /** 调整模式的全屏遮罩：点按时钟以外任意位置即保存并退出 */
+    private var clockEditScrim: View? = null
+    private var clockHandleDownX = 0f
+    private var clockHandleDownY = 0f
+    private var clockHandleStartScale = 1f
+    private var clockHandleStartW = 0
+    private var clockHandleStartH = 0
+    /** 大时钟当前缩放（1.0 = XML 默认字号） */
+    private var clockScale = 1f
+    /** XML 中的原始字号（sp），首次绑定记录，缩放时以此基准乘系数 */
+    private var clockBaseTimeSp = 0f
+    private var clockBaseDateSp = 0f
+    private var clockBaseLunarSp = 0f
     /** 负一屏横条播放进度刷新（每秒一次，仅在负一屏可见时更新） */
     private val minusProgressHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var minusProgressTick: Runnable? = null
@@ -280,6 +309,13 @@ class MainActivity : AppCompatActivity() {
         minusBar = v.findViewById(R.id.minusBar)
         minusBtnPlay = v.findViewById(R.id.btnMinusPlay)
         minusBigClock = v.findViewById(R.id.minusBigClock)
+        // 记录 XML 原始字号（缩放以此为基准，避免反复绑定时叠加）
+        if (clockBaseTimeSp <= 0f) {
+            val sd = resources.displayMetrics.scaledDensity
+            clockBaseTimeSp = v.findViewById<TextView>(R.id.minusBigTime)?.textSize?.div(sd) ?: 0f
+            clockBaseDateSp = v.findViewById<TextView>(R.id.minusBigDate)?.textSize?.div(sd) ?: 0f
+            clockBaseLunarSp = v.findViewById<TextView>(R.id.minusLunar)?.textSize?.div(sd) ?: 0f
+        }
         // 音乐控制按钮
         v.findViewById<View>(R.id.btnMinusPrev).setOnClickListener {
             if (::musicHost.isInitialized) musicHost.prev()
@@ -311,6 +347,10 @@ class MainActivity : AppCompatActivity() {
         if (::musicHost.isInitialized) musicHost.refresh()
         // 大号时钟等负一屏偏好
         applyMinusPrefs()
+        // 大时钟手势：点按开日历、长按拖动移动、长按松手调大小
+        setupClockGestures()
+        // 调整大小时的提示外框（叠在页面上层，跟随时钟位置/尺寸）
+        setupClockEditFrame(v)
         // 横条播放进度：进入负一屏立即刷新一次，之后每秒轮询
         lastLunarKey = ""
         updateMinusLunar()
@@ -497,11 +537,346 @@ class MainActivity : AppCompatActivity() {
         minusRoot?.findViewById<ImageView>(R.id.btnMinusNext)?.imageTintList = whiteTint
     }
 
-    /** 应用负一屏偏好：大号时钟玻璃效果 + 重置闲置自动进入计时 */
+    /** 应用负一屏偏好：大号时钟玻璃效果 + 恢复位置/字号 + 重置闲置自动进入计时 */
     private fun applyMinusPrefs() {
         minusBigClock?.visibility = View.VISIBLE
         applyBigClockGlass()
+        // 恢复上次拖动的位置与字号
+        val (txDp, tyDp, scale) = UiTheme.minusClockTransform(this)
+        val d = resources.displayMetrics.density
+        minusBigClock?.translationX = txDp * d
+        minusBigClock?.translationY = tyDp * d
+        applyClockScale(scale)
+        minusBigClock?.let { c -> c.post { clampClockInsideParent(c) } }
         setupAutoMinusTimer()
+    }
+
+    /**
+     * 大时钟手势：
+     * - 点按（未长按）→ 打开日历 App；
+     * - 长按不松手后拖动 → 移动位置，松手保存；
+     * - 长按后原地松手 → 进入"调整大小"模式：时钟外出现提示框，拖动框的边缘缩放，点按完成。
+     * 长按触发前移动（如想翻页）不拦截，交给 ViewPager2。
+     */
+    private fun setupClockGestures() {
+        val clock = minusBigClock ?: return
+        clock.isClickable = true
+        val slop = ViewConfiguration.get(this).scaledTouchSlop
+        clock.setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    v.parent?.requestDisallowInterceptTouchEvent(false)
+                    clockDownRawX = e.rawX
+                    clockDownRawY = e.rawY
+                    clockStartTx = v.translationX
+                    clockStartTy = v.translationY
+                    clockMoved = false
+                    clockLongPressed = false
+                    if (!clockResizing) {
+                        val r = Runnable {
+                            clockLongPressed = true
+                            // 长按触发即亮出编辑外框（明确告诉用户"现在可以拖了"）
+                            showClockEditFrame()
+                            // 长按后自己接管手势，避免 ViewPager2 把拖动当成翻页
+                            v.parent?.requestDisallowInterceptTouchEvent(true)
+                            v.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                        }
+                        clockLongPress = r
+                        clockHandler.postDelayed(r, ViewConfiguration.getLongPressTimeout().toLong())
+                    }
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (clockResizing) {
+                        // 调整模式：只有右下角圆点会缩放，点在时钟上不算拖动
+                        true
+                    } else if (clockLongPressed) {
+                        val dx = e.rawX - clockDownRawX
+                        val dy = e.rawY - clockDownRawY
+                        if (!clockMoved && (kotlin.math.abs(dx) > slop || kotlin.math.abs(dy) > slop)) {
+                            clockMoved = true
+                        }
+                        v.translationX = clockStartTx + dx
+                        v.translationY = clockStartTy + dy
+                        clampClockInsideParent(v)
+                        syncClockEditFrame()
+                        true
+                    } else {
+                        // 长按触发前就移动了（例如想翻页）：撤销长按并把滑动还给 ViewPager2
+                        if (kotlin.math.abs(e.rawX - clockDownRawX) > slop ||
+                            kotlin.math.abs(e.rawY - clockDownRawY) > slop
+                        ) {
+                            cancelClockLongPress()
+                        }
+                        false
+                    }
+                }
+                MotionEvent.ACTION_UP -> {
+                    cancelClockLongPress()
+                    if (clockResizing) {
+                        v.parent?.requestDisallowInterceptTouchEvent(false)
+                        saveClockTransform()
+                        // 调整模式里点按（没拖动）= 完成
+                        if (!clockMoved) exitClockResizeMode(true)
+                    } else if (clockLongPressed) {
+                        v.parent?.requestDisallowInterceptTouchEvent(false)
+                        if (clockMoved) {
+                            saveClockTransform()
+                            hideClockEditFrame()
+                            NuiToast.show(this@MainActivity, "时钟位置已保存")
+                        } else {
+                            // 长按后原地松手 → 出现外框，进入调整大小模式
+                            enterClockResizeMode()
+                        }
+                    } else {
+                        openCalendarApp()
+                    }
+                    clockLongPressed = false
+                    clockMoved = false
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    cancelClockLongPress()
+                    v.parent?.requestDisallowInterceptTouchEvent(false)
+                    if (clockResizing) {
+                        saveClockTransform()
+                        exitClockResizeMode(false)
+                    } else {
+                        if (clockMoved) saveClockTransform()
+                        // 长按后手势被系统打断：收起编辑外框，避免留在界面上
+                        hideClockEditFrame()
+                    }
+                    clockLongPressed = false
+                    clockMoved = false
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    /** 右下角圆点的拖拽：以时钟左上角为锚点，往右下拉变大、往左上收变小 */
+    private fun setupClockResizeHandle(handle: View) {
+        handle.setOnTouchListener { _, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    // 圆点拖动时禁止 ViewPager2 拦截，避免被当成翻页
+                    handle.parent?.requestDisallowInterceptTouchEvent(true)
+                    clockHandleDownX = e.rawX
+                    clockHandleDownY = e.rawY
+                    clockHandleStartScale = clockScale
+                    clockHandleStartW = minusBigClock?.width ?: 0
+                    clockHandleStartH = minusBigClock?.height ?: 0
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (clockHandleStartW > 0 && clockHandleStartH > 0) {
+                        val dx = e.rawX - clockHandleDownX
+                        val dy = e.rawY - clockHandleDownY
+                        // 横/纵位移按宽高比例取平均，再乘到起始倍率
+                        val ratio = 1f + (dx / clockHandleStartW + dy / clockHandleStartH) / 2f
+                        applyClockScale(clockHandleStartScale * ratio)
+                        syncClockEditFrame()
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    handle.parent?.requestDisallowInterceptTouchEvent(false)
+                    saveClockTransform()
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    private fun enterClockResizeMode() {
+        clockResizing = true
+        showClockEditFrame()
+        NuiToast.show(this@MainActivity, "拖动右下角把手调整大小，点按完成")
+    }
+
+    private fun exitClockResizeMode(saved: Boolean) {
+        clockResizing = false
+        hideClockEditFrame()
+        if (saved) NuiToast.show(this@MainActivity, "时钟大小已保存")
+    }
+
+    /** 创建全屏遮罩 + 调整外框 + 右下角拖拽把手（叠在页面最上层） */
+    private fun setupClockEditFrame(root: View) {
+        val page = root as? ViewGroup ?: return
+        clockEditScrim?.let { (it.parent as? ViewGroup)?.removeView(it) }
+        clockEditFrame?.let { (it.parent as? ViewGroup)?.removeView(it) }
+        clockEditHandle?.let { (it.parent as? ViewGroup)?.removeView(it) }
+        // 遮罩：点按时钟以外的任何位置即保存并退出调整模式（符合直觉）
+        val scrim = View(this).apply {
+            background = android.graphics.drawable.ColorDrawable(0x22000000)
+            visibility = View.GONE
+            setOnTouchListener { sv, e ->
+                if (e.actionMasked == MotionEvent.ACTION_DOWN) {
+                    // 调整模式下遮罩独占手势，避免横向滑动被 ViewPager2 当成翻页
+                    sv.parent?.requestDisallowInterceptTouchEvent(true)
+                }
+                if (e.actionMasked == MotionEvent.ACTION_UP) {
+                    sv.parent?.requestDisallowInterceptTouchEvent(false)
+                    saveClockTransform()
+                    exitClockResizeMode(true)
+                }
+                true
+            }
+        }
+        page.addView(
+            scrim,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+        clockEditScrim = scrim
+        val f = View(this).apply {
+            background = getDrawable(R.drawable.bg_clock_edit_frame)
+            visibility = View.GONE
+        }
+        page.addView(
+            f,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP or Gravity.START,
+            )
+        )
+        clockEditFrame = f
+        // 把手尺寸（iOS 风格灰色 L 形，比外框线粗、颜色明显不同，一眼看出这里能拖）
+        val handleSize = (56 * resources.displayMetrics.density).toInt()
+        val h = View(this).apply {
+            background = getDrawable(R.drawable.bg_clock_resize_handle)
+            visibility = View.GONE
+        }
+        page.addView(
+            h,
+            FrameLayout.LayoutParams(handleSize, handleSize, Gravity.TOP or Gravity.START)
+        )
+        clockEditHandle = h
+        setupClockResizeHandle(h)
+        // 字号缩放会改变时钟尺寸，布局变化后外框跟随
+        minusBigClock?.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            if (clockResizing) syncClockEditFrame()
+        }
+    }
+
+    private fun showClockEditFrame() {
+        val f = clockEditFrame ?: return
+        syncClockEditFrame()
+        clockEditScrim?.visibility = View.VISIBLE
+        f.visibility = View.VISIBLE
+        clockEditHandle?.visibility = View.VISIBLE
+    }
+
+    private fun hideClockEditFrame() {
+        clockEditScrim?.visibility = View.GONE
+        clockEditFrame?.visibility = View.GONE
+        clockEditHandle?.visibility = View.GONE
+    }
+
+    /** 外框与右下角把手跟随时钟（外框向外扩 8dp，把手贴在外框右下角、向外偏 4dp） */
+    private fun syncClockEditFrame() {
+        val clock = minusBigClock ?: return
+        val f = clockEditFrame ?: return
+        val parent = clock.parent as? View ?: return
+        if (parent.width <= 0) return
+        val inset = (8 * resources.displayMetrics.density).toInt()
+        val left = (clock.left + clock.translationX - inset).toInt()
+        val top = (clock.top + clock.translationY - inset).toInt()
+        val w = clock.width + inset * 2
+        val h = clock.height + inset * 2
+        val lp = f.layoutParams as? FrameLayout.LayoutParams
+        if (lp != null && (lp.leftMargin != left || lp.topMargin != top ||
+                lp.width != w || lp.height != h)
+        ) {
+            lp.leftMargin = left
+            lp.topMargin = top
+            lp.width = w
+            lp.height = h
+            f.layoutParams = lp
+        }
+        val hp = clockEditHandle?.layoutParams as? FrameLayout.LayoutParams ?: return
+        // L 形两臂中线（图内 47/56 处）压在白框线上，外拐角略突出于白框右下角（iOS 编辑界面样式）
+        val armCenter = hp.width * 47f / 56f
+        val hx = (left + w - armCenter).toInt()
+        val hy = (top + h - armCenter).toInt()
+        if (hp.leftMargin != hx || hp.topMargin != hy) {
+            hp.leftMargin = hx
+            hp.topMargin = hy
+            clockEditHandle?.layoutParams = hp
+        }
+    }
+
+    private fun cancelClockLongPress() {
+        clockLongPress?.let { clockHandler.removeCallbacks(it) }
+        clockLongPress = null
+    }
+
+    /** 按基准字号 × 系数设置大时钟三行文字（0.55~2.0 倍） */
+    private fun applyClockScale(scale: Float) {
+        val clock = minusBigClock ?: return
+        if (clockBaseTimeSp <= 0f) return
+        val s = scale.coerceIn(0.55f, 2f)
+        clock.findViewById<TextView>(R.id.minusBigTime)
+            ?.setTextSize(TypedValue.COMPLEX_UNIT_SP, clockBaseTimeSp * s)
+        clock.findViewById<TextView>(R.id.minusBigDate)
+            ?.setTextSize(TypedValue.COMPLEX_UNIT_SP, clockBaseDateSp * s)
+        clock.findViewById<TextView>(R.id.minusLunar)
+            ?.setTextSize(TypedValue.COMPLEX_UNIT_SP, clockBaseLunarSp * s)
+        clockScale = s
+    }
+
+    /** 拖动/缩放后限制在负一屏页面内，避免时钟被拖出屏幕 */
+    private fun clampClockInsideParent(v: View?) {
+        val clock = v ?: minusBigClock ?: return
+        val parent = clock.parent as? View ?: return
+        if (parent.width <= 0 || parent.height <= 0) return
+        val baseLeft = clock.left - clock.translationX
+        val baseTop = clock.top - clock.translationY
+        val minTx = -baseLeft
+        val maxTx = (parent.width - clock.width - baseLeft).coerceAtLeast(minTx)
+        val minTy = -baseTop
+        val maxTy = (parent.height - clock.height - baseTop).coerceAtLeast(minTy)
+        clock.translationX = clock.translationX.coerceIn(minTx, maxTx)
+        clock.translationY = clock.translationY.coerceIn(minTy, maxTy)
+    }
+
+    /** 保存大时钟相对默认位置的偏移（dp）与字号缩放 */
+    private fun saveClockTransform() {
+        val clock = minusBigClock ?: return
+        val d = resources.displayMetrics.density
+        UiTheme.setMinusClockTransform(this, clock.translationX / d, clock.translationY / d, clockScale)
+    }
+
+    /** 点按大时钟 → 打开日历 App（找不到任何日历时右上角提示） */
+    private fun openCalendarApp() {
+        val candidates = listOf(
+            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_CALENDAR),
+            Intent(Intent.ACTION_VIEW)
+                .setDataAndType(android.net.Uri.parse("content://com.android.calendar/time"), "time/epoch"),
+            Intent(Intent.ACTION_MAIN).setPackage("com.android.calendar"),
+            Intent(Intent.ACTION_MAIN).setPackage("com.google.android.calendar"),
+        )
+        for (i in candidates) {
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val resolved = try {
+                packageManager.resolveActivity(i, 0)
+            } catch (_: Exception) {
+                null
+            }
+            if (resolved != null) {
+                try {
+                    startActivity(i)
+                    return
+                } catch (_: Exception) {
+                }
+            }
+        }
+        NuiToast.show(this, "未找到日历应用")
     }
 
     /** 大号时钟 iOS 26 式玻璃效果：fill 极淡（像透明玻璃）、只有描边不透明（边缘清晰）、弱阴影保证可读。 */
