@@ -151,7 +151,7 @@ object UiTheme {
     const val DEFAULT_APP_ICON_DP = 72
 
     fun dockStyle(ctx: Context): DockStyle =
-        if (ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_DOCK_STYLE, 0) == 1)
+        if (ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(KEY_DOCK_STYLE, 1) == 1)
             DockStyle.FLOAT else DockStyle.EDGE
 
     fun setDockStyle(ctx: Context, style: DockStyle) {

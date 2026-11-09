@@ -1050,24 +1050,28 @@ class MapHost(
 
     /** 与分割条同步显隐：非 page0 / 失焦 / 对话框时不显示（遮罩会压在壁纸或图标上） */
     private fun setCornerMaskVisible(visible: Boolean) {
-        // 状态未变时（切页/回前台会重复调用 setDividerVisible）不做 force 移除+重加：
-        // 反复重建 8 个遮罩窗本身就会让四角闪一下。只补建缺失的角窗/更新位置；
-        // 浮窗重建后的置顶由 showFloat 的 800ms 延迟统一处理。
+        // 【性能】切页不再 removeView/addView 8 个角窗（跨进程 IPC 会阻塞主线程掉帧）：
+        // 仅切换 alpha，窗口常驻 WindowManager。回桌面时 applyCornerMask 刷新位图/位置，
+        // 浮窗重建后的置顶由 showFloat 结果回调 / 800ms 兜底的 force 路径处理。
         if (cornerMaskVisible == visible) {
             if (visible) applyCornerMask()
             return
         }
         cornerMaskVisible = visible
-        if (!visible) { removeCornerMask(); return }
-        // force：外部地图可能刚重建过浮窗（新窗口在遮罩之上），必须 remove+add 才能重新置顶
-        applyCornerMask(force = true)
-        // mapPanel 可能尚未布局完成（cachedX/cachedW 仍为 0），与分割条一致做延迟重试。
-        // 非 force：此时浮窗尚未重建（回桌面后由 showFloat 负责置顶），只需定位/补建。
-        mapPanel.postDelayed({ if (cornerMaskVisible) applyCornerMask() }, 500)
-        mapPanel.postDelayed({ if (cornerMaskVisible) applyCornerMask() }, 1500)
+        if (!visible) {
+            cornerMaskViews.forEach { it?.alpha = 0f }
+            return
+        }
+        // 显示：补建缺失角窗 + 刷新位图/位置（非 force，已有窗不 remove+add）
+        applyCornerMask()
+        cornerMaskViews.forEach { it?.alpha = 1f }
+        // 几何可能未稳定（cachedX/cachedW 仍为 0），与分割条一致做延迟重试
+        mapPanel.postDelayed({ if (cornerMaskVisible) { applyCornerMask(); cornerMaskViews.forEach { it?.alpha = 1f } } }, 500)
+        mapPanel.postDelayed({ if (cornerMaskVisible) { applyCornerMask(); cornerMaskViews.forEach { it?.alpha = 1f } } }, 1500)
     }
 
     private fun removeCornerMask() {
+        // 仅在 onDestroy / applyCornerMask(force) 时真正移除窗口；切页隐藏走 alpha 切换
         for (i in cornerMaskViews.indices) {
             cornerMaskViews[i]?.let {
                 runCatching { wm.removeView(it) }
@@ -1259,28 +1263,34 @@ class MapHost(
         mapPanel.postDelayed({ updateDividerPosition() }, 1500)
     }
 
-    /** 切换分割条可见性：非 page0 时直接移出屏幕（x=-10000），不 removeView 不 GONE，
-     *  保持 overlay 稳定存在，避免反复创建/销毁导致丢失。page0 时定位到音乐栏左缘。 */
+    /** 切换分割条可见性：非 page0 时把竖条移出屏幕（x=-10000）并将角窗置透明，
+     *  page0 时恢复并定位到音乐栏左缘。
+     *  【性能】角窗(8个)走 alpha 切换免 remove/add IPC；竖条单窗 updateViewLayout 移到屏外
+     *  （既隐藏又防触摸穿透到其它 App），仅 1 次 IPC，可接受。 */
     fun setDividerVisible(visible: Boolean) {
         setCornerMaskVisible(visible)
         if (visible) {
             if (dividerOverlay == null) {
                 showDivider()
             } else {
+                dividerOverlay?.alpha = 1f
                 dividerOverlay?.visibility = View.VISIBLE
                 dividerShown = true
                 updateDividerPosition()
-                // 重新显示时置顶到高德浮窗之上（浮窗同为 APPLICATION_OVERLAY、后加在上）
-                if (!dividerTouching && !dividerAdjustActive) bringDividerToFront()
+                // bringToFront 延迟到动画结束后（IDLE 回调 / showFloat 结果回调），
+                // 避免动画期间 removeView+addView 阻塞主线程
             }
             onDividerVisibilityChanged?.invoke(true)
         } else {
             dividerShown = false
             dividerAdjustActive = false
+            // 竖条移出屏幕：既不可见也不拦截触摸（alpha=0 会留下触摸热区穿透到其它 App）
             dividerOverlay?.let {
                 val lp = it.layoutParams as WindowManager.LayoutParams
-                lp.x = -10000
-                runCatching { wm.updateViewLayout(it, lp) }
+                if (lp.x != -10000) {
+                    lp.x = -10000
+                    runCatching { wm.updateViewLayout(it, lp) }
+                }
             }
             hideDividerIcon()
             onDividerVisibilityChanged?.invoke(false)

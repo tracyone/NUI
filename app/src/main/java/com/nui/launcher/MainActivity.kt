@@ -1068,6 +1068,13 @@ class MainActivity : AppCompatActivity() {
                 // 【性能】动画期间不刷竖条：refreshDivider/updateViewLayout 是跨进程 IPC，
                 // 动画中每帧调用会阻塞主线程导致掉帧尖峰；动画结束由 SCROLL_STATE_IDLE
                 // 的 refreshDivider 一次性落位（用户感知不到延迟）。
+                // 【翻页耗时测量】从应用列表切回桌面时，桌面页 position=1 且 offset=0 的瞬间，
+                // 右侧音乐面板右边缘刚好到达屏幕右边缘，以此作为动画终点。
+                if (pageLatencyMeasuring && position == 1 && positionOffset == 0f) {
+                    val cost = android.os.SystemClock.elapsedRealtime() - pageLatencyStartMs
+                    pageLatencyMeasuring = false
+                    Log.i("NUI.PageLatency", "page1->page0 cost=${cost}ms (offset=0 settled)")
+                }
             }
             override fun onPageSelected(position: Int) {
                 // 指示器：点索引 = 外层页索引（0=负一屏，1=桌面，2..N=应用各页）
@@ -1092,29 +1099,23 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 }
-                // 离开桌面时关闭高德浮窗；回到桌面时浮窗几何由 IDLE 回调刷新
-                // （滑动动画中 getLocationOnScreen 会取到过渡坐标，导致浮窗与 dock 重叠）
+                // 离开桌面时关闭高德浮窗（发 closemap，高德必定响应）；
+                // 回到桌面时浮窗几何由 SCROLL_STATE_IDLE 的 resumeFloat 刷新。
                 if (::mapHost.isInitialized && position != 1) mapHost.closeFloat()
-                // 悬浮分割条：仅桌面页(1)显示，其它页移出屏幕。
-                // postDelayed 兜底：onPageSelected 可能在 mapHost 初始化前触发，
-                // 或 setCurrentItem(false) 后布局尚未稳定，延迟后再定位。
-                if (position == 1) {
-                    if (::mapHost.isInitialized) mapHost.setDividerVisible(true)
-                    binding.viewPager.postDelayed({
-                        if (!isDestroyed && !isFinishing && ::mapHost.isInitialized &&
-                            binding.viewPager.currentItem == 1) {
-                            mapHost.setDividerVisible(true)
-                        }
-                    }, 300)
-                } else if (::mapHost.isInitialized) {
+                // 悬浮分割条：仅桌面页(1)显示。
+                // 【性能】显示(setDividerVisible true)延迟到 IDLE：setCornerMaskVisible 刷新角窗
+                // 位图 + updateDividerPosition 的 updateViewLayout 是 IPC，动画期执行会掉帧；
+                // 隐藏走 alpha 切换（无 IPC），离开桌面时立即执行不影响动画。
+                if (position != 1 && ::mapHost.isInitialized) {
                     mapHost.setDividerVisible(false)
                 }
                 // 离开桌面页时隐藏导航/巡航信息卡（负一屏/应用列表不显示悬浮信息）
                 navInfoHost?.onPageChanged(position)
                 syncWeatherLayer(position)
-                // 悬浮歌词（全局窗）：负一屏(0)与桌面(1)都显示，应用列表(2+)隐藏
-                if (::musicHost.isInitialized) {
-                    musicHost.setFloatAreaVisible(position == 0 || position == 1)
+                // 悬浮歌词（全局窗）：负一屏(0)与桌面(1)显示，应用列表(2+)隐藏。
+                // 【性能】显示延迟到 IDLE（updateLyricFloat 可能 addView IPC）；隐藏立即执行。
+                if (::musicHost.isInitialized && position >= 2) {
+                    musicHost.setFloatAreaVisible(false)
                 }
                 // 音乐浮窗：仅桌面页(1)请求绑定的音乐 App 在该窗口悬浮显示，其它页关闭
                 if (position == 1) {
@@ -1141,6 +1142,15 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onPageScrollStateChanged(state: Int) {
+                // 【翻页耗时测量】兜底：若 onPageScrolled 未捕获到 offset=0（极端帧丢失），
+                // 在 IDLE+currentItem=1 时结算，保证每次测量都有结果。
+                if (pageLatencyMeasuring && state == ViewPager2.SCROLL_STATE_IDLE &&
+                    binding.viewPager.currentItem == 1
+                ) {
+                    val cost = android.os.SystemClock.elapsedRealtime() - pageLatencyStartMs
+                    pageLatencyMeasuring = false
+                    Log.i("NUI.PageLatency", "page1->page0 cost=${cost}ms (IDLE fallback)")
+                }
                 // 页面完全静止后再刷新浮窗几何：HOME/应用列表按钮/滑动回桌面统一走这里。
                 // 【性能】动画结束瞬间若立即执行窗口落位（浮窗/分割条/手柄），这些跨进程 IPC
                 // （relayoutWindow/pauseSurface/bringDivider/hideSwap）在车机上会集中阻塞主线程，
@@ -1151,6 +1161,8 @@ class MainActivity : AppCompatActivity() {
                 ) {
                     binding.viewPager.postDelayed({
                         if (!isDestroyed && !isFinishing && binding.viewPager.currentItem == 1) {
+                            // 回桌面：先显示分割条（alpha=1 + 定位），再恢复浮窗并按新几何刷新
+                            mapHost.setDividerVisible(true)
                             // 回桌面先恢复浮窗（closeFloat 已置隐藏态），再按新几何刷新
                             mapHost.resumeFloat()
                             mapHost.refreshFloat()
@@ -1158,6 +1170,21 @@ class MainActivity : AppCompatActivity() {
                             mapHost.refreshDivider()
                             // 页面已静止：手柄在过渡中可能未定位（target 未挂载），此处重新落位
                             showSwapHandles()
+                        }
+                    }, 100)
+                }
+                // 悬浮歌词：负一屏(0)与桌面(1)显示，延迟到动画结束避免 addView IPC 掉帧
+                if (state == ViewPager2.SCROLL_STATE_IDLE &&
+                    (binding.viewPager.currentItem == 0 || binding.viewPager.currentItem == 1) &&
+                    ::musicHost.isInitialized
+                ) {
+                    val targetPage = binding.viewPager.currentItem
+                    binding.viewPager.postDelayed({
+                        if (!isDestroyed && !isFinishing &&
+                            (binding.viewPager.currentItem == 0 || binding.viewPager.currentItem == 1) &&
+                            binding.viewPager.currentItem == targetPage
+                        ) {
+                            musicHost.setFloatAreaVisible(true)
                         }
                     }, 100)
                 }
@@ -1568,11 +1595,25 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
+    // ===== 翻页耗时测量（page1 应用列表 -> page0 桌面）=====
+    // 触发：应用列表按钮（dockApps）从应用列表页切回桌面。
+    // 终点：onPageScrolled 中桌面页 position=1 且 offset=0（此时右侧音乐面板右边缘到达屏幕右边缘）。
+    // 仅在主线程读写，无需同步。
+    private var pageLatencyStartMs = 0L
+    private var pageLatencyMeasuring = false
+
     private fun setupDock() {
         binding.dockApps.setOnClickListener {
             // 桌面(1) -> 应用第一页(2)；其它页（含负一屏）-> 回桌面(1)
-            if (binding.viewPager.currentItem == 1) binding.viewPager.currentItem = 2
-            else binding.viewPager.currentItem = 1
+            val cur = binding.viewPager.currentItem
+            if (cur == 1) {
+                binding.viewPager.currentItem = 2
+            } else {
+                // 从应用列表/负一屏回桌面：开始计时，onPageScrolled(offset=0) 时结算
+                pageLatencyStartMs = android.os.SystemClock.elapsedRealtime()
+                pageLatencyMeasuring = true
+                binding.viewPager.currentItem = 1
+            }
         }
         binding.dockBar.isClickable = true
         renderDock()
@@ -1875,6 +1916,8 @@ class MainActivity : AppCompatActivity() {
     private fun updatePageIndicator(position: Int) {
         val dots = binding.pageIndicator.tag as? Array<View> ?: return
         if (dots.isEmpty()) return
+        // 负一屏（position 0）不显示页面指示器白点
+        binding.pageIndicator.visibility = if (position == 0) View.GONE else View.VISIBLE
         val safe = position.coerceIn(0, dots.size - 1)
         for (i in dots.indices) dots[i].alpha = if (i == safe) 1f else 0.35f
     }
