@@ -7,23 +7,13 @@
     android:background="@color/settings_bg"
     android:padding="24dp">
 
-    <!-- 左侧：设置分类（包 ScrollView，低密度/矮屏车机上可滚动；内容超出时底部渐隐提示"还有更多"） -->
-    <FrameLayout
+    <!-- 左侧：设置分类（返回键+标题固定在顶部，菜单项包 ScrollView 可滚动；内容超出时底部渐隐提示） -->
+    <LinearLayout
         android:layout_width="240dp"
-        android:layout_height="match_parent">
+        android:layout_height="match_parent"
+        android:orientation="vertical">
 
-        <ScrollView
-            android:id="@+id/leftMenuScroll"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:scrollbars="none"
-            android:fillViewport="true">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical">
-
+        <!-- 返回键 + 标题：固定在顶部，DPI 大菜单滚动时不消失 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -51,6 +41,24 @@
                 android:textSize="26sp"
                 android:textStyle="bold" />
         </LinearLayout>
+
+        <!-- 菜单项：可滚动区域，占剩余高度 -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <ScrollView
+                android:id="@+id/leftMenuScroll"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scrollbars="none"
+                android:fillViewport="true">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
 
         <TextView
             android:id="@+id/tabMusic"
@@ -162,6 +170,26 @@
         </LinearLayout>
         </ScrollView>
 
+        <!-- 顶部渐隐+箭头：向下滚动后还有上方内容时显示，提示用户上滑 -->
+        <LinearLayout
+            android:id="@+id/leftMenuTopFade"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_gravity="top"
+            android:orientation="vertical"
+            android:gravity="top|center_horizontal"
+            android:paddingTop="4dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/leftMenuTopFadeArrow"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="▲"
+                android:textSize="14sp"
+                android:alpha="0.85" />
+        </LinearLayout>
+
         <!-- 底部渐隐+箭头：左侧菜单还有更多分类可滚动时显示，提示用户下滑 -->
         <LinearLayout
             android:id="@+id/leftMenuFade"
@@ -181,7 +209,8 @@
                 android:textSize="14sp"
                 android:alpha="0.85" />
         </LinearLayout>
-    </FrameLayout>
+        </FrameLayout>
+    </LinearLayout>
 
     <!-- 右侧：详细设置（包 ScrollView，内容超出可滚动，底部渐隐+箭头提示） -->
     <FrameLayout

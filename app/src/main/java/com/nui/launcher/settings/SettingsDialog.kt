@@ -578,19 +578,29 @@ class SettingsDialog(context: Context) : Dialog(context) {
         findViewById<TextView>(R.id.tvAboutVersion).text = ver
     }
 
-    /** 左侧菜单底部渐隐+箭头：内容超出可视区（可向下滚动）时显示，提示还有更多分类 */
+    /** 左侧菜单顶部/底部渐隐+箭头：
+     *  - 底部箭头：可向下滚动时显示，提示还有更多分类
+     *  - 顶部箭头：向下滚动后可向上滚动时显示，提示上方还有内容 */
     private fun updateLeftMenuFade() {
         val scroll = findViewById<android.widget.ScrollView>(R.id.leftMenuScroll) ?: return
         val fade = findViewById<View>(R.id.leftMenuFade) ?: return
+        val topFade = findViewById<View>(R.id.leftMenuTopFade) ?: return
         val dark = UiTheme.isDark(context)
         val p = UiTheme.settingsPalette(dark)
         val bg = p.bg
+        // 底部渐隐：上透明→下实色
         fade.background = GradientDrawable(
             GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(0x00000000, bg)
         )
+        // 顶部渐隐：上实色→下透明
+        topFade.background = GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(bg, 0x00000000)
+        )
         findViewById<TextView>(R.id.leftMenuFadeArrow)?.setTextColor(p.label)
+        findViewById<TextView>(R.id.leftMenuTopFadeArrow)?.setTextColor(p.label)
         scroll.post {
             fade.visibility = if (scroll.canScrollVertically(1)) View.VISIBLE else View.GONE
+            topFade.visibility = if (scroll.canScrollVertically(-1)) View.VISIBLE else View.GONE
         }
     }
 
