@@ -178,6 +178,26 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content" />
 
+        <!-- 红绿灯条：巡航时紧贴"速度/摄像头"信息卡下方显示；
+             无灯数据时 gone 不占位（时钟区 weight=1 自动吸收高度），
+             数据来自高德 60073，由 NavInfoHost 渲染胶囊 -->
+        <LinearLayout
+            android:id="@+id/lightBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_marginTop="8dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:id="@+id/cruiseLight"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical" />
+        </LinearLayout>
+
         <!-- 时钟区：大时间 + 日期 + 天气 -->
         <LinearLayout
             android:layout_width="match_parent"

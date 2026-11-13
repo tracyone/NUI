@@ -67,10 +67,26 @@ class NavInfoHost(
         private const val NAV_STATE_CRUISE_END = 25
         /** 昼夜外观轮询间隔（毫秒）：60 秒 */
         private const val DAY_NIGHT_POLL_MS = 60_000L
+
+        // ---------- 红绿灯语音状态（进程级共享） ----------
+        // 桌面可能同时存在多个 MainActivity 实例（各持一份 NavInfoHost、各注册一个 receiver），
+        // 同一帧 60073 会被处理多次。这些状态放在 companion 里全局共享，
+        // 保证同一路口的提醒只播一次（UI 渲染仍由各实例各自负责）。
+        private var greenCueDone = false  // 本轮红灯的"即将绿灯"是否已播
+        private var redCueDone = false    // 本轮绿灯的"即将红灯"是否已播
+        private var lastRedNoticeAt = 0L  // "前方路口红灯"上次播报时间（20 秒冷却）
+        private var lastGreenCueAt = 0L   // "即将绿灯"上次播报时间（20 秒冷却）
+        private var lastRedCueAt = 0L     // "即将红灯"上次播报时间（20 秒冷却）
+        private var redFrames = 0         // 直行红灯连续帧数（≥2 才认，过滤位置漂移抖动）
+        private var greenSinceMs = 0L     // 直行绿灯起始时间（持续 ≥5 秒才算本轮结束）
+        private var lastVoiceJson: String? = null  // 上一帧已播报的灯数据（进程级去重）
+        private var lastVoiceAt = 0L
     }
 
-    /** 一套导航/巡航卡的视图引用（page0 或负一屏各一份）。[page] 为该卡片所在 ViewPager2 页索引。 */
-    private class Refs(val root: View, val page: Int) {
+    /** 一套导航/巡航卡的视图引用（page0 或负一屏各一份）。[page] 为该卡片所在 ViewPager2 页索引。
+     *  [showLights]：该卡片是否负责渲染红绿灯胶囊。桌面巡航卡本身不显示（改由音乐区上方的
+     *  独立灯条显示），避免同一组灯上下重复出现。 */
+    private class Refs(val root: View, val page: Int, val showLights: Boolean = false) {
         val turn: ImageView? = root.findViewById(R.id.navInfoTurn)
         val dest: TextView? = root.findViewById(R.id.navInfoDest)
         val eta: TextView? = root.findViewById(R.id.navInfoEta)
@@ -136,17 +152,41 @@ class NavInfoHost(
     private var camAnnouncedNear = false   // <200m 已播报
     private var tts: NuiTts? = null
 
+    // 红绿灯数据断流：高德只在有灯的路段约 1Hz 发 60073；超过该时长没收到 → 隐藏旧灯态
+    private val lightHideHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    // 多灯聚合：一个路口 size>1 时，高德按 index 分多条广播下发，需要按组暂存后一起渲染
+    private val pendingLights = HashMap<Int, JSONObject>()
+    private var pendingSize = 0
+    private var pendingAt = 0L
+    private val LIGHT_TIMEOUT_MS = 5_000L
+    private val lightHideRunnable = Runnable {
+        refs.forEach {
+            it.cruiseLight?.visibility = View.GONE
+            if (it.showLights) it.root.visibility = View.GONE
+        }
+        greenCueDone = false
+        redCueDone = false
+        redFrames = 0
+        greenSinceMs = 0L
+        Log.i(TAG, "红绿灯数据断流，隐藏灯态")
+    }
+
     // 数据断流看门狗：导航/巡航态下超过该时长收不到任何 10001/10019 → 恢复按钮区
     private val watchdogHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val DATA_TIMEOUT_MS = 15_000L
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context?, intent: Intent?) {
-            when (intent?.getIntExtra("KEY_TYPE", -1)) {
-                KEY_TYPE_NAV_STATE -> handleNavState(intent)
-                KEY_TYPE_NAVI_INFO -> handleNaviInfo(intent)
-                KEY_TYPE_TRAFFIC_LIGHT -> handleTrafficLight(intent)
-                KEY_TYPE_TMC -> handleTmc(intent)
+            val kt = intent?.getIntExtra("KEY_TYPE", -1)
+            if (kt == KEY_TYPE_TRAFFIC_LIGHT) {
+                // 高德 1Hz 发帧，release 包不宜刷 I 级日志；排查协议时开 debug 可见
+                Log.d(TAG, "60073 到达 NUI: extras=${dumpExtras(intent)}")
+            }
+            when (kt) {
+                KEY_TYPE_NAV_STATE -> handleNavState(intent!!)
+                KEY_TYPE_NAVI_INFO -> handleNaviInfo(intent!!)
+                KEY_TYPE_TRAFFIC_LIGHT -> handleTrafficLight(intent!!)
+                KEY_TYPE_TMC -> handleTmc(intent!!)
             }
         }
     }
@@ -169,6 +209,21 @@ class NavInfoHost(
         Log.i(TAG, "导航/巡航信息显示已启动（卡片数=${refs.size}）")
     }
 
+    /** 附加 page0 音乐区上方的红绿灯条（该块负责渲染胶囊；桌面巡航卡不再显示同一组灯） */
+    fun attachLightBar(view: View) {
+        refs.add(Refs(view, 1, showLights = true))
+        syncRefsState()
+    }
+
+    /** page0 的 ViewHolder 被回收/重建后重新绑定：旧 View 已脱离窗口树，
+     *  必须换成新 View，否则导航卡和红绿灯继续渲染到废弃布局（页面上什么都看不到）。 */
+    fun rebind(overlayView: View, lightBar: View?) {
+        refs.clear()
+        refs.add(Refs(overlayView, 1))
+        if (lightBar != null) refs.add(Refs(lightBar, 1, showLights = true))
+        syncRefsState()
+    }
+
     /** 导航/巡航激活时回调（用于取消闲置自动进入负一屏计时等） */
     var onNavActive: (() -> Unit)? = null
     /** 导航/巡航结束时回调（用于重新安排闲置自动进入负一屏计时等） */
@@ -180,9 +235,14 @@ class NavInfoHost(
             r.turn?.visibility = View.GONE
             r.navBlock?.visibility = if (mode == Mode.NAVI) View.VISIBLE else View.GONE
             r.cruiseBlock?.visibility = if (mode == Mode.CRUISE) View.VISIBLE else View.GONE
-            if (mode == Mode.NONE) r.cruiseLight?.visibility = View.GONE
-            r.root.visibility =
-                if (mode != Mode.NONE && currentPage == r.page) View.VISIBLE else View.GONE
+            // 红绿灯胶囊只由灯条负责（showLights），且只在巡航态显示；其余一律隐藏
+            if (mode != Mode.CRUISE || !r.showLights) r.cruiseLight?.visibility = View.GONE
+            r.root.visibility = when {
+                // 灯条是独立容器：只在巡航 + 有灯数据时占位，导航/无数据时不留下空白条
+                r.showLights -> if (mode == Mode.CRUISE && currentPage == r.page) View.VISIBLE else View.GONE
+                mode != Mode.NONE && currentPage == r.page -> View.VISIBLE
+                else -> View.GONE
+            }
         }
     }
 
@@ -289,9 +349,10 @@ class NavInfoHost(
         if (mode == newMode) return
         val old = mode
         mode = newMode
-        // 高德巡航播报临时静音：进巡航静音，退巡航/进导航恢复（临时静音单次有效，不误伤导航语音）
-        if (newMode == Mode.CRUISE && old != Mode.CRUISE) setAmapCruiseMute(true)
-        if (old == Mode.CRUISE && newMode != Mode.CRUISE) setAmapCruiseMute(false)
+        // 高德巡航静音已按用户要求禁用：高德自己播报巡航语音，NUI 不再发 10047 静音广播。
+        // 如未来需要恢复，取消下面两行的注释即可。
+        // if (newMode == Mode.CRUISE && old != Mode.CRUISE) setAmapCruiseMute(true)
+        // if (old == Mode.CRUISE && newMode != Mode.CRUISE) setAmapCruiseMute(false)
         Log.i(TAG, "模式: ${old.name} -> ${newMode.name}")
         val active = newMode != Mode.NONE
         if (active) onNavActive?.invoke()       // 进入导航/巡航：取消闲置计时
@@ -314,12 +375,17 @@ class NavInfoHost(
         refs.forEach { r ->
             r.navBlock?.visibility = if (newMode == Mode.NAVI) View.VISIBLE else View.GONE
             r.cruiseBlock?.visibility = if (newMode == Mode.CRUISE) View.VISIBLE else View.GONE
-            r.root.visibility =
-                if (active && currentPage == r.page) View.VISIBLE else View.GONE
+            r.root.visibility = when {
+                r.showLights -> if (newMode == Mode.CRUISE && currentPage == r.page) View.VISIBLE else View.GONE
+                active && currentPage == r.page -> View.VISIBLE
+                else -> View.GONE
+            }
             // 占用天气区域（仅 page0 有 weather）：隐藏天气文字；退出恢复
             r.weather?.visibility = if (active) View.GONE else View.VISIBLE
-            if (!active) r.cruiseLight?.visibility = View.GONE
+            if (!active || !r.showLights) r.cruiseLight?.visibility = View.GONE
         }
+        // 退出巡航/导航：取消红绿灯断流隐藏计时
+        if (!active) lightHideHandler.removeCallbacks(lightHideRunnable)
         if (!active) {
             overspeedAlerted = false
             stopDataWatchdog()
@@ -637,32 +703,27 @@ class NavInfoHost(
      * 圆形灯(颜色随灯状态) + 圆内白色方向箭头 + 右侧白色倒计时数字），
      * 参考 Navi-Link TrafficLightView 样式，多个方向横排。
      */
-    private fun handleTrafficLight(intent: Intent) {
-        // 60073 红绿灯是巡航专属广播：高德发它说明正在巡航。若巡航检测（46/ICON=0）
-        // 因版本差异失败，收到有效红绿灯数据仍进入巡航显示，避免"有数据不显示"
-        val lights = intent.getStringExtra("lightsData")
-            ?: intent.getStringExtra("LIGHTS_DATA")
-        if (mode == Mode.NAVI || lights.isNullOrBlank()) {
-            if (mode != Mode.NAVI) refs.forEach { it.cruiseLight?.visibility = View.GONE }
-            return
+    /** 立即隐藏红绿灯胶囊并清空红灯状态（无灯数据/退出巡航/断流时调用） */
+    private fun hideLights() {
+        lightHideHandler.removeCallbacks(lightHideRunnable)
+        refs.forEach {
+            it.cruiseLight?.visibility = View.GONE
+            // 灯条容器一并收起：无灯数据时不留下 8dp 空白，时钟区自动下移
+            if (it.showLights) it.root.visibility = View.GONE
         }
-        if (mode != Mode.CRUISE) setMode(Mode.CRUISE)
-        resetDataWatchdog()
-        val array: JSONArray
-        try {
-            array = JSONArray(lights)
-        } catch (e: Exception) {
-            Log.w(TAG, "解析红绿灯失败: ${e.message}")
-            return
-        }
-        if (array.length() == 0) {
-            refs.forEach { it.cruiseLight?.visibility = View.GONE }
-            return
-        }
-        // 最近（第一个）红灯倒计时，供变灯提醒用
-        var firstRedCountdown = -1
+        greenCueDone = false
+        redCueDone = false
+        redFrames = 0
+        greenSinceMs = 0L
+    }
+
+    /** 取"直行"方向灯态：返回 (是否红, 倒计时)；数组里没有直行灯返回 null。
+     *  语音只播直行——与会车实际行进方向一致，避免播报左转/右转灯导致"与实际红绿灯不沾边"。 */
+    private fun pickStraightLight(array: JSONArray): Pair<Boolean, Int>? {
         for (i in 0 until array.length()) {
-            val obj = array.getJSONObject(i)
+            val obj = array.optJSONObject(i) ?: continue
+            val dir = obj.optString("dir", obj.optString("direction", ""))
+            if (!dir.contains("直")) continue
             val status = obj.optString(
                 "trafficLightStatus",
                 obj.optString("status", obj.optString("state", "unknown"))
@@ -672,33 +733,296 @@ class NavInfoHost(
                 obj.optInt("countdown", obj.optInt("countDown",
                     obj.optInt("remaining_time", -1)))
             )
-            val isRed = status.contains("red", ignoreCase = true) ||
-                status == "1" || status == "0"
-            if (i == 0 && isRed) firstRedCountdown = countdown
+            val isRed = status.contains("red", ignoreCase = true) || status == "0"
+            // 绿灯且倒计时为 0：高德常发的占位/无效数据，忽略（否则会被当成"灯已结束"，
+            // 使红灯提醒反复触发）。真正的绿灯会带 >0 的倒计时。
+            if (!isRed && countdown <= 0) return null
+            return Pair(isRed, countdown)
         }
-        // 两套卡片各自渲染一份相同的红绿灯胶囊
-        refs.forEach { r -> r.cruiseLight?.let { buildCruiseLights(it, array) } }
+        return null
+    }
 
-        // 变灯提醒：巡航中最近红灯倒计时 ≤3s 语音提醒（不设速度条件，高德悬浮窗巡航即有红绿灯）
-        if (firstRedCountdown in 1..3) {
-            val text = if (firstRedCountdown <= 1) "绿灯即将亮起" else "${firstRedCountdown}秒后变绿"
-            tts?.speak(text)
-            Log.i(TAG, "变灯提醒(巡航): $text")
+    /** 读取 extras 里的整数，兼容 Int / 其它 Number / String 三种传法 */
+    private fun extraInt(intent: Intent, key: String, def: Int): Int {
+        val v = intent.extras?.get(key) ?: return def
+        return when (v) {
+            is Int -> v
+            is Number -> v.toInt()
+            is String -> v.trim().toIntOrNull() ?: def
+            else -> def
         }
+    }
+
+    /** 打印 60073 的全部 extras：key(类型)=值；数组打印完整内容，便于确认高德多灯的真实格式 */
+    private fun dumpExtras(intent: Intent?): String {
+        val b = intent?.extras ?: return "null"
+        val sb = StringBuilder("[")
+        b.keySet().forEach { k ->
+            val v = b.get(k)
+            sb.append(k).append('(').append(v?.javaClass?.simpleName ?: "null").append(")=")
+            when (v) {
+                is IntArray -> sb.append(v.toList())
+                is LongArray -> sb.append(v.toList())
+                is FloatArray -> sb.append(v.toList())
+                is Array<*> -> sb.append(v.toList())
+                else -> sb.append(v)
+            }
+            sb.append(' ')
+        }
+        sb.append(']')
+        // Bundle 全量可能很长，截断防止刷爆日志
+        return sb.toString().take(900)
+    }
+
+    /** 解析 60073 红绿灯广播：新版高德按 (size, index) 逐条下发，需聚合成一组后渲染 */
+    private fun handleTrafficLight(intent: Intent) {
+        // 60073 红绿灯是巡航专属广播：高德发它说明正在巡航。若巡航检测（46/ICON=0）
+        // 因版本差异失败，收到有效红绿灯数据仍进入巡航显示，避免"有数据不显示"
+        val lights = intent.getStringExtra("lightsData")
+            ?: intent.getStringExtra("LIGHTS_DATA")
+        // 新版高德不再发 lightsData(JSON 数组)，改用单独字段：trafficLightStatus/dir/
+        // redLightCountDownSeconds/greenLightLastSecond/size。需自行构造 JSONArray。
+        val array: JSONArray = if (!lights.isNullOrBlank()) {
+            try {
+                JSONArray(lights)
+            } catch (e: Exception) {
+                Log.w(TAG, "解析 lightsData 失败: ${e.message}")
+                if (mode != Mode.NAVI) hideLights()
+                return
+            }
+        } else {
+            // 实测高德车机版格式：一个路口有 size 个灯，但每帧只发其中一个，
+            // 用 index 指明是第几个（0,1,2…），同一个路口的几条广播间隔只有几毫秒。
+            // 必须按 (size, index) 聚合成一组再渲染，否则永远只显示最后一个。
+            val status = extraInt(intent, "trafficLightStatus", -1)
+            if (status == -1) {
+                if (mode != Mode.NAVI) hideLights()
+                return
+            }
+            val dir = extraInt(intent, "dir", 2)
+            val redCd = extraInt(intent, "redLightCountDownSeconds", 0)
+            val greenCd = extraInt(intent, "greenLightLastSecond", 0)
+            val statusStr = when {
+                // 颜色优先按倒计时字段判定；红灯帧两个倒计时可能同值，回落到 status
+                redCd > 0 && greenCd <= 0 -> "red"
+                greenCd > 0 && redCd <= 0 -> "green"
+                status == 0 -> "red"
+                status == 1 -> "green"
+                status == 2 -> "yellow"
+                else -> "unknown"
+            }
+            val dirStr = when (dir) {
+                1 -> "左转"
+                2 -> "直行"
+                3 -> "右转"
+                4 -> "掉头"
+                else -> "路口"
+            }
+            // 红灯取 redLightCountDownSeconds，绿灯取 greenLightLastSecond（可能为 0 = 无读秒）
+            val cd = if (statusStr == "red") redCd else greenCd
+            val one = JSONObject()
+                .put("dir", dirStr)
+                .put("trafficLightStatus", statusStr)
+                .put("redLightCountDownSeconds", cd)
+
+            val size = extraInt(intent, "size", 1)
+            val index = extraInt(intent, "index", 0)
+            val frameAt = SystemClock.elapsedRealtime()
+            if (size <= 1) {
+                pendingLights.clear()
+                pendingSize = 0
+                JSONArray().put(one)
+            } else {
+                // 新一轮（index 回到 0）或距上一条超过 1.2s（高德 1Hz）时重置这一组
+                if (index <= 0 || pendingSize != size || frameAt - pendingAt > 1_200L) {
+                    pendingLights.clear()
+                    pendingSize = size
+                }
+                pendingLights[index] = one
+                pendingAt = frameAt
+                val arr = JSONArray()
+                for (i in 0 until size) pendingLights[i]?.let { arr.put(it) }
+                if (arr.length() == size) {
+                    Log.d(TAG, "红绿灯组: size=$size 已收=${arr.length()}")
+                }
+                arr
+            }
+        }
+        if (mode == Mode.NAVI || array.length() == 0) {
+            if (mode != Mode.NAVI) hideLights()
+            return
+        }
+        if (mode != Mode.CRUISE) setMode(Mode.CRUISE)
+        resetDataWatchdog()
+        val nowMs = SystemClock.elapsedRealtime()
+        if (array.length() == 0) {
+            // 高德当前路段无灯数据（常见）：立即隐藏，避免残留上一组灯
+            hideLights()
+            return
+        }
+        // 只由灯条渲染（桌面巡航卡不再显示同一组灯，避免上下重复）
+        refs.forEach { r ->
+            val box = r.cruiseLight ?: return@forEach
+            if (r.showLights) {
+                // 灯条根容器可能已被 hideLights()/syncRefsState() 收起（无灯路段、断流、切页），
+                // 恢复数据时必须重新展开根容器，否则子容器设为 VISIBLE 也看不见——
+                // 现象就是"日志在渲染红绿灯，屏幕上却没有灯条"。
+                if (currentPage == r.page) r.root.visibility = View.VISIBLE
+                buildCruiseLights(box, array)
+            } else box.visibility = View.GONE
+        }
+        // 断流兜底：超过 LIGHT_TIMEOUT_MS 没再收到 60073 就隐藏（灯已过/高德停止下发）
+        lightHideHandler.removeCallbacks(lightHideRunnable)
+        lightHideHandler.postDelayed(lightHideRunnable, LIGHT_TIMEOUT_MS)
+
+        // 语音去重（进程级）：高德同一帧会连发两条相同广播（隐式 + 显式兜底），且桌面可能
+        // 存在多个 MainActivity 实例各注册一个 receiver——同内容 500ms 内只让一帧进入语音逻辑，
+        // 否则同一句提醒会播 2~4 遍。UI 渲染已在上面完成，不受此处影响。
+        // 注意去重键必须用聚合后的数组内容：单灯格式下 lightsData 恒为 null，用它当 key
+        // 会把同一帧里的第二个灯（直行）当成重复帧丢掉，直行语音就永远不会触发。
+        val voiceKey = array.toString()
+        if (voiceKey == lastVoiceJson && nowMs - lastVoiceAt < 500) return
+        lastVoiceJson = voiceKey
+        lastVoiceAt = nowMs
+
+        // 语音提醒只看直行方向（没有直行灯就不播，避免把左转/右转灯播成前方红灯）
+        val straight = pickStraightLight(array)
+        val hasRedNow = straight?.first == true
+        val straightRed = if (hasRedNow) straight!!.second else -1
+        if (hasRedNow) {
+            // 由绿转红：新一轮红灯开始，重置"即将红灯"的播报标志
+            if (greenSinceMs != 0L) redCueDone = false
+            redFrames++
+            greenSinceMs = 0L
+            // 红灯出现提醒：直行红灯连续到第 2 帧（≥2 秒）才认，过滤高德位置漂移造成的瞬时红灯；
+            // 同一路口 20 秒内不重复播
+            if (redFrames == 2 && straightRed > 5 && nowMs - lastRedNoticeAt > 20_000L) {
+                lastRedNoticeAt = nowMs
+                tts?.speak("前方路口红灯")
+                Log.i(TAG, "红绿灯提醒(巡航): 前方路口红灯 ${straightRed}秒")
+            }
+            // 红灯剩余 <8 秒：提示即将绿灯（本轮红灯只播一次，20 秒冷却防止倒计时抖动重播）
+            if (redFrames >= 2 && straightRed in 1..7 && !greenCueDone &&
+                nowMs - lastGreenCueAt > 20_000L) {
+                greenCueDone = true
+                lastGreenCueAt = nowMs
+                tts?.speak("即将绿灯")
+                Log.i(TAG, "红绿灯提醒(巡航): 即将绿灯 ${straightRed}秒")
+            }
+        } else if (straight != null && straight.second > 0) {
+            // 直行绿灯：必须持续 ≥5 秒才算本轮真正结束（红绿交替抖动时不重置，
+            // 否则同一路口的红灯会被当成"新出现的红灯"反复播报）
+            if (greenSinceMs == 0L) {
+                greenSinceMs = nowMs
+                greenCueDone = false   // 新一轮绿灯开始，允许"即将绿灯"重新触发
+            }
+            // 绿灯剩余 <8 秒：提示即将红灯（本轮绿灯只播一次，20 秒冷却）
+            if (!redCueDone && straight.second in 1..7 && nowMs - lastRedCueAt > 20_000L) {
+                redCueDone = true
+                lastRedCueAt = nowMs
+                tts?.speak("即将红灯")
+                Log.i(TAG, "红绿灯提醒(巡航): 即将红灯 ${straight.second}秒")
+            }
+            if (nowMs - greenSinceMs >= 5_000L) {
+                greenCueDone = false
+                redFrames = 0
+            }
+        }
+        // straight == null（无直行数据/占位无效）：保持当前状态，等断流超时或下一个有效帧再重置
+    }
+
+    /** 一排胶囊里单个灯的可复用视图（避免每秒重建 View 造成闪烁） */
+    private class LightItem(
+        val root: LinearLayout,
+        val dot: View,
+        val arrow: ImageView,
+        val time: TextView,
+        val compact: Boolean
+    ) {
+        var lastColor: Int = Int.MIN_VALUE
+        var lastArrowRes: Int = 0
+        var lastText: String = ""
     }
 
     /** 把红绿灯 JSON 数组渲染为一排胶囊到 [container]（每套卡片各调一次） */
     private fun buildCruiseLights(container: LinearLayout, array: JSONArray) {
         try {
-            container.removeAllViews()
             val dm = context.resources.displayMetrics.density
             fun dp(v: Int): Int = (v * dm + 0.5f).toInt()
             // 多方向时紧凑模式（参考 Navi-Link setCompact）：圆/字缩小，保证 4 个以上胶囊放得下
             val compact = array.length() >= 3
-            val dotSize = if (compact) dp(26) else dp(44)
-            val timeSize = if (compact) 18f else 30f
-            val padH = if (compact) dp(3) else dp(6)
-            val itemMargin = if (compact) dp(3) else dp(8)
+            // 视图复用：60073 每秒一帧（同一帧还会连发两条），若每帧都 removeAllViews()+new View，
+            // 整排会被重新测量/布局/重绘，看起来就是"倒计时在闪"（摄像头卡是原地 setText，所以不闪）。
+            // 只在灯数量或紧凑模式变化时重建，其余情况只改颜色/箭头/文字。
+            val cached = container.tag as? MutableList<LightItem>
+            val items: MutableList<LightItem> =
+                if (cached != null && cached.size == array.length() &&
+                    cached.firstOrNull()?.compact == compact
+                ) {
+                    cached
+                } else {
+                    container.removeAllViews()
+                    val dotSize = if (compact) dp(26) else dp(44)
+                    val timeSize = if (compact) 18f else 30f
+                    val padH = if (compact) dp(3) else dp(6)
+                    val itemMargin = if (compact) dp(3) else dp(8)
+                    val built = ArrayList<LightItem>(array.length())
+                    for (i in 0 until array.length()) {
+                        // 胶囊：深蓝圆角背景 + [圆形灯(带箭头) + 倒计时数字]
+                        val item = LinearLayout(context).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            gravity = android.view.Gravity.CENTER_VERTICAL
+                            setPadding(padH, dp(2), padH, dp(2))
+                            background = android.graphics.drawable.GradientDrawable().apply {
+                                cornerRadius = dp(24).toFloat()
+                                setColor(0xE61E2A3A.toInt())   // 深蓝半透明胶囊
+                            }
+                        }
+                        // 圆形灯 FrameLayout：底层圆形(灯色) + 上层箭头
+                        val dotBox = FrameLayout(context)
+                        dotBox.layoutParams = LinearLayout.LayoutParams(dotSize, dotSize)
+                        val dot = View(context)
+                        dot.layoutParams = FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                        dot.background = android.graphics.drawable.GradientDrawable().apply {
+                            shape = android.graphics.drawable.GradientDrawable.OVAL
+                        }
+                        val arrowIv = ImageView(context).apply {
+                            scaleType = ImageView.ScaleType.CENTER_INSIDE
+                            setPadding(dp(6), dp(6), dp(6), dp(6))
+                            setColorFilter(0xFFFFFFFF.toInt(), android.graphics.PorterDuff.Mode.SRC_IN)
+                        }
+                        dotBox.addView(dot)
+                        dotBox.addView(arrowIv, FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                        // 绿灯常见 0 秒（无读秒）：不显示数字，只留灯色和方向箭头
+                        val timeTv = TextView(context).apply {
+                            setTextColor(0xFFFFFFFF.toInt())
+                            textSize = timeSize
+                            setTypeface(null, android.graphics.Typeface.BOLD)
+                            includeFontPadding = false
+                            // 三位数（如 114 秒）在窄面板里会被折成竖排，必须强制单行
+                            maxLines = 1
+                            isSingleLine = true
+                            gravity = android.view.Gravity.CENTER
+                            // 最小宽度按两位数字给，秒数 2 位→1 位时胶囊不会左右跳动
+                            minWidth = if (compact) dp(22) else dp(36)
+                        }
+                        timeTv.layoutParams = LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                            marginStart = dp(4); marginEnd = dp(2)
+                        }
+                        item.addView(dotBox)
+                        item.addView(timeTv)
+                        container.addView(item, LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                            marginEnd = itemMargin
+                        })
+                        built.add(LightItem(item, dot, arrowIv, timeTv, compact))
+                    }
+                    container.tag = built
+                    built
+                }
             for (i in 0 until array.length()) {
                 val obj = array.getJSONObject(i)
                 val dir = obj.optString("dir", obj.optString("direction", "路口"))
@@ -711,8 +1035,7 @@ class NavInfoHost(
                     obj.optInt("countdown", obj.optInt("countDown",
                         obj.optInt("remaining_time", -1)))
                 )
-                val isRed = status.contains("red", ignoreCase = true) ||
-                    status == "1" || status == "0"
+                val isRed = status.contains("red", ignoreCase = true) || status == "0"
                 val color = when {
                     isRed -> 0xFFFF3333.toInt()
                     status.contains("green", true) -> 0xFF34C759.toInt()
@@ -725,54 +1048,21 @@ class NavInfoHost(
                     dir.contains("掉头") || dir.contains("回转") || dir.contains("调头") -> R.drawable.light_u_turn
                     else -> R.drawable.light_straight
                 }
-                // 胶囊：深蓝圆角背景 + [圆形灯(带箭头) + 倒计时数字]
-                val item = LinearLayout(context).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = android.view.Gravity.CENTER_VERTICAL
-                    setPadding(padH, dp(2), padH, dp(2))
-                    background = android.graphics.drawable.GradientDrawable().apply {
-                        cornerRadius = dp(24).toFloat()
-                        setColor(0xE61E2A3A.toInt())   // 深蓝半透明胶囊
-                    }
+                val it = items[i]
+                // 只有真的变化才改动，避免每秒无谓 invalidate
+                if (it.lastColor != color) {
+                    (it.dot.background as? android.graphics.drawable.GradientDrawable)?.setColor(color)
+                    it.lastColor = color
                 }
-                // 圆形灯 FrameLayout：底层圆形(灯色) + 上层箭头
-                val dotBox = FrameLayout(context)
-                dotBox.layoutParams = LinearLayout.LayoutParams(dotSize, dotSize)
-                val dot = View(context)
-                dot.layoutParams = FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                dot.background = android.graphics.drawable.GradientDrawable().apply {
-                    shape = android.graphics.drawable.GradientDrawable.OVAL
-                    setColor(color)
+                if (it.lastArrowRes != arrowRes) {
+                    it.arrow.setImageResource(arrowRes)
+                    it.lastArrowRes = arrowRes
                 }
-                // 方向箭头（图片资源，白色箭头叠加在圆形灯上）
-                val arrowIv = ImageView(context).apply {
-                    setImageResource(arrowRes)
-                    scaleType = ImageView.ScaleType.CENTER_INSIDE
-                    setPadding(dp(6), dp(6), dp(6), dp(6))
-                    setColorFilter(0xFFFFFFFF.toInt(), android.graphics.PorterDuff.Mode.SRC_IN)
+                val text = if (countdown > 0) "$countdown" else ""
+                if (it.lastText != text) {
+                    it.time.text = text
+                    it.lastText = text
                 }
-                dotBox.addView(dot)
-                dotBox.addView(arrowIv, FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-                // 倒计时数字
-                val timeTv = TextView(context).apply {
-                    text = if (countdown >= 0) "$countdown" else ""
-                    setTextColor(0xFFFFFFFF.toInt())
-                    textSize = timeSize
-                    setTypeface(null, android.graphics.Typeface.BOLD)
-                    includeFontPadding = false
-                }
-                timeTv.layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                    marginStart = dp(4); marginEnd = dp(2)
-                }
-                item.addView(dotBox)
-                item.addView(timeTv)
-                container.addView(item, LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                    marginEnd = itemMargin
-                })
                 Log.d(TAG, "巡航红绿灯[$i]: dir=$dir status=$status ${countdown}秒 速度=${curSpeed}km/h")
             }
             container.visibility = View.VISIBLE

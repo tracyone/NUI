@@ -136,16 +136,21 @@ class MockGpsService : Service() {
         stopMoving()
         running = true
         thread = Thread {
-            while (running) {
-                inject(lat, lon, heading, speedKph)
-                // 每 0.5s 沿 heading 方向前进 speed 对应的距离（米）
-                val d = speedKph / 3.6 / 2.0
-                val rad = Math.toRadians(heading.toDouble())
-                val dLat = d * cos(rad) / 111320.0
-                val dLon = d * sin(rad) / (111320.0 * cos(Math.toRadians(lat)))
-                lat += dLat
-                lon += dLon
-                Thread.sleep(500)
+            try {
+                while (running) {
+                    inject(lat, lon, heading, speedKph)
+                    // 每 0.5s 沿 heading 方向前进 speed 对应的距离（米）
+                    val d = speedKph / 3.6 / 2.0
+                    val rad = Math.toRadians(heading.toDouble())
+                    val dLat = d * cos(rad) / 111320.0
+                    val dLon = d * sin(rad) / (111320.0 * cos(Math.toRadians(lat)))
+                    lat += dLat
+                    lon += dLon
+                    Thread.sleep(500)
+                }
+            } catch (e: InterruptedException) {
+                // stopMoving() 主动打断，正常退出，不要崩溃
+                Log.i(TAG, "move loop interrupted")
             }
         }.apply {
             isDaemon = true

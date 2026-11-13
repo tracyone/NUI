@@ -113,6 +113,7 @@ class MainActivity : AppCompatActivity() {
     private var desktopBtnNavCompany: View? = null
     private var desktopBtnNavFavorite: View? = null
     private var desktopNavInfoOverlay: View? = null
+    private var desktopLightBar: View? = null
     private var navInfoHost: com.nui.launcher.nav.NavInfoHost? = null
     // 负一屏（最左页）view 引用
     private var minusVideo: VideoWallpaperView? = null
@@ -1018,6 +1019,12 @@ class MainActivity : AppCompatActivity() {
         desktopBtnNavCompany = v.findViewById(R.id.btnNavCompany)
         desktopBtnNavFavorite = v.findViewById(R.id.btnNavFavorite)
         desktopNavInfoOverlay = v.findViewById(R.id.navInfoOverlay)
+        desktopLightBar = v.findViewById(R.id.lightBar)
+        // page0 的 ViewHolder 可能被回收重建：每次 bindDesktop 都把导航卡/红绿灯条
+        // 重新挂到当前 View 上，否则 NavInfoHost 继续往旧 View 渲染，页面上看不到灯条。
+        if (navInfoHost != null) {
+            navInfoHost?.rebind(desktopNavInfoOverlay!!, desktopLightBar)
+        }
         weatherText = v.findViewById(R.id.weatherText)
         weatherText?.setOnClickListener { startActivity(Intent(this, WeatherActivity::class.java)) }
         bindNavFavoriteClick()
@@ -2033,6 +2040,8 @@ class MainActivity : AppCompatActivity() {
         navInfoHost?.onNavActive = { setupAutoMinusTimer() }
         navInfoHost?.onNavInactive = { setupAutoMinusTimer() }
         navInfoHost?.start()
+        // 音乐区上方的红绿灯条：复用 60073 巡航红绿灯胶囊渲染
+        desktopLightBar?.let { navInfoHost?.attachLightBar(it) }
         bindNavFavoriteClick()
     }
 
