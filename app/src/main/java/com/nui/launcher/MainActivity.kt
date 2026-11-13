@@ -948,6 +948,13 @@ class MainActivity : AppCompatActivity() {
     private var edgeTriggered = false
     /** 上次重置闲置计时的时间戳（ACTION_MOVE 限流用，避免每帧都调 setupAutoMinusTimer） */
     private var lastActiveResetMs = 0L
+    /** ViewPager2 是否处于静止（无翻页动画）。动画期间页面被平移，
+     *  mapPanel 的屏幕坐标是过渡值，浮窗采样必须等静止。 */
+    private var pagerIdle = true
+    /** Home 键从负一屏(0)切桌面(1)时置位：onResume 紧跟 onNewIntent 执行，
+     *  此刻动画刚开始，不能在里面恢复浮窗（否则按过渡坐标发 showmap，浮窗错位+多建窗口卡顿），
+     *  统一交给 SCROLL_STATE_IDLE 的延迟恢复。 */
+    private var pendingDesktopFloatRestore = false
 
     override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
         val action = ev.actionMasked
@@ -1149,6 +1156,9 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onPageScrollStateChanged(state: Int) {
+                // 页面是否静止：翻页动画期间页面整体平移，浮窗几何取到的是过渡值，
+                // 必须等 IDLE 后才能采样（否则 Home 键切页会把浮窗发到屏幕中部）
+                pagerIdle = state == ViewPager2.SCROLL_STATE_IDLE
                 // 【翻页耗时测量】兜底：若 onPageScrolled 未捕获到 offset=0（极端帧丢失），
                 // 在 IDLE+currentItem=1 时结算，保证每次测量都有结果。
                 if (pageLatencyMeasuring && state == ViewPager2.SCROLL_STATE_IDLE &&
@@ -1168,6 +1178,8 @@ class MainActivity : AppCompatActivity() {
                 ) {
                     binding.viewPager.postDelayed({
                         if (!isDestroyed && !isFinishing && binding.viewPager.currentItem == 1) {
+                            // 由 IDLE 统一负责恢复，清掉 onResume 的挂起标记
+                            pendingDesktopFloatRestore = false
                             // 回桌面：先显示分割条（alpha=1 + 定位），再恢复浮窗并按新几何刷新
                             mapHost.setDividerVisible(true)
                             // 回桌面先恢复浮窗（closeFloat 已置隐藏态），再按新几何刷新
@@ -1472,15 +1484,22 @@ class MainActivity : AppCompatActivity() {
             android.util.Log.d("NUI.Main", "onNewIntent: back from external -> page $pageBeforeLaunch")
         } else {
             // 在桌面内按 home：桌面(1) <-> 应用第一页(2)；负一屏(0)按 home 回桌面(1)
-            if (binding.viewPager.currentItem == 1) binding.viewPager.currentItem = 2
-            else binding.viewPager.currentItem = 1
+            if (binding.viewPager.currentItem == 1) {
+                binding.viewPager.currentItem = 2
+            } else {
+                // 负一屏→桌面是平滑滚动，onResume 紧随其后：此时页面仍在左侧过渡位置，
+                // 浮窗恢复交给 IDLE（否则会把浮窗定位到屏幕中部）
+                if (binding.viewPager.currentItem == 0) pendingDesktopFloatRestore = true
+                binding.viewPager.currentItem = 1
+            }
             android.util.Log.d("NUI.Main", "onNewIntent: home-in-desktop -> page ${binding.viewPager.currentItem}")
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        android.util.Log.d("NUI.Main", "onResume page=${binding.viewPager.currentItem} launchedExternal=$launchedExternalApp")
+    /** onResume 中的视图/系统栏刷新。
+     *  从负一屏按 Home 回桌面时延后执行：这些调用含窗口 flags、图标重设、整树 requestLayout
+     *  与跨进程广播查询，在翻页动画启动帧上集中执行会造成明显卡顿。 */
+    private fun onResumeRefreshViews() {
         // 设置页可能改了显示状态栏/系统Dock开关，返回时重新应用系统栏 flags 与悬浮地图底部边界
         applySystemDock()
         if (::weatherFetcher.isInitialized) weatherFetcher.start()
@@ -1496,16 +1515,45 @@ class MainActivity : AppCompatActivity() {
         // 强制窗口重排+重绘（后台期间 View 属性可能变更，恢复前台时补一次）
         binding.root.requestLayout()
         binding.root.invalidate()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        android.util.Log.d("NUI.Main", "onResume page=${binding.viewPager.currentItem} launchedExternal=$launchedExternalApp")
+        // 负一屏按 Home 回桌面：onResume 紧随 onNewIntent 执行，此刻 ViewPager 刚开始平滑滚动。
+        // 下面这些重活（改窗口 flags、重设图标、整棵树 requestLayout、跨进程查导航状态）
+        // 全在主线程，会把翻页动画的启动帧卡住 1s 以上——手动滑动不经过 onResume 所以不卡。
+        // 这类场景整体延后到动画结束：先让动画跑起来，再做刷新。
+        if (pendingDesktopFloatRestore) {
+            binding.root.postDelayed({ if (!isDestroyed && !isFinishing) onResumeRefreshViews() }, 450)
+        } else {
+            onResumeRefreshViews()
+        }
         if (::mapHost.isInitialized) {
             mapHost.onResume()
             // 根据当前 page 决定悬浮地图显示状态（仅桌面显示浮窗）
             if (binding.viewPager.currentItem == 1) {
-                mapHost.resumeFloat()
-                // 兜底：启动/回前台时确保桌面页分割条已显示
-                mapHost.setDividerVisible(true)
+                // 负一屏→桌面的平滑滚动刚开始（onResume 紧跟 onNewIntent）：不在此恢复浮窗，
+                // 交给 IDLE 后的统一落位；否则会用过渡坐标 showmap（浮窗漂到屏幕中部 + 卡顿）
+                if (!pendingDesktopFloatRestore) {
+                    mapHost.resumeFloat()
+                    // 兜底：启动/回前台时确保桌面页分割条已显示
+                    mapHost.setDividerVisible(true)
+                }
             } else {
                 mapHost.closeFloat()
             }
+            // 兜底：IDLE 回调若因时序没执行（页面已静止但没收到 IDLE），800ms 后补一次恢复
+            binding.root.postDelayed({
+                if (!isDestroyed && !isFinishing && ::mapHost.isInitialized &&
+                    binding.viewPager.currentItem == 1 && pagerIdle && pendingDesktopFloatRestore) {
+                    pendingDesktopFloatRestore = false
+                    mapHost.setDividerVisible(true)
+                    mapHost.resumeFloat()
+                    mapHost.refreshFloat()
+                    mapHost.refreshDivider()
+                }
+            }, 800)
             // 延迟兜底：setCurrentItem(1,false) 和布局稳定后再确认一次分割条状态，
             // 防止 onPageSelected 时序问题导致分割条卡在 -10000（移出屏幕）
             binding.root.postDelayed({
@@ -1936,6 +1984,8 @@ class MainActivity : AppCompatActivity() {
         val btnSwitchMap = desktopBtnSwitchMap ?: return
 
         mapHost = MapHost(this, mapContainer, mapPanel)
+        // 浮窗几何只在页面静止时采样：翻页动画中 mapPanel 屏幕坐标是过渡值
+        mapHost.pageSettledProvider = { pagerIdle }
         // 圆角遮罩需要壁纸像素：直接取根布局背景（WallpaperController 设置的即为铺满全屏的壁纸）
         mapHost.wallpaperProvider = { binding.root.background }
         mapHost.onGeometryChanged = { binding.root.post { syncRightPanel(); mapHostRefreshDivider(); positionSwapHandles(); syncMusicFloat(); if (::musicHost.isInitialized) musicHost.requestFloatRefresh(); mapHost.refreshCornerMask() } }

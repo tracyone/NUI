@@ -282,6 +282,9 @@ class MapHost(
      *  这里统一延迟一小段时间只发一次（带 force 合并），等几何稳定后按最终值发送。 */
     private var showQueued = false
     private var showForced = false
+    /** 页面未静止时 showFloat 的重试计数（约 100ms 一次，累计 1s 仍不静止则放弃） */
+    private var showRetryCount = 0
+    private val MAX_SHOW_RETRY = 10
 
     /** 布局刷新监听：refreshFloat 用一次性 listener 等本次布局完成后再取几何。
      *  用成员字段 + 每次先移除/取消，防止切页多次调用时 listener 与兜底延迟累积，
@@ -294,7 +297,8 @@ class MapHost(
             v.removeOnLayoutChangeListener(this)
             v.removeCallbacks(refreshFloatRunnable)
             if (!floatEnabled) return
-            primeCache()
+            // 动画期布局变化属过渡，几何不可信：等 IDLE 后的 refreshFloat 重新取数
+            if (!primeCache()) return
             showFloat()
         }
     }
@@ -302,7 +306,7 @@ class MapHost(
     private val refreshFloatRunnable: Runnable = Runnable {
         mapPanel.removeOnLayoutChangeListener(refreshFloatLayoutListener)
         if (!floatEnabled) return@Runnable
-        primeCache()
+        if (!primeCache()) return@Runnable
         showFloat()
     }
 
@@ -334,6 +338,14 @@ class MapHost(
     private var cachedY = -1
     private var cachedW = -1   // 边界格式（x + width）
     private var cachedH = -1   // 边界格式（y + height）
+
+    /** 页面是否已静止（ViewPager2 处于 IDLE）。翻页动画期间页面整体被平移，
+     *  mapPanel 的屏幕坐标是过渡值（如负一屏→桌面时取到屏幕中部 x=779），
+     *  此时发 showmap 会把浮窗定位到错误位置，并额外触发一次窗口重建（卡顿）。
+     *  未提供时按"静止"处理，兼容不依赖 ViewPager 的调用方。 */
+    var pageSettledProvider: (() -> Boolean)? = null
+
+    private fun pageSettled(): Boolean = pageSettledProvider?.invoke() ?: true
 
     fun start(sources: List<MapSource>, autoLaunch: Boolean = false) {
         // 优先高德浮窗；没有偏好时默认 EXTERNAL_FLOAT
@@ -522,7 +534,13 @@ class MapHost(
         }
     }
 
-    private fun primeCache() {
+    private fun primeCache(): Boolean {
+        // 翻页动画中页面整体被平移，此时 mapPanel 的屏幕坐标是过渡值：
+        // 必须在页面静止后才采样，否则会把浮窗发到屏幕中间（并多建一次窗口导致卡顿）
+        if (!pageSettled()) {
+            Log.d(TAG, "primeCache skip: page scrolling")
+            return false
+        }
         val loc = IntArray(2)
         mapPanel.getLocationOnScreen(loc)
         val sw = context.resources.displayMetrics.widthPixels
@@ -531,12 +549,13 @@ class MapHost(
         if (loc[0] < 0 || loc[0] >= sw || loc[1] < 0 || loc[1] >= sh ||
             mapPanel.width <= 0 || mapPanel.height <= 0) {
             Log.w(TAG, "primeCache skip: loc=${loc[0]},${loc[1]} size=${mapPanel.width}x${mapPanel.height}")
-            return
+            return false
         }
         cachedX = loc[0]
         cachedY = loc[1]
         cachedW = cachedX + mapPanel.width
         cachedH = cachedY + mapPanel.height
+        return true
     }
 
     /**
@@ -639,7 +658,16 @@ class MapHost(
         showForced = false
         if (!floatEnabled) return@Runnable
         val src = current?.takeIf { it.type == MapSource.Type.EXTERNAL_FLOAT } ?: return@Runnable
-        primeCache()
+        // 页面还在滚动：几何不可信，推迟到静止后再发（避免浮窗落到过渡位置 + 多建一次窗口）
+        if (!primeCache()) {
+            if (showRetryCount < MAX_SHOW_RETRY) {
+                showRetryCount++
+                showQueued = true
+                container.postDelayed(showNowRunnable, 100)
+            }
+            return@Runnable
+        }
+        showRetryCount = 0
         val sent = sendFloatBroadcast(src.floatShowAction, forced)
         // 几何未变被去重跳过：浮窗没有重建/重定位，无需再重复置顶与补遮罩
         if (!sent) return@Runnable
