@@ -72,13 +72,8 @@ class NavInfoHost(
         // 桌面可能同时存在多个 MainActivity 实例（各持一份 NavInfoHost、各注册一个 receiver），
         // 同一帧 60073 会被处理多次。这些状态放在 companion 里全局共享，
         // 保证同一路口的提醒只播一次（UI 渲染仍由各实例各自负责）。
-        private var greenCueDone = false  // 本轮红灯的"即将绿灯"是否已播
-        private var redCueDone = false    // 本轮绿灯的"即将红灯"是否已播
-        private var lastRedNoticeAt = 0L  // "前方路口红灯"上次播报时间（20 秒冷却）
-        private var lastGreenCueAt = 0L   // "即将绿灯"上次播报时间（20 秒冷却）
-        private var lastRedCueAt = 0L     // "即将红灯"上次播报时间（20 秒冷却）
-        private var redFrames = 0         // 直行红灯连续帧数（≥2 才认，过滤位置漂移抖动）
-        private var greenSinceMs = 0L     // 直行绿灯起始时间（持续 ≥5 秒才算本轮结束）
+        private var cueDone = false       // 本轮倒计时的"注意即将变灯"是否已播
+        private var lastCueAt = 0L        // 上次播报时间（20 秒冷却，防止倒计时抖动重播）
         private var lastVoiceJson: String? = null  // 上一帧已播报的灯数据（进程级去重）
         private var lastVoiceAt = 0L
     }
@@ -164,10 +159,7 @@ class NavInfoHost(
             it.cruiseLight?.visibility = View.GONE
             if (it.showLights) it.root.visibility = View.GONE
         }
-        greenCueDone = false
-        redCueDone = false
-        redFrames = 0
-        greenSinceMs = 0L
+        cueDone = false
         Log.i(TAG, "红绿灯数据断流，隐藏灯态")
     }
 
@@ -349,10 +341,10 @@ class NavInfoHost(
         if (mode == newMode) return
         val old = mode
         mode = newMode
-        // 高德巡航静音已按用户要求禁用：高德自己播报巡航语音，NUI 不再发 10047 静音广播。
-        // 如未来需要恢复，取消下面两行的注释即可。
-        // if (newMode == Mode.CRUISE && old != Mode.CRUISE) setAmapCruiseMute(true)
-        // if (old == Mode.CRUISE && newMode != Mode.CRUISE) setAmapCruiseMute(false)
+        // 高德巡航播报静音：进入巡航时让高德闭嘴，由 NUI 负责红绿灯语音提醒；
+        // 退出巡航（含转导航）恢复高德播报。
+        if (newMode == Mode.CRUISE && old != Mode.CRUISE) setAmapCruiseMute(true)
+        if (old == Mode.CRUISE && newMode != Mode.CRUISE) setAmapCruiseMute(false)
         Log.i(TAG, "模式: ${old.name} -> ${newMode.name}")
         val active = newMode != Mode.NONE
         if (active) onNavActive?.invoke()       // 进入导航/巡航：取消闲置计时
@@ -711,19 +703,18 @@ class NavInfoHost(
             // 灯条容器一并收起：无灯数据时不留下 8dp 空白，时钟区自动下移
             if (it.showLights) it.root.visibility = View.GONE
         }
-        greenCueDone = false
-        redCueDone = false
-        redFrames = 0
-        greenSinceMs = 0L
+        cueDone = false
     }
 
-    /** 取"直行"方向灯态：返回 (是否红, 倒计时)；数组里没有直行灯返回 null。
-     *  语音只播直行——与会车实际行进方向一致，避免播报左转/右转灯导致"与实际红绿灯不沾边"。 */
-    private fun pickStraightLight(array: JSONArray): Pair<Boolean, Int>? {
+    /** 语音用的一盏灯 */
+    private class CueLight(val isRed: Boolean, val sec: Int, val dir: String)
+
+    /** 收集同组有效灯（绿灯 0 秒属于高德占位帧，忽略） */
+    private fun collectCueLights(array: JSONArray): List<CueLight> {
+        val out = ArrayList<CueLight>(array.length())
         for (i in 0 until array.length()) {
             val obj = array.optJSONObject(i) ?: continue
             val dir = obj.optString("dir", obj.optString("direction", ""))
-            if (!dir.contains("直")) continue
             val status = obj.optString(
                 "trafficLightStatus",
                 obj.optString("status", obj.optString("state", "unknown"))
@@ -734,12 +725,20 @@ class NavInfoHost(
                     obj.optInt("remaining_time", -1)))
             )
             val isRed = status.contains("red", ignoreCase = true) || status == "0"
-            // 绿灯且倒计时为 0：高德常发的占位/无效数据，忽略（否则会被当成"灯已结束"，
-            // 使红灯提醒反复触发）。真正的绿灯会带 >0 的倒计时。
-            if (!isRed && countdown <= 0) return null
-            return Pair(isRed, countdown)
+            if (!isRed && countdown <= 0) continue
+            if (countdown <= 0) continue
+            out.add(CueLight(isRed, countdown, dir))
         }
-        return null
+        return out
+    }
+
+    /** dir → 语音里的方向词 */
+    private fun cueDirWord(dir: String): String = when {
+        dir.contains("左") -> "左转"
+        dir.contains("右") -> "右转"
+        dir.contains("掉") || dir.contains("回转") || dir.contains("调头") -> "掉头"
+        dir.contains("直") -> "直行"
+        else -> ""
     }
 
     /** 读取 extras 里的整数，兼容 Int / 其它 Number / String 三种传法 */
@@ -782,6 +781,9 @@ class NavInfoHost(
             ?: intent.getStringExtra("LIGHTS_DATA")
         // 新版高德不再发 lightsData(JSON 数组)，改用单独字段：trafficLightStatus/dir/
         // redLightCountDownSeconds/greenLightLastSecond/size。需自行构造 JSONArray。
+        // 多灯组是否已收齐：语音只在整组齐了再判断方向，否则先到的那条会被当成
+        // "只有一个灯"，方向词和"倒计时接近"的判断都会出错
+        var groupComplete = true
         val array: JSONArray = if (!lights.isNullOrBlank()) {
             try {
                 JSONArray(lights)
@@ -845,6 +847,7 @@ class NavInfoHost(
                 if (arr.length() == size) {
                     Log.d(TAG, "红绿灯组: size=$size 已收=${arr.length()}")
                 }
+                groupComplete = arr.length() == size
                 arr
             }
         }
@@ -875,6 +878,9 @@ class NavInfoHost(
         lightHideHandler.removeCallbacks(lightHideRunnable)
         lightHideHandler.postDelayed(lightHideRunnable, LIGHT_TIMEOUT_MS)
 
+        // 组还没收齐：先不播，等这一组的其余灯（间隔仅几毫秒）到齐后再统一判断
+        if (!groupComplete) return
+
         // 语音去重（进程级）：高德同一帧会连发两条相同广播（隐式 + 显式兜底），且桌面可能
         // 存在多个 MainActivity 实例各注册一个 receiver——同内容 500ms 内只让一帧进入语音逻辑，
         // 否则同一句提醒会播 2~4 遍。UI 渲染已在上面完成，不受此处影响。
@@ -885,50 +891,44 @@ class NavInfoHost(
         lastVoiceJson = voiceKey
         lastVoiceAt = nowMs
 
-        // 语音提醒只看直行方向（没有直行灯就不播，避免把左转/右转灯播成前方红灯）
-        val straight = pickStraightLight(array)
-        val hasRedNow = straight?.first == true
-        val straightRed = if (hasRedNow) straight!!.second else -1
-        if (hasRedNow) {
-            // 由绿转红：新一轮红灯开始，重置"即将红灯"的播报标志
-            if (greenSinceMs != 0L) redCueDone = false
-            redFrames++
-            greenSinceMs = 0L
-            // 红灯出现提醒：直行红灯连续到第 2 帧（≥2 秒）才认，过滤高德位置漂移造成的瞬时红灯；
-            // 同一路口 20 秒内不重复播
-            if (redFrames == 2 && straightRed > 5 && nowMs - lastRedNoticeAt > 20_000L) {
-                lastRedNoticeAt = nowMs
-                tts?.speak("前方路口红灯")
-                Log.i(TAG, "红绿灯提醒(巡航): 前方路口红灯 ${straightRed}秒")
+        // 语音播报：只看已进入 <8 秒窗口的灯，车速 <25km/h 才播，每轮只播一次
+        // （倒计时回到 8 秒以上或断流后重新允许）。
+        // 方向词：同组两个灯倒计时相差不到 3 秒时方向没有区分度，只说"注意即将变灯"。
+        val cueLights = collectCueLights(array)
+        val lowSpeedCue = curSpeed < 25
+        if (cueLights.isNotEmpty()) {
+            // 代表灯：窗口内优先直行（直行是用户真正要走的方向），否则取倒计时最短的
+            var inWindowBest: CueLight? = null
+            var straightAny: CueLight? = null
+            var shortestAny: CueLight? = null
+            for (l in cueLights) {
+                if (straightAny == null && l.dir.contains("直")) straightAny = l
+                if (shortestAny == null || l.sec < shortestAny!!.sec) shortestAny = l
+                if (l.sec in 1..7) {
+                    if (inWindowBest == null) inWindowBest = l
+                    else if (!inWindowBest!!.dir.contains("直") && l.dir.contains("直")) inWindowBest = l
+                    else if (inWindowBest!!.dir == l.dir && l.sec < inWindowBest!!.sec) inWindowBest = l
+                }
             }
-            // 红灯剩余 <8 秒：提示即将绿灯（本轮红灯只播一次，20 秒冷却防止倒计时抖动重播）
-            if (redFrames >= 2 && straightRed in 1..7 && !greenCueDone &&
-                nowMs - lastGreenCueAt > 20_000L) {
-                greenCueDone = true
-                lastGreenCueAt = nowMs
-                tts?.speak("即将绿灯")
-                Log.i(TAG, "红绿灯提醒(巡航): 即将绿灯 ${straightRed}秒")
-            }
-        } else if (straight != null && straight.second > 0) {
-            // 直行绿灯：必须持续 ≥5 秒才算本轮真正结束（红绿交替抖动时不重置，
-            // 否则同一路口的红灯会被当成"新出现的红灯"反复播报）
-            if (greenSinceMs == 0L) {
-                greenSinceMs = nowMs
-                greenCueDone = false   // 新一轮绿灯开始，允许"即将绿灯"重新触发
-            }
-            // 绿灯剩余 <8 秒：提示即将红灯（本轮绿灯只播一次，20 秒冷却）
-            if (!redCueDone && straight.second in 1..7 && nowMs - lastRedCueAt > 20_000L) {
-                redCueDone = true
-                lastRedCueAt = nowMs
-                tts?.speak("即将红灯")
-                Log.i(TAG, "红绿灯提醒(巡航): 即将红灯 ${straight.second}秒")
-            }
-            if (nowMs - greenSinceMs >= 5_000L) {
-                greenCueDone = false
-                redFrames = 0
+            val chosen = inWindowBest ?: straightAny ?: shortestAny!!
+            val sec = chosen.sec
+            if (sec > 7) cueDone = false
+            if (sec in 1..7 && !cueDone && lowSpeedCue && nowMs - lastCueAt > 20_000L) {
+                var minSec = Int.MAX_VALUE
+                var maxSec = Int.MIN_VALUE
+                for (l in cueLights) {
+                    if (l.sec < minSec) minSec = l.sec
+                    if (l.sec > maxSec) maxSec = l.sec
+                }
+                val near = cueLights.size >= 2 && (maxSec - minSec) < 3
+                val prefix = if (near) "" else cueDirWord(chosen.dir)
+                cueDone = true
+                lastCueAt = nowMs
+                tts?.speak("注意${prefix}即将变灯")
+                Log.i(TAG, "红绿灯提醒(巡航): 注意${prefix}即将变灯 ${sec}秒 速度=${curSpeed}")
             }
         }
-        // straight == null（无直行数据/占位无效）：保持当前状态，等断流超时或下一个有效帧再重置
+        // 无有效灯：保持当前状态，等断流超时或下一个有效帧再重置
     }
 
     /** 一排胶囊里单个灯的可复用视图（避免每秒重建 View 造成闪烁） */
@@ -942,6 +942,7 @@ class NavInfoHost(
         var lastColor: Int = Int.MIN_VALUE
         var lastArrowRes: Int = 0
         var lastText: String = ""
+        var lastDigits: Int = 0
     }
 
     /** 把红绿灯 JSON 数组渲染为一排胶囊到 [container]（每套卡片各调一次） */
@@ -1058,7 +1059,23 @@ class NavInfoHost(
                     it.arrow.setImageResource(arrowRes)
                     it.lastArrowRes = arrowRes
                 }
-                val text = if (countdown > 0) "$countdown" else ""
+                // 无有效读秒（0/缺字段）显示占位符，避免出现"只有方向没有数字"的胶囊；
+                // 三位数（如 114 秒）按位数缩小字号并放宽最小宽度，否则窄面板里会被压到显示不全
+                val text = if (countdown > 0) "$countdown" else "--"
+                val digits = if (countdown > 0) text.length else 2
+                if (it.lastDigits != digits) {
+                    // 右侧面板宽度有限：两个三位数胶囊并按会超出，必须同时缩小字号和最小宽度，
+                    // 否则最后一个数字会被父容器裁掉
+                    val baseSize = if (compact) 18f else 30f
+                    it.time.textSize = if (digits >= 3) baseSize * 0.62f else baseSize
+                    it.time.minWidth = dp(
+                        when {
+                            digits >= 3 -> if (compact) 20 else 34
+                            compact -> 22
+                            else -> 36
+                        })
+                    it.lastDigits = digits
+                }
                 if (it.lastText != text) {
                     it.time.text = text
                     it.lastText = text
