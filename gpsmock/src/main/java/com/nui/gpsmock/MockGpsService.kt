@@ -52,21 +52,28 @@ class MockGpsService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_SET -> {
-                lat = intent.getDoubleExtra(EXTRA_LAT, lat)
-                lon = intent.getDoubleExtra(EXTRA_LON, lon)
-                heading = intent.getFloatExtra(EXTRA_HEADING, heading)
-                speedKph = intent.getFloatExtra(EXTRA_SPEED, speedKph)
+                // 双通道：--es lat（字符串）为主，--ef latf（float）兜底，兼容旧版 am
+                val latFb = intent?.getNum(EXTRA_LATF, lat) ?: lat
+                lat = intent?.getNum(EXTRA_LAT, latFb) ?: latFb
+                val lonFb = intent?.getNum(EXTRA_LONF, lon) ?: lon
+                lon = intent?.getNum(EXTRA_LON, lonFb) ?: lonFb
+                heading = intent?.getNum(EXTRA_HEADING, heading.toDouble())?.toFloat() ?: heading
+                speedKph = intent?.getNum(EXTRA_SPEED, speedKph.toDouble())?.toFloat() ?: speedKph
                 stopMoving()
                 inject(lat, lon, heading, speedKph)
                 Log.i(TAG, "SET lat=$lat lon=$lon heading=$heading speed=$speedKph injected=$injected")
             }
             ACTION_MOVE -> {
-                lat = intent.getDoubleExtra(EXTRA_LAT, lat)
-                lon = intent.getDoubleExtra(EXTRA_LON, lon)
-                heading = intent.getFloatExtra(EXTRA_HEADING, heading)
-                speedKph = intent.getFloatExtra(EXTRA_SPEED, speedKph)
+                // 双通道：--es lat（字符串）为主，--ef latf（float）兜底，兼容旧版 am
+                val latFb = intent?.getNum(EXTRA_LATF, lat) ?: lat
+                lat = intent?.getNum(EXTRA_LAT, latFb) ?: latFb
+                val lonFb = intent?.getNum(EXTRA_LONF, lon) ?: lon
+                lon = intent?.getNum(EXTRA_LON, lonFb) ?: lonFb
+                heading = intent?.getNum(EXTRA_HEADING, heading.toDouble())?.toFloat() ?: heading
+                speedKph = intent?.getNum(EXTRA_SPEED, speedKph.toDouble())?.toFloat() ?: speedKph
                 startMoving()
                 Log.i(TAG, "MOVE start lat=$lat lon=$lon heading=$heading speed=$speedKph")
+                Log.i(TAG, "MOVE extras=${intent?.extras?.keySet()} latType=${intent?.extras?.get(EXTRA_LAT)?.javaClass?.simpleName}")
             }
             ACTION_STOP -> {
                 stopMoving()
@@ -74,6 +81,23 @@ class MockGpsService : Service() {
             }
         }
         return START_STICKY
+    }
+
+    /**
+     * 兼容读取数值参数：
+     * 旧版 am 不支持 --ed，需用 --es 传字符串；新版可用 --ed/--ef。
+     * 这里按实际 extra 类型解析，传什么都能收。
+     */
+    private fun Intent.getNum(key: String, def: Double): Double {
+        val v = extras?.get(key) ?: return def
+        return when (v) {
+            is Double -> v
+            is Float -> v.toDouble()
+            is Int -> v.toDouble()
+            is Long -> v.toDouble()
+            is String -> v.toDoubleOrNull() ?: def
+            else -> def
+        }
     }
 
     private fun startAsForeground() {
@@ -90,7 +114,13 @@ class MockGpsService : Service() {
         }.setContentTitle("GPS Mock").setContentText("模拟定位运行中").setSmallIcon(
             android.R.drawable.ic_menu_mylocation
         ).build()
-        startForeground(1, n)
+        // 某些系统（如 Android 14 未声明 foregroundServiceType）会抛异常，
+        // 捕获后继续以普通后台服务运行，注入仍然有效。
+        try {
+            startForeground(1, n)
+        } catch (e: Exception) {
+            Log.w(TAG, "startForeground failed: ${e.javaClass.simpleName}: ${e.message}")
+        }
     }
 
     private fun ensureProvider() {
@@ -177,6 +207,8 @@ class MockGpsService : Service() {
         const val ACTION_STOP = "com.nui.gpsmock.STOP"
         const val EXTRA_LAT = "lat"
         const val EXTRA_LON = "lon"
+        const val EXTRA_LATF = "latf"
+        const val EXTRA_LONF = "lonf"
         const val EXTRA_HEADING = "heading"
         const val EXTRA_SPEED = "speed"
     }
