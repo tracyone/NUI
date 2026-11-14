@@ -1794,10 +1794,13 @@ class MainActivity : AppCompatActivity() {
             barLp.bottomMargin = 0
             barLp.gravity = android.view.Gravity.START
         } else {
-            // 悬浮：圆角竖条，高度与右侧音乐栏一致（match_parent + 上下 8dp margin），垂直居中
-            // 注意：不能用 WRAP_CONTENT，因为 dockItems 是 0dp+weight=1，会与父容器 WRAP_CONTENT 形成循环依赖，
-            // 导致 dockItems.height 永远为 0，renderDock 无法渲染图标。
-            barLp.height = resources.displayMetrics.heightPixels - (16 * dp).toInt()
+            // 悬浮：圆角竖条，上下留 8dp，高度铺满父容器（根布局已按系统栏做 padding）。
+            // 注意：不能用 displayMetrics.heightPixels 算高度——窗口高度与根布局高度在系统栏
+            // 显隐切换（尤其 FLAG_LAYOUT_NO_LIMITS 下）并不一致，车机上会出现 dock 变短、
+            // 上下空隙过大的现象。match_parent 由父容器决定高度，两种形态都准确。
+            // 也不能用 WRAP_CONTENT，因为 dockItems 是 0dp+weight=1，会与父容器 WRAP_CONTENT
+            // 形成循环依赖，导致 dockItems.height 永远为 0，renderDock 无法渲染图标。
+            barLp.height = FrameLayout.LayoutParams.MATCH_PARENT
             barLp.leftMargin = (8 * dp).toInt()
             barLp.topMargin = (8 * dp).toInt()
             barLp.bottomMargin = (8 * dp).toInt()
