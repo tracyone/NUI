@@ -153,6 +153,7 @@ class NavInfoHost(
     private val pendingLights = HashMap<Int, JSONObject>()
     private var pendingSize = 0
     private var pendingAt = 0L
+    private var pendingFirstAt = 0L
     private val LIGHT_TIMEOUT_MS = 5_000L
     private val lightHideRunnable = Runnable {
         refs.forEach {
@@ -784,6 +785,7 @@ class NavInfoHost(
         // 多灯组是否已收齐：语音只在整组齐了再判断方向，否则先到的那条会被当成
         // "只有一个灯"，方向词和"倒计时接近"的判断都会出错
         var groupComplete = true
+        var skipRender = false
         val array: JSONArray = if (!lights.isNullOrBlank()) {
             try {
                 JSONArray(lights)
@@ -839,6 +841,7 @@ class NavInfoHost(
                 if (index <= 0 || pendingSize != size || frameAt - pendingAt > 1_200L) {
                     pendingLights.clear()
                     pendingSize = size
+                    pendingFirstAt = frameAt
                 }
                 pendingLights[index] = one
                 pendingAt = frameAt
@@ -846,6 +849,11 @@ class NavInfoHost(
                 for (i in 0 until size) pendingLights[i]?.let { arr.put(it) }
                 if (arr.length() == size) {
                     Log.d(TAG, "红绿灯组: size=$size 已收=${arr.length()}")
+                } else if (frameAt - pendingFirstAt < 1_200L) {
+                    // 半组：同组其余灯几毫秒后才到。若此时重绘，胶囊会由 N 个变 1 个、
+                    // 再变回 N 个，每秒整排重建两次——这就是肉眼看到的闪烁。
+                    // 本帧跳过渲染，保持上一帧完整灯组，等收齐后一次性更新。
+                    skipRender = true
                 }
                 groupComplete = arr.length() == size
                 arr
@@ -871,7 +879,7 @@ class NavInfoHost(
                 // 恢复数据时必须重新展开根容器，否则子容器设为 VISIBLE 也看不见——
                 // 现象就是"日志在渲染红绿灯，屏幕上却没有灯条"。
                 if (currentPage == r.page) r.root.visibility = View.VISIBLE
-                buildCruiseLights(box, array)
+                if (!skipRender) buildCruiseLights(box, array)
             } else box.visibility = View.GONE
         }
         // 断流兜底：超过 LIGHT_TIMEOUT_MS 没再收到 60073 就隐藏（灯已过/高德停止下发）
