@@ -52,6 +52,8 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var mapHost: MapHost
+    /** 统一圆角遮罩层：给地图 / 音乐等外部浮窗补圆角（单 overlay 窗口，多浮窗共用） */
+    private lateinit var cornerMaskLayer: com.nui.launcher.map.CornerMaskLayer
     private lateinit var navHost: NavHost
     private lateinit var musicHost: MusicHost
     private lateinit var wallpaper: WallpaperController
@@ -119,6 +121,8 @@ class MainActivity : AppCompatActivity() {
     private var minusVideo: VideoWallpaperView? = null
     private var ivMinusWallpaper: ImageView? = null
     private var minusSong: TextView? = null
+    private var minusProgressArea: View? = null
+    private var minusMusicArea: LinearLayout? = null
     private var minusArtist: TextView? = null
     private var minusCover: ImageView? = null
     private var minusBar: LinearLayout? = null
@@ -190,6 +194,10 @@ class MainActivity : AppCompatActivity() {
         private var weatherLayerShown = false
         /** 上次天气预警 key 集合（用于检测新出现的重大天气变化） */
         private var lastAlertKeys = emptySet<String>()
+        /** 首次启动语音播报是否已调度：进程级，Activity 重建（首次启动常见）不再重复调度，
+         *  否则两个实例各挂一个 30s 定时器 → 欢迎语说两遍 */
+        @Volatile
+        private var firstWeatherVoiceScheduled = false
     }
 
     private inner class PagerAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
@@ -304,6 +312,8 @@ class MainActivity : AppCompatActivity() {
         minusRoot = v
         minusVideo = v.findViewById(R.id.mvWallpaper)
         minusSong = v.findViewById(R.id.minusSong)
+        minusProgressArea = v.findViewById(R.id.minusProgressArea)
+        minusMusicArea = v.findViewById(R.id.minusMusicArea)
         minusArtist = v.findViewById(R.id.minusArtist)
         minusCover = v.findViewById(R.id.minusCover)
         ivMinusWallpaper = v.findViewById(R.id.ivMinusWallpaper)
@@ -325,7 +335,8 @@ class MainActivity : AppCompatActivity() {
             if (::musicHost.isInitialized) musicHost.next()
         }
         minusBtnPlay?.setOnClickListener {
-            if (::musicHost.isInitialized) musicHost.togglePlay()
+            // 与桌面音乐卡一致：没会话时先弹通知使用权，已授权则拉起绑定的音乐 App
+            if (::musicHost.isInitialized) musicHost.onPlayPressed()
         }
         // 音乐卡（封面/歌名/卡片非按钮区）点击 → 打开绑定的音乐 App（停留在 App 内）
         v.findViewById<View>(R.id.minusMusicArea).setOnClickListener {
@@ -421,6 +432,14 @@ class MainActivity : AppCompatActivity() {
         val posTv = root.findViewById<TextView>(R.id.minusPosTime) ?: return
         val durTv = root.findViewById<TextView>(R.id.minusDurTime) ?: return
         val progress = if (::musicHost.isInitialized) musicHost.playbackProgress() else null
+        // 会话判定：有歌名或能拿到播放进度（车机 32 位下 playbackProgress 可能暂不可用，
+        // 只靠它判断会误隐藏控件，故带上歌名一起判断）
+        val hasSession = (minusSong?.text?.isNotEmpty() == true) || progress != null
+        // 没有会话时不显示时间+进度条：用 INVISIBLE 而不是 GONE，保留它占的宽度，
+        // 右边三个播放控件才会一直贴在最右侧（GONE 会让它们跟着内容左移）
+        minusProgressArea?.visibility = if (hasSession) View.VISIBLE else View.INVISIBLE
+        // 播放控件常驻且在横条最右侧（布局本来就贴右），没歌时也要能点播放拉起绑定的音乐 App
+        minusMusicArea?.gravity = Gravity.START or Gravity.CENTER_VERTICAL
         if (progress == null) {
             minusDurationMs = 0L
             if (!minusSeeking) {
@@ -1125,6 +1144,14 @@ class MainActivity : AppCompatActivity() {
                 }
                 // 离开桌面页时隐藏导航/巡航信息卡（负一屏/应用列表不显示悬浮信息）
                 navInfoHost?.onPageChanged(position)
+                // 圆角遮罩：离开桌面立即隐藏；回桌面先按当前几何显示，浮窗恢复后 onFloatShown 再校准。
+                // 地图浮窗恢复是异步的（且几何未变时 showmap 会被幂等去重、不再回调 onFloatShown），
+                // 所以回桌面后再补两次延迟同步，保证遮罩不会因为时序错过浮窗而整页缺失。
+                syncCornerMask()
+                if (position == 1) {
+                    binding.root.postDelayed({ if (!isDestroyed && !isFinishing) syncCornerMask() }, 700)
+                    binding.root.postDelayed({ if (!isDestroyed && !isFinishing) syncCornerMask() }, 1800)
+                }
                 syncWeatherLayer(position)
                 // 悬浮歌词（全局窗）：负一屏(0)与桌面(1)显示，应用列表(2+)隐藏。
                 // 【性能】显示延迟到 IDLE（updateLyricFloat 可能 addView IPC）；隐藏立即执行。
@@ -1286,7 +1313,9 @@ class MainActivity : AppCompatActivity() {
      *  期间高德返回中则暂存，返回完成后 flush 播放（正常 10s 内返回，30s 后基本直接播）。 */
     private fun scheduleFirstWeatherVoice() {
         if (firstWeatherScheduled) return
+        if (firstWeatherVoiceScheduled) return
         firstWeatherScheduled = true
+        firstWeatherVoiceScheduled = true
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
             firstWeatherCheckDone = true
             val info = weatherFetcher.current
@@ -1434,7 +1463,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun startActivity(intent: Intent?, options: android.os.Bundle?) {
+        val launchingExternal = intent?.component?.packageName?.let { it != packageName } == true
+        lastExternalLaunchAt = android.os.SystemClock.elapsedRealtime()
+        if (launchingExternal && ::cornerMaskLayer.isInitialized) cornerMaskLayer.detach()
+        super.startActivity(intent, options)
+    }
+
     override fun startActivity(intent: Intent?) {
+        // 启动别的 App 时，在真正 startActivity 之前就摘掉圆角遮罩：
+        // onPause 要等系统调度，启动动画的头几帧会把四角壁纸块带到对方界面上。
+        val launchingExternal = intent?.component?.packageName?.let { it != packageName } == true
+        lastExternalLaunchAt = android.os.SystemClock.elapsedRealtime()
+        if (launchingExternal && ::cornerMaskLayer.isInitialized) cornerMaskLayer.detach()
         super.startActivity(intent)
         // 启动的不是自己（外部 app），记录标志位和当前 page，按 home 回来时恢复
         if (intent?.component?.packageName != packageName) {
@@ -1520,6 +1561,8 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         android.util.Log.d("NUI.Main", "onResume page=${binding.viewPager.currentItem} launchedExternal=$launchedExternalApp")
+        maskHandler.removeCallbacks(cornerMaskWatchdog)
+        maskHandler.postDelayed(cornerMaskWatchdog, 700L)
         // 负一屏按 Home 回桌面：onResume 紧随 onNewIntent 执行，此刻 ViewPager 刚开始平滑滚动。
         // 下面这些重活（改窗口 flags、重设图标、整棵树 requestLayout、跨进程查导航状态）
         // 全在主线程，会把翻页动画的启动帧卡住 1s 以上——手动滑动不经过 onResume 所以不卡。
@@ -1628,6 +1671,10 @@ class MainActivity : AppCompatActivity() {
             mapHost.onPause()
             mapHost.cancelPendingShow()
         }
+        // 遮罩是 TYPE_APPLICATION_OVERLAY，会盖在其他 App 之上：退前台直接摘除窗口，
+        // 否则全屏 App / 系统界面四角会残留壁纸块（GONE 在某些机型上仍留 surface，所以用 detach）。
+        maskHandler.removeCallbacks(cornerMaskWatchdog)
+        if (::cornerMaskLayer.isInitialized) cornerMaskLayer.detach()
         if (::musicHost.isInitialized) {
             musicHost.setFloatAreaVisible(false)
             // 退后台关闭音乐浮窗，避免悬浮在其他 App / 系统弹窗之上
@@ -1644,6 +1691,9 @@ class MainActivity : AppCompatActivity() {
         if (::weatherVoice.isInitialized) weatherVoice.shutdown()
         if (::weatherLayer.isInitialized) weatherLayer.removeCallbacks(weatherLayerFadeRunnable)
         if (::mapHost.isInitialized) { mapHost.hideDivider(); mapHost.onDestroy() }
+        maskHandler.removeCallbacks(cornerMaskWatchdog)
+        runCatching { maskCheckExecutor.shutdownNow() }
+        if (::cornerMaskLayer.isInitialized) cornerMaskLayer.release()
         if (::musicHost.isInitialized) musicHost.onDestroy()
         minusProgressTick?.let { minusProgressHandler.removeCallbacks(it) }
         minusProgressTick = null
@@ -1813,7 +1863,9 @@ class MainActivity : AppCompatActivity() {
         if (::mapHost.isInitialized) {
             val mapRadius = (24 * dp).toInt()
             desktopMapPanel?.radius = if (edge) 0f else mapRadius.toFloat()
-            mapHost.setCornerMask(!edge, mapRadius)
+            // 浮窗圆角改由统一的 CornerMaskLayer 处理（单窗口、地图+音乐共用），旧四角遮罩停用
+            mapHost.setCornerMask(false, 0)
+            if (::cornerMaskLayer.isInitialized) syncCornerMask()
         }
 
         // 地图卡片：dock 右侧留出 12dp 统一间距（参考氢桌面比例）
@@ -1986,13 +2038,22 @@ class MainActivity : AppCompatActivity() {
         val rightPanel = desktopRightPanel ?: return
         val btnSwitchMap = desktopBtnSwitchMap ?: return
 
+        cornerMaskLayer = com.nui.launcher.map.CornerMaskLayer(this, (24 * resources.displayMetrics.density).toInt())
+        cornerMaskLayer.wallpaperProvider = { binding.root.background }
+
         mapHost = MapHost(this, mapContainer, mapPanel)
         // 浮窗几何只在页面静止时采样：翻页动画中 mapPanel 屏幕坐标是过渡值
         mapHost.pageSettledProvider = { pagerIdle }
         // 圆角遮罩需要壁纸像素：直接取根布局背景（WallpaperController 设置的即为铺满全屏的壁纸）
         mapHost.wallpaperProvider = { binding.root.background }
-        mapHost.onGeometryChanged = { binding.root.post { syncRightPanel(); mapHostRefreshDivider(); positionSwapHandles(); syncMusicFloat(); if (::musicHost.isInitialized) musicHost.requestFloatRefresh(); mapHost.refreshCornerMask() } }
-        mapHost.onFloatShown = { if (::musicHost.isInitialized) musicHost.bringLyricFloatToFront(); bringSwapHandlesToFront() }
+        mapHost.onGeometryChanged = { binding.root.post { syncRightPanel(); mapHostRefreshDivider(); positionSwapHandles(); syncMusicFloat(); if (::musicHost.isInitialized) musicHost.requestFloatRefresh(); mapHost.refreshCornerMask(); syncCornerMask() } }
+        mapHost.onFloatShown = {
+            if (::musicHost.isInitialized) musicHost.bringLyricFloatToFront()
+            bringSwapHandlesToFront()
+            // 浮窗刚被它自己 addView 到栈顶，把圆角遮罩重新提到最上，避免"先露一帧方角"
+            if (::cornerMaskLayer.isInitialized) cornerMaskLayer.bringToFront()
+            syncCornerMask()
+        }
         mapHost.onAutoReturnDone = { flushPendingWeatherVoice() }
         mapHost.onPickMap = {
             mapHost.closeFloat()
@@ -2044,7 +2105,107 @@ class MainActivity : AppCompatActivity() {
         if (!::musicHost.isInitialized) return
         val onDesktop = binding.viewPager.currentItem == 1
         val panelVisible = desktopRightPanel?.visibility == View.VISIBLE
-        musicHost.setMusicFloatVisible(onDesktop && panelVisible)
+        val want = onDesktop && panelVisible
+        // 翻页动画中右侧面板还在移动，这时取到的是过渡坐标（实测出现过
+        // Rect(556,4-804,716) 这类屏幕中部的值）。此时重发 showmap 会让
+        // 音乐浮窗瞬移到中间再跳回来 —— 这正是"切换时位置跳变"的成因。
+        // 动画期间只处理"该关闭"，显示一律等 IDLE 后的那次 syncMusicFloat 落位。
+        if (!pagerIdle) {
+            if (!want) musicHost.setMusicFloatVisible(false)
+            syncCornerMask()
+            return
+        }
+        musicHost.setMusicFloatVisible(want)
+        syncCornerMask()
+    }
+
+    /** 收集当前需要圆角的外部浮窗矩形（地图 / 音乐），交给统一遮罩层 [cornerMaskLayer]。
+     *
+     *  只有「外观=悬浮」且停在桌面页才需要（贴边形态是直角卡片，负一屏/应用列表没有浮窗）。
+     *  地图浮窗矩形由 MapHost 提供（含 4px 外扩），音乐浮窗矩形就是右侧音乐面板（同样外扩 4px），
+     *  与 sendMusicFloatBroadcast 里给音乐 App 的 showmap 边界保持完全一致，遮罩才能严丝合缝。 */
+    /** 栈顶包名查询走后台线程：getRunningTasks 是跨进程 Binder，车机上可能几毫秒，
+     *  放在主线程会压翻页/拖动动画，所以一律异步查、查完回主线程再决定摘不摘窗。 */
+    private val maskCheckExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private val maskHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var maskCheckPending = false
+
+    private var lastExternalLaunchAt = 0L
+
+    private fun scheduleForegroundCheck() {
+        // 只在"刚启动过外部 App"的 10s 窗口内做栈顶校验。
+        // 平时桌面静止时查它没有任何收益，而部分车机 ROM 的 getRunningTasks 返回不可靠
+        // （把还在前台的 Launcher 判成"不是栈顶"），会把圆角误摘之后再也不恢复。
+        if (android.os.SystemClock.elapsedRealtime() - lastExternalLaunchAt > 10_000L) return
+        if (maskCheckPending || isDestroyed || isFinishing) return
+        maskCheckPending = true
+        maskCheckExecutor.execute {
+            val top = try {
+                val am = getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                am.getRunningTasks(1).firstOrNull()?.topActivity?.packageName
+            } catch (e: Exception) {
+                null
+            }
+            maskHandler.post {
+                maskCheckPending = false
+                if (isDestroyed || isFinishing) return@post
+                // top 为 null（权限受限/查询失败）时保守不动，宁可留着也不误摘
+                val notMine = top != null && top != packageName
+                if (notMine || !hasWindowFocus()) {
+                    if (::cornerMaskLayer.isInitialized) cornerMaskLayer.detach()
+                }
+            }
+        }
+    }
+
+    private val cornerMaskWatchdog = object : Runnable {
+        override fun run() {
+            if (isDestroyed || isFinishing) return
+            if (!::cornerMaskLayer.isInitialized) return
+            // 主线程只做零成本的焦点判断；需要查栈顶时丢给后台线程
+            if (!hasWindowFocus()) cornerMaskLayer.detach() else scheduleForegroundCheck()
+            maskHandler.postDelayed(this, 1_000L)
+        }
+    }
+
+    private fun syncCornerMask() {
+        if (!::cornerMaskLayer.isInitialized || isDestroyed || isFinishing) return
+        // 延迟任务（回桌面 700/1800ms 兜底、焦点回调 300ms）可能在"已经启动别的 App"之后才执行，
+        // 这时再把窗口 add 回来就会挂到对方全屏界面上 —— 必须只在前台且有焦点时才允许出现。
+        if (!hasWindowFocus()) {
+            cornerMaskLayer.detach()
+            return
+        }
+        val onDesktop = binding.viewPager.currentItem == 1
+        val floating = UiTheme.dockStyle(this) == UiTheme.DockStyle.FLOAT
+        if (!onDesktop || !floating) {
+            cornerMaskLayer.setVisible(false)
+            return
+        }
+        // 翻页动画期间右侧面板还在移动，rightPanelBounds() 会返回中间态坐标，
+        // 直接画会在屏幕中部闪一块遮罩。动画期先不画，等 idle（含下面 700/1800ms 兜底）再画。
+        if (!pagerIdle) {
+            cornerMaskLayer.setVisible(false)
+            return
+        }
+        val targets = ArrayList<com.nui.launcher.map.CornerMaskLayer.Target>(2)
+        if (::mapHost.isInitialized) {
+            mapHost.floatWindowRect()?.let { targets.add(com.nui.launcher.map.CornerMaskLayer.Target(it)) }
+        }
+        if (::musicHost.isInitialized && musicHost.isMusicFloatShowing()) {
+            rightPanelBounds()?.let {
+                val inset = 4
+                targets.add(
+                    com.nui.launcher.map.CornerMaskLayer.Target(
+                        android.graphics.Rect(it[0] - inset, it[1] - inset, it[2] + inset, it[3] + inset),
+                    ),
+                )
+            }
+        }
+        cornerMaskLayer.update(targets, true)
+        // 异步复核栈顶：如果 700/1800ms 这类延迟任务执行时目标 App 已经在前台，
+        // 这里会在下一帧把它摘掉，而不是把窗口留在对方界面上。
+        scheduleForegroundCheck()
     }
 
     /** 弹出地图选择器更换悬浮地图。[onPicked] 在选择后回调（设置面板用它刷新绑定名称）。
@@ -2136,8 +2297,12 @@ class MainActivity : AppCompatActivity() {
         musicHost.musicPanelBoundsProvider = { rightPanelBounds() }
         // 负一屏横条音乐区：同步歌名/歌手/封面/播放状态
         musicHost.onMinusMusic = { title, artist, cover, playing ->
-            minusSong?.text = title.ifEmpty { "点击打开音乐" }
+            // 没有会话时不显示任何提示文案（"点击打开音乐"这种占位文案太难看了），
+            // 点击行为仍由 minusMusicArea 的点击监听保留
+            minusSong?.text = title
             minusArtist?.text = artist
+            // 音乐 App 没启动 / 没有会话：时间+进度条整块不显示
+            minusProgressArea?.visibility = if (title.isNotEmpty()) View.VISIBLE else View.GONE
             if (cover != null) {
                 minusCover?.setImageBitmap(cover)
                 minusCover?.visibility = View.VISIBLE
@@ -2754,6 +2919,12 @@ class MainActivity : AppCompatActivity() {
             // 难看且挡住点击），必须先隐藏。对话框关闭时上面的 hasFocus 分支会恢复。
             //（底部互换横条由 onDividerVisibilityChanged 联动隐藏，无需单独处理）
             if (::mapHost.isInitialized) mapHost.setDividerVisible(false)
+            // 圆角遮罩同理：它也是 overlay，失焦（启动其他 App / 弹窗 / 系统界面）时必须摘掉，
+            // 否则四角壁纸块会挂到别人的全屏界面上。
+            if (::cornerMaskLayer.isInitialized) cornerMaskLayer.detach()
+        }
+        if (hasFocus && ::cornerMaskLayer.isInitialized) {
+            binding.root.postDelayed({ if (!isDestroyed && !isFinishing) syncCornerMask() }, 300)
         }
     }
 

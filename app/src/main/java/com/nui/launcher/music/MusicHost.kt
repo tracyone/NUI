@@ -225,6 +225,9 @@ class MusicHost(
         }
     }
 
+    /** 绑定的音乐 App 当前是否正在音乐面板区域内悬浮显示 */
+    fun isMusicFloatShowing(): Boolean = musicFloatRequested
+
     /** 请求/取消绑定的音乐 App 在音乐窗口内悬浮显示。
      *  visible=true 且已开启设置、有绑定 App → 发悬浮广播（已显示时按最新几何防抖重发）；
      *  否则发关闭广播（幂等，未显示时也安全）。 */
@@ -316,7 +319,10 @@ class MusicHost(
      *  已在运行（播放/暂停）则直接切歌，不重复启动。 */
     fun next() {
         val c = currentController
-        if (c == null) { if (hasPermission) launchPreferredApp(); return }
+        if (c == null) {
+            if (hasPermission) launchPreferredApp() else requestPermission()
+            return
+        }
         safe { c.transportControls.skipToNext() }
     }
     /** 打开绑定的音乐 App 并停留在 App 内（桌面/负一屏音乐卡点击封面/卡片非按钮区：
@@ -324,7 +330,10 @@ class MusicHost(
     fun openApp() = launchPreferredApp(autoReturn = false)
     fun prev() {
         val c = currentController
-        if (c == null) { if (hasPermission) launchPreferredApp(); return }
+        if (c == null) {
+            if (hasPermission) launchPreferredApp() else requestPermission()
+            return
+        }
         safe { c.transportControls.skipToPrevious() }
     }
 
@@ -747,6 +756,9 @@ class MusicHost(
         // 用户刚点过暂停（2s 内），不自动恢复（避免和用户操作竞争）
         if (now - lastUserPauseAt < 2000L) return
         if (now - lastAutoResumeAt < 10_000L) return
+        // 上一次恢复被 App 拒绝（仍是暂停）后冷却 60s：车机版音乐后台拒绝起播时，
+        // 反复 play 只会让 App 连续跳过歌曲，不如安静等待用户手动操作。
+        if (android.os.SystemClock.elapsedRealtime() - autoResumeFailedAt < 60_000L) return
         val preferred = prefs.getString(KEY_APP, null) ?: return
         val controller = currentController ?: return
         if (controller.packageName != preferred) return
@@ -757,20 +769,23 @@ class MusicHost(
         scheduleAuto(800L) { doAutoResumePlay(controller) }
     }
 
+    /** 最近一次"恢复播放后仍是暂停"的失败时刻（elapsedRealtime） */
+    private var autoResumeFailedAt = 0L
+
     private fun doAutoResumePlay(controller: MediaController) {
         if (userPaused) return
         // 双保险：用户 2s 内手动暂停过也直接放弃（cancelAllAuto 后这里基本不会走到）
         if (System.currentTimeMillis() - lastUserPauseAt < 2000L) return
         runCatching { controller.transportControls.play() }
             .onFailure { Log.w(TAG, "自动恢复 play() 失败: ${it.message}") }
-        autoResumeRetry++
-        // 32 位模拟器上酷我可能在 play() 后再次暂停：2s 后检查，如果仍暂停则重试
-        if (autoResumeRetry < 3) {
-            scheduleAuto(2000L) {
-                val st = controller.playbackState?.state
-                if (!userPaused && st == PlaybackState.STATE_PAUSED) {
-                    doAutoResumePlay(controller)
-                }
+        // 只 play 一次，2s 后仅做判定，不再重试。
+        // 酷我不允许后台起播时，play() 会走到它自己的 "play fail,next music" 分支，
+        // 每发一次 play 就跳过一首歌 —— 原来 3 次重试等于连跳 3 首，这就是"自己跳到下一首"。
+        scheduleAuto(2000L) {
+            val st = controller.playbackState?.state
+            if (!userPaused && st == PlaybackState.STATE_PAUSED) {
+                autoResumeFailedAt = android.os.SystemClock.elapsedRealtime()
+                Log.i(TAG, "自动恢复未生效，冷却 60s 不再尝试（避免触发 App 连跳下一首）")
             }
         }
     }
@@ -809,12 +824,8 @@ class MusicHost(
             setImageResource(android.R.drawable.ic_media_play)
             setColorFilter(p.textSecondary)
         }, LinearLayout.LayoutParams(dp(40), dp(40)).apply { bottomMargin = dp(6) })
-        v.addView(TextView(context).apply {
-            text = if (hasPermission) "点击打开音乐" else "点击授权读取歌曲"
-            setTextColor(p.textSecondary)
-            textSize = 13f
-            gravity = Gravity.CENTER
-        })
+        // 提示文案去掉（"点击打开音乐"这类占位文字太丑），只保留整卡点击行为：
+        // 已授权 → 启动绑定的音乐 App；未授权 → 弹权限申请
         v.setOnClickListener { if (hasPermission) launchPreferredApp() else requestPermission() }
         v.setOnLongClickListener { pickPreferredApp(); true }
         container.addView(v)
@@ -950,6 +961,16 @@ class MusicHost(
     var onMinusMusic: ((title: String, artist: String, cover: Bitmap?, playing: Boolean) -> Unit)? = null
     /** 负一屏歌词回调：每 100ms 把当前行/下一行歌词同步给负一屏横条中间 */
     var onMinusLyric: ((current: String, next: String) -> Unit)? = null
+
+    /** 播放按钮统一入口（负一屏横条）：
+     *  有会话 → 直接切播放/暂停；
+     *  无会话（首次安装/音乐 App 没启动）→ 与桌面音乐启动卡一致：
+     *    未授予通知使用权 → 先弹权限申请；已授权 → 拉起绑定的音乐 App。 */
+    fun onPlayPressed() {
+        val c = currentController
+        if (c != null) { togglePlay(); return }
+        if (hasPermission) launchPreferredApp() else requestPermission()
+    }
 
     /** 负一屏横条播放/暂停按钮：切换当前控制器播放状态 */
     fun togglePlay() {

@@ -82,14 +82,18 @@
 
                 <TextView
                     android:id="@+id/navLabelHome"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
+                    android:gravity="center"
                     android:text="回家"
                     android:textSize="12sp"
                     android:textColor="@color/text_primary"
                     android:maxLines="1"
-                    android:ellipsize="end" />
+                    app:autoSizeTextType="uniform"
+                    app:autoSizeMinTextSize="8sp"
+                    app:autoSizeMaxTextSize="12sp"
+                    app:autoSizeStepGranularity="1sp" />
             </LinearLayout>
 
             <LinearLayout
@@ -118,14 +122,18 @@
 
                 <TextView
                     android:id="@+id/navLabelCompany"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
+                    android:gravity="center"
                     android:text="公司"
                     android:textSize="12sp"
                     android:textColor="@color/text_primary"
                     android:maxLines="1"
-                    android:ellipsize="end" />
+                    app:autoSizeTextType="uniform"
+                    app:autoSizeMinTextSize="8sp"
+                    app:autoSizeMaxTextSize="12sp"
+                    app:autoSizeStepGranularity="1sp" />
             </LinearLayout>
 
             <LinearLayout
@@ -154,14 +162,18 @@
 
                 <TextView
                     android:id="@+id/navLabelFavorite"
-                    android:layout_width="wrap_content"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
+                    android:gravity="center"
                     android:text="收藏"
                     android:textSize="12sp"
                     android:textColor="@color/text_primary"
                     android:maxLines="1"
-                    android:ellipsize="end" />
+                    app:autoSizeTextType="uniform"
+                    app:autoSizeMinTextSize="8sp"
+                    app:autoSizeMaxTextSize="12sp"
+                    app:autoSizeStepGranularity="1sp" />
             </LinearLayout>
         </LinearLayout>
 

@@ -1071,6 +1071,20 @@ class MapHost(
     private fun cornerRadiusPx(): Int =
         if (cornerMaskEnabled && cornerMaskRadiusPx > 0) cornerMaskRadiusPx else 0
 
+    /** 当前外部浮窗的屏幕矩形（已含 floatInsetPx 外扩）；非悬浮形态 / 几何未就绪 / 未显示时返回 null。
+     *  供统一圆角遮罩层（CornerMaskLayer）使用。 */
+    fun floatWindowRect(): android.graphics.Rect? {
+        if (current?.type != MapSource.Type.EXTERNAL_FLOAT) return null
+        if (!floatEnabled) return null
+        if (cachedW - cachedX <= 0 || cachedH - cachedY <= 0) return null
+        return android.graphics.Rect(
+            cachedX - floatInsetPx,
+            cachedY - floatInsetPx,
+            cachedW + floatInsetPx,
+            cachedH + floatInsetPx,
+        )
+    }
+
     /** 几何变化后重定位圆角遮罩（拖动/缩放/互换后调用） */
     fun refreshCornerMask() {
         if (cornerMaskVisible) applyCornerMask()
