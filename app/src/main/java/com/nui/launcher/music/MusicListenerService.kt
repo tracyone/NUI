@@ -19,6 +19,7 @@ import android.widget.RemoteViews
 import android.widget.TextView
 import androidx.annotation.RequiresApi
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import com.nui.launcher.BuildConfig
 
 /**
  * 通知监听器：两个作用
@@ -70,7 +71,7 @@ class MusicListenerService : NotificationListenerService() {
             ?: bigText?.takeIf { LRC_LIKE.containsMatchIn(it) }
             ?: remoteLyric(notify)
         if (candidate != null) {
-            Log.d(TAG, "通知取到歌词 ${candidate.length} 字（$pkg）")
+            if (BuildConfig.DEBUG) Log.d(TAG, "通知取到歌词 ${candidate.length} 字（$pkg）")
         } else if (dumpedPkgs.add(pkg)) {
             // 每个包只打一次：拿到通知却找不到歌词时，把 extras 的 key 列出来，
             // 便于确认真实设备上 App 到底把歌词放在哪个字段（不刷屏）

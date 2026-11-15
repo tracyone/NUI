@@ -12,8 +12,8 @@ android {
         applicationId = "com.nui.launcher"
         minSdk = 21
         targetSdk = 34
-        versionCode = 82
-        versionName = "0.0.82"
+        versionCode = 83
+        versionName = "0.0.83"
         // ABI 由 productFlavors 拆分（arm32 / arm64），见下
     }
 
@@ -31,6 +31,11 @@ android {
         create("arm64") {
             dimension = "arch"
         }
+    }
+
+    // 诊断日志走 BuildConfig.DEBUG：debug 包保留，release 包被 R8 当死代码裁掉
+    buildFeatures {
+        buildConfig = true
     }
 
     buildTypes {

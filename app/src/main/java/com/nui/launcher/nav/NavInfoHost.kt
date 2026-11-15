@@ -19,6 +19,7 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.nui.launcher.BuildConfig
 import com.nui.launcher.R
 import com.nui.launcher.voice.NuiTts
 import org.json.JSONArray
@@ -172,8 +173,8 @@ class NavInfoHost(
         override fun onReceive(ctx: Context?, intent: Intent?) {
             val kt = intent?.getIntExtra("KEY_TYPE", -1)
             if (kt == KEY_TYPE_TRAFFIC_LIGHT) {
-                // 高德 1Hz 发帧，release 包不宜刷 I 级日志；排查协议时开 debug 可见
-                Log.d(TAG, "60073 到达 NUI: extras=${dumpExtras(intent)}")
+                // 高德 1Hz 发帧，release 包不打：字符串拼接与写日志都在 release 裁掉
+                if (BuildConfig.DEBUG) Log.d(TAG, "60073 到达 NUI: extras=${dumpExtras(intent)}")
             }
             when (kt) {
                 KEY_TYPE_NAV_STATE -> handleNavState(intent!!)
@@ -848,7 +849,7 @@ class NavInfoHost(
                 val arr = JSONArray()
                 for (i in 0 until size) pendingLights[i]?.let { arr.put(it) }
                 if (arr.length() == size) {
-                    Log.d(TAG, "红绿灯组: size=$size 已收=${arr.length()}")
+                    if (BuildConfig.DEBUG) Log.d(TAG, "红绿灯组: size=$size 已收=${arr.length()}")
                 } else if (frameAt - pendingFirstAt < 1_200L) {
                     // 半组：同组其余灯几毫秒后才到。若此时重绘，胶囊会由 N 个变 1 个、
                     // 再变回 N 个，每秒整排重建两次——这就是肉眼看到的闪烁。
