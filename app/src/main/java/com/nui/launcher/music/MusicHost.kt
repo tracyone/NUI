@@ -130,11 +130,16 @@ class MusicHost(
             // 封面只在通知标题与当前歌曲匹配时才设置（避免切歌后收到上一首的通知导致封面张冠李戴）
             val titleMatch = title.isNullOrBlank() || lastTitle.isBlank() || title == lastTitle
             if (cover != null && lastCover == null && titleMatch) lastCover = cover
-            if (!lyric.isNullOrBlank() && lastLyricRaw == null) lastLyricRaw = lyric
-            // 如果歌词从无变有，重新 parseLrc 触发悬浮窗显示
-            if (!lyric.isNullOrBlank() && lyrics.isEmpty()) {
-                val parsed = parseLrc(lastLyricRaw)
-                if (parsed.isNotEmpty()) { lyrics = parsed; lyricHighlight = -1 }
+            // App 自己给的歌词最准：只要与当前歌匹配就采用（覆盖网易云/QQ 抓词的结果，
+            // 解决"网络搜到的歌词经常是别首歌/翻唱版"的问题）
+            if (!lyric.isNullOrBlank() && titleMatch && lyric != lastLyricRaw) {
+                lastLyricRaw = lyric
+                val parsed = parseLrc(lyric)
+                if (parsed.isNotEmpty()) {
+                    lyrics = parsed
+                    lyricHighlight = -1
+                    Log.d(TAG, "采用通知歌词 ${lyric.length} 字")
+                }
             }
             // 封面或歌词更新后，立即重绘一次（不等待 refresh() 轮询）
             if (currentController != null && (cover != null || !lyric.isNullOrBlank())) {
@@ -370,8 +375,7 @@ class MusicHost(
         val newTitle = md?.getString(MediaMetadata.METADATA_KEY_TITLE)
         val newArtist = md?.getString(MediaMetadata.METADATA_KEY_ARTIST)
         val newArt = md?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
-        val newLyricRaw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N)
-            md?.getString("android.media.metadata.LYRIC") else null
+        val newLyricRaw = lyricFromMetadata(md, controller.packageName ?: "")
         // 切歌：title 变了就更新缓存，且主动丢掉旧歌词（避免酷我AIDL滞后时张冠李戴）
         val songSwitched = newTitle != null && newTitle.isNotBlank() && newTitle != lastTitle
         if (songSwitched) {
@@ -393,6 +397,9 @@ class MusicHost(
         onMinusMusic?.invoke(title, artist, art, isPlaying(controller.playbackState))
         // 歌词内容变化（切歌/重新抓词）才重置高亮；同歌词的重复渲染保留当前高亮，避免闪烁回 ♪
         val recomputed = parseLrc(lastLyricRaw)
+        if (recomputed.size != lyrics.size && recomputed.isNotEmpty()) {
+            Log.d(TAG, "歌词解析 ${recomputed.size} 行，首行 ${recomputed.first().first}ms")
+        }
         if (recomputed != lyrics) lyricHighlight = -1
         lyrics = recomputed
         // 歌词为空（MediaSession 元数据不带歌词）：按歌名+歌手走网络抓词（通用兜底，QQ/酷我等均适用）
@@ -842,8 +849,17 @@ class MusicHost(
         val key = "$t||$lastArtist"
         if (key == lyricFetchKey) return
         lyricFetchKey = key
-        android.util.Log.d("NUI.MusicHost", "maybeFetchLyric: $t - $lastArtist")
-        lyricFetcher.requestLyric(t, lastArtist, 0L, allowQqFallback = false)
+        // 酷我：歌词只认它自己经 MediaSession 透出的那份（改包注入 android.media.metadata.LYRIC），
+        // 不再走网络抓词——网络匹配同名不同版本正是歌词经常错的主因。
+        val pkg = currentController?.packageName ?: ""
+        if (pkg.startsWith("cn.kuwo")) {
+            Log.d(TAG, "maybeFetchLyric: 酷我走 media_session 歌词，跳过网络: $t - $lastArtist")
+            return
+        }
+        Log.d(TAG, "maybeFetchLyric: $t - $lastArtist")
+        // 传真实时长：网易云候选按时长排除同名不同版本，匹配不到时再用 QQ 兜底
+        val dur = currentController?.metadata?.getLong(android.media.MediaMetadata.METADATA_KEY_DURATION) ?: 0L
+        lyricFetcher.requestLyric(t, lastArtist, dur, allowQqFallback = true)
     }
 
     /** 启动首选音乐 App，延迟返回 NUI（与地图逻辑一致）。
@@ -1294,11 +1310,54 @@ class MusicHost(
         """^(作词|作曲|编曲|制作人|制作|监制|混音|母带|录音|和声|合声|吉他|贝斯|键盘|弦乐|钢琴|鼓|发行|出品|版权|原唱|翻唱|纯音乐|OP|SP|演唱|统筹|企划|营销|宣传|推广|出版|授权|策划|填词|谱曲|原曲|原词|念白|口白|说唱|配唱|人声|封面|视觉|设计|插画|摄影|导演|编剧|剪辑|特效|调色|字幕|翻译|校对|审核|鸣谢|感谢|联合出品|联合发行|独家发行|独家出品|音乐统筹|音乐发行|音乐出品|音乐制作|音乐监制|音乐企划|音乐营销|音乐宣传|音乐推广|出品人|发行人|监制人|厂牌|唱片公司|经纪公司|经纪|代理|总代理|独家代理|发行代理|版权代理|词曲版权|录音版权|词曲|词曲作者|词曲创作|创作|创作者|创作人|原创|专辑|单曲|EP|流派|风格|语言|地区|国家|发行时间|发行日期|ISRC|UPC|EAN|条形码|唱片编号|版权所有|翻录必究|版权声明|法律声明)\s*[:：]?.*$"""
     )
 
-    /** 解析 LRC 格式歌词：[mm:ss.xx]歌词文本 → (timeMs, text) 列表。 */
+    /** LRC 时间戳特征：[mm:ss 或 [mm:ss.xx，用于识别"这段文本是歌词" */
+    private val LRC_LIKE = Regex("""\[\d{1,2}:\d{2}""")
+
+    /** 从 MediaSession metadata 取歌词：先标准 key，再扫厂商自定义 key
+     *  （酷我等车机版常把整首 LRC 塞在 "cn.kuwo.lyric" 这类自定义字段里）。
+     *
+     *  MediaMetadata 内部就是一个 Bundle，直接反射取出后按实际类型读：
+     *  用 getString() 遍历遇到 Long/Bitmap 字段会抛 ClassCastException，
+     *  系统会打一串 "Attempt to cast generated internal exception" 警告。 */
+    private fun lyricFromMetadata(md: android.media.MediaMetadata?, pkg: String): String? {
+        if (md == null) {
+            // 每包只打一次：区分「App 没发布 metadata」和「发布了但没歌词」
+            if (dumpedMetaPkgs.add("$pkg#null")) Log.d(TAG, "metadata 为空 pkg=$pkg（App 未发布 metadata）")
+            return null
+        }
+        val bundle = runCatching {
+            android.media.MediaMetadata::class.java
+                .getDeclaredField("mBundle")
+                .apply { isAccessible = true }
+                .get(md) as? android.os.Bundle
+        }.getOrNull() ?: return null
+        var hit: String? = null
+        for (key in bundle.keySet()) {
+            val raw = bundle.get(key) ?: continue
+            val text = when (raw) {
+                is CharSequence -> raw.toString()
+                is Array<*> -> raw.joinToString("\n") { it?.toString() ?: "" }
+                else -> null
+            } ?: continue
+            if (text.length >= 40 && LRC_LIKE.containsMatchIn(text)) { hit = text; break }
+        }
+        if (hit != null && hit.length != lastMetaLyricLen) {
+            lastMetaLyricLen = hit.length
+            Log.d(TAG, "metadata 歌词 ${hit.length} 字 pkg=$pkg")
+        }
+        if (hit == null && dumpedMetaPkgs.add(pkg)) {
+            // 每个包只打一次：真机上确认酷我把歌词放在哪个字段（没有就是压根没给）
+            Log.d(TAG, "metadata 无歌词 pkg=$pkg keys=${bundle.keySet().joinToString()}")
+        }
+        return hit
+    }
+
+    /** 解析 LRC 格式歌词：[mm:ss.xx]歌词文本 → (timeMs, text) 列表。
+     *  毫秒部分可缺省（酷我经 MediaSession 注入的是 [mm:ss] 形式）。 */
     private fun parseLrc(raw: String?): List<Pair<Long, String>> {
         if (raw.isNullOrBlank()) return emptyList()
         val result = mutableListOf<Pair<Long, String>>()
-        val tagRe = Regex("""\[(\d{1,2}):(\d{2})[.:](\d{1,3})\]""")
+        val tagRe = Regex("""\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]""")
         for (line in raw.lines()) {
             val matches = tagRe.findAll(line).toList()
             if (matches.isEmpty()) continue
@@ -1310,7 +1369,7 @@ class MusicHost(
                 val min = m.groupValues[1].toLong()
                 val sec = m.groupValues[2].toLong()
                 val msDigits = m.groupValues[3]
-                val ms = msDigits.toLong().let {
+                val ms = if (msDigits.isEmpty()) 0L else msDigits.toLong().let {
                     when (msDigits.length) { 1 -> it * 100; 2 -> it * 10; else -> it }
                 }
                 val timeMs = (min * 60 + sec) * 1000 + ms
@@ -1348,6 +1407,11 @@ class MusicHost(
         (v * context.resources.displayMetrics.density).toInt()
 
     companion object {
+        /** 已打过"metadata 无歌词"诊断日志的包名（每包一次，不刷屏） */
+        private val dumpedMetaPkgs = mutableSetOf<String>()
+
+        /** 上次命中的 metadata 歌词长度（变化才打日志） */
+        private var lastMetaLyricLen = -1
         /** 用户主动暂停标记：全局静态——Activity 重建后新旧 MusicHost 并存时，任一实例暂停都能拦住所有实例的自动恢复 */
         var userPaused = false
         /** 用户主动暂停时间戳：全局静态 */

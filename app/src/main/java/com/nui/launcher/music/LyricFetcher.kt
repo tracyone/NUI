@@ -79,6 +79,7 @@ class LyricFetcher(private val context: Context) {
         val candidates = searchTop(title, artist)?.toMutableList() ?: mutableListOf()
         // 先尝试原始歌名候选，取第一个有真实时间轴歌词的
         for (song in candidates) {
+            if (!durationMatch(song, durationMs)) continue
             val lrc = fetchLyric(song)
             if (lrc != null && hasRealLyrics(lrc)) {
                 Log.d(TAG, "pick song id=${song.id} name=${song.name} artist=${song.artists.joinToString("/")}")
@@ -95,6 +96,7 @@ class LyricFetcher(private val context: Context) {
             for (song in more) {
                 if (candidates.any { it.id == song.id }) continue
                 candidates.add(song)
+                if (!durationMatch(song, durationMs)) continue
                 val lrc = fetchLyric(song)
                 if (lrc != null && hasRealLyrics(lrc)) {
                     Log.d(TAG, "pick song id=${song.id} name=${song.name} artist=${song.artists.joinToString("/")}")
@@ -114,6 +116,18 @@ class LyricFetcher(private val context: Context) {
             return qqLrc
         }
         return null
+    }
+
+    /** 时长校验：两边都有时长且差超过 10 秒，视为同名不同版本（Live/翻唱/伴奏），不取其歌词。
+     *  调用方没传时长（0）时不做限制。 */
+    private fun durationMatch(song: Song, durationMs: Long): Boolean {
+        if (durationMs <= 0L || song.duration <= 0L) return true
+        val diff = kotlin.math.abs(song.duration - durationMs)
+        if (diff > 10_000L) {
+            Log.d(TAG, "skip song id=${song.id} name=${song.name} (时长差 ${diff / 1000}s)")
+            return false
+        }
+        return true
     }
 
     // ===== QQ 音乐 fallback =====
@@ -243,6 +257,7 @@ class LyricFetcher(private val context: Context) {
                     id = s.optLong("id"),
                     name = s.optString("name"),
                     artists = artists,
+                    duration = s.optLong("duration"),
                 )
             }
         }.getOrDefault(emptyList())
@@ -315,6 +330,8 @@ class LyricFetcher(private val context: Context) {
         val id: Long,
         val name: String,
         val artists: List<String>,
+        /** 时长（毫秒），用于排除同名不同版本（Live/翻唱/纯音乐） */
+        val duration: Long = 0L,
     )
 
     companion object {

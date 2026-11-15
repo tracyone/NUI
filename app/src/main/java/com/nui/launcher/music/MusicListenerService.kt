@@ -8,8 +8,15 @@ import android.graphics.drawable.Drawable
 import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
+import android.util.Log
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import android.view.View
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import android.widget.RemoteViews
+import android.widget.TextView
 import androidx.annotation.RequiresApi
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 
@@ -56,10 +63,18 @@ class MusicListenerService : NotificationListenerService() {
             notify.extras?.getParcelableCompat<Bitmap>(Notification.EXTRA_PICTURE)
         }.getOrNull()
 
-        // 歌词：优先从 EXTRA_BIG_TEXT（通知大视图已显示的整段文本）里扒 LRC
-        val candidate = when {
-            !bigText.isNullOrBlank() && LRC_LIKE.containsMatchIn(bigText) -> bigText
-            else -> null
+        // 歌词来源优先级：
+        // 1) 通知 extras 里任何一段带时间戳的文本（不少车机版把歌词放自定义 key / bigText）
+        // 2) 通知 RemoteViews 的歌词控件文本（酷我车机版桌面歌词就在里面，每次更新只给当前行）
+        val candidate = findLrcInExtras(extras)
+            ?: bigText?.takeIf { LRC_LIKE.containsMatchIn(it) }
+            ?: remoteLyric(notify)
+        if (candidate != null) {
+            Log.d(TAG, "通知取到歌词 ${candidate.length} 字（$pkg）")
+        } else if (dumpedPkgs.add(pkg)) {
+            // 每个包只打一次：拿到通知却找不到歌词时，把 extras 的 key 列出来，
+            // 便于确认真实设备上 App 到底把歌词放在哪个字段（不刷屏）
+            Log.d(TAG, "通知无歌词 pkg=$pkg keys=${extras.keySet().joinToString()}")
         }
 
         val i = Intent(ACTION_NOTIFY).apply {
@@ -75,7 +90,63 @@ class MusicListenerService : NotificationListenerService() {
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) { }
 
+    /** 在 extras 里扫一遍，找带 LRC 时间戳的文本（App 可能放在自定义 key 里） */
+    private fun findLrcInExtras(extras: Bundle): String? {
+        for (key in extras.keySet()) {
+            val v = extras.get(key) ?: continue
+            val text = when (v) {
+                is CharSequence -> v.toString()
+                is Array<*> -> v.joinToString("\n") { it?.toString() ?: "" }
+                else -> null
+            } ?: continue
+            if (text.length >= 40 && LRC_LIKE.containsMatchIn(text)) return text
+        }
+        return null
+    }
+
+    /** 解析通知的 RemoteViews（contentView / bigContentView），把里面 TextView 的文本收出来。
+     *  同包 2 秒内只解析一次：通知可能每秒刷新，反复 inflate 会白烧 CPU。 */
+    private fun remoteLyric(notify: Notification): String? {
+        val pkg = notify.toString()
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastRemoteParseAt < REMOTE_PARSE_INTERVAL_MS) return null
+        lastRemoteParseAt = now
+        val rvs = mutableListOf<RemoteViews>()
+        notify.contentView?.let { rvs.add(it) }
+        runCatching {
+            // bigContentView 是 @hide 字段，公开 API 拿不到
+            Notification::class.java.getField("bigContentView").get(notify)?.let {
+                (it as? RemoteViews)?.let { rv -> rvs.add(rv) }
+            }
+        }
+        val texts = mutableListOf<String>()
+        for (rv in rvs) {
+            runCatching {
+                val root = rv.apply(this, FrameLayout(this))
+                collectTexts(root, texts)
+            }
+        }
+        val joined = texts.joinToString("\n").trim()
+        return if (joined.length >= 20 && LRC_LIKE.containsMatchIn(joined)) joined else null
+    }
+
+    private fun collectTexts(v: View, out: MutableList<String>) {
+        if (v is TextView) {
+            v.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { out.add(it) }
+        }
+        if (v is ViewGroup) for (i in 0 until v.childCount) collectTexts(v.getChildAt(i), out)
+    }
+
     companion object {
+        private const val TAG = "NUI.MusicListener"
+        private const val REMOTE_PARSE_INTERVAL_MS = 2000L
+
+        @Volatile
+        private var lastRemoteParseAt = 0L
+
+        /** 已经打过"通知无歌词"诊断日志的包名（每包只打一次） */
+        private val dumpedPkgs = mutableSetOf<String>()
+
         const val ACTION_NOTIFY = "nui.music.NOTIFICATION_UPDATE"
         const val EXTRA_PKG = "pkg"
         const val EXTRA_TITLE = "title"
