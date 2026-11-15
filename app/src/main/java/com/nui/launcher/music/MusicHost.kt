@@ -294,10 +294,14 @@ class MusicHost(
                 if (bound != null) renderPlaying(bound) else renderEmpty()
                 return
             }
-            // 未绑定：跟随当前播放源——优先正在播放的会话，其次最后一个会话
+            // 未绑定：跟当前展示的音乐 App 走。只有它彻底没有会话了，才回退到"正在播放的/最后一个"。
+            // 不能优先挑 playing：用户点一下暂停，本 App 立刻不算 playing，界面就会跳到另一个在播的
+            // App，看着像"点暂停顺便切歌"（实测 QQ 音乐、酷我同时注册会话时必现）。
             if (controllers.isEmpty()) { renderEmpty(); return }
+            val keep = currentController?.packageName
+                ?.let { pkg -> controllers.firstOrNull { it.packageName == pkg } }
             val playing = controllers.filter { isPlaying(it.playbackState) }
-            val chosen = playing.firstOrNull() ?: controllers.last()
+            val chosen = keep ?: playing.firstOrNull() ?: controllers.last()
             Log.d(TAG, "refresh[未绑定] 会话=${controllers.map { it.packageName }}, 选中=${chosen.packageName}")
             renderPlaying(chosen)
         } catch (e: SecurityException) {
@@ -519,13 +523,7 @@ class MusicHost(
                     userPause()
                     controller.transportControls.pause()
                 } else {
-                    // 首次播放该应用：先预热（启动进程确保 metadata/歌词可用），返回后自动播放
-                    if (primedPackage != controller.packageName) {
-                        primeAndPlay(controller)
-                    } else {
-                        userPaused = false
-                        controller.transportControls.play()
-                    }
+                    playOrPrime(controller)
                 }
             }
         }
@@ -626,11 +624,8 @@ class MusicHost(
                 if (isPlaying(controller.playbackState)) {
                     userPause()
                     controller.transportControls.pause()
-                } else if (primedPackage != controller.packageName) {
-                    primeAndPlay(controller)   // 首次播放该应用：先预热（与唱碟点击一致）
                 } else {
-                    userPaused = false
-                    controller.transportControls.play()
+                    playOrPrime(controller)
                 }
             }
         }, LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(4); marginEnd = dp(4) })
@@ -675,6 +670,24 @@ class MusicHost(
             setOnClickListener { onClick() }
             setPadding(dp(10), dp(10), dp(10), dp(10))
         }
+
+    /**
+     * 播放/暂停只做播放暂停。
+     * 只有 play() 没生效（绑定的音乐 App 进程不活跃、会话不响应）才拉起它一次，
+     * 拉回桌面后再补一次 play。进程内对同一个 App 只自动拉起一次，避免点一次弹一次。
+     */
+    private fun playOrPrime(c: MediaController) {
+        userPaused = false
+        c.transportControls.play()
+        handler.postDelayed({
+            if (userPaused || isPlaying(c.playbackState)) return@postDelayed
+            val bound = prefs.getString(KEY_APP, null) ?: return@postDelayed
+            if (bound != c.packageName || primeAttemptedPkg == bound) return@postDelayed
+            primeAttemptedPkg = bound
+            launchPreferredApp(autoReturn = true)
+            scheduleAuto(8800L) { if (!userPaused) c.transportControls.play() }
+        }, 1200L)
+    }
 
     /** 播放/暂停键：绿色实心圆（Apple Music 风格），比上下首更醒目 */
     private fun playBtn(icon: Int, onClick: () -> Unit): View =
@@ -829,51 +842,6 @@ class MusicHost(
      *    启动音乐前先 onHideFloat（关掉外部高德浮窗）
      *    返回 NUI 后，延迟约 2500ms 让酷我 FloatApp 先创建（后创建的浮窗在 z-order 上层），
      *    然后 onShowFloat 恢复地图浮窗——高德浮窗最后创建，盖住酷我 FloatApp。 */
-    /** 首次播放前预热：启动音乐应用确保进程在运行（metadata/歌词可用），延迟返回后自动播放。
-     *  解决 QQ 音乐等应用：MediaSession 存在但进程未运行时，transportControls.play() 能播但拿不到歌词。 */
-    private fun primeAndPlay(controller: MediaController) {
-        val pkg = controller.packageName
-        Log.d(TAG, "primeAndPlay: pkg=$pkg primedPackage=$primedPackage")
-        // 车机版音乐 App（如酷我）可能无 LAUNCHER activity，ACTION_MAIN 兜底
-        val i = context.packageManager.getLaunchIntentForPackage(pkg)
-            ?: Intent(Intent.ACTION_MAIN).apply {
-                addCategory(Intent.CATEGORY_LAUNCHER)
-                setPackage(pkg)
-            }
-        if (i.resolveActivity(context.packageManager) == null) {
-            // 拿不到启动 Intent，直接播放
-            Log.d(TAG, "primeAndPlay: no launch intent, play directly")
-            controller.transportControls.play()
-            primedPackage = pkg
-            return
-        }
-        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        onHideFloat?.invoke()
-        runCatching { context.startActivity(i) }
-        Log.d(TAG, "primeAndPlay: launched $pkg, will return in 3s")
-        // 延迟返回 NUI，返回后自动播放 + 恢复地图浮窗
-        handler.postDelayed({
-            val back = Intent().apply {
-                setClassName(context, "com.nui.launcher.MainActivity")
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
-            }
-            runCatching { context.startActivity(back) }
-            primedPackage = pkg
-            Log.d(TAG, "primeAndPlay: returned to NUI, will play in 800ms")
-            scheduleAuto(800L) {
-                // 回 NUI 后用户可能已点暂停：不再自动起播
-                if (!userPaused) {
-                    controller.transportControls.play()
-                    Log.d(TAG, "primeAndPlay: auto play triggered")
-                } else {
-                    Log.d(TAG, "primeAndPlay: user paused, skip auto play")
-                }
-            }
-            // 延迟更久显示高德浮窗：让酷我 FloatApp 先创建，高德后创建在 z-order 上层
-            handler.postDelayed({ onShowFloat?.invoke() }, 2500L)
-        }, 3000L)
-    }
-
     /**
      * 启动已绑定的音乐 App。
      * @param autoReturn true＝启动后延迟 3 秒自动回到桌面（用于启动卡"点击打开音乐"、长按切换 App：
@@ -896,7 +864,6 @@ class MusicHost(
                 i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 onHideFloat?.invoke()
                 runCatching { context.startActivity(i) }
-                primedPackage = pkg
                 // 用户主动进入 App：停留，不自动回桌面（浮窗随 onResume 恢复）
                 if (!autoReturn) return
                 // 延迟返回 NUI；车机音乐 App 冷启动慢，首次返回后可能其初始化完成又抢回前台，
@@ -951,6 +918,22 @@ class MusicHost(
         context.getSystemService(Context.WINDOW_SERVICE) as android.view.WindowManager
     private var lyricFloatView: FrameLayout? = null
     private var karaokeView: KaraokeTextView? = null
+    /**
+     * 悬浮歌词是否真的 addView 成功过。
+     * 不能用 lyricFloatView != null 判断：createLyricFloat 会先赋值，addView 可能在
+     * 没有悬浮窗权限时抛异常，此时引用非空但窗口从未挂上。若拿它当"曾经显示过"，
+     * hideLyricFloat 会触发 renderPlaying → refreshLyric → updateLyricFloat 的无限递归，
+     * 主线程直接卡死触发 ANR（实测 v78 无线悬浮窗权限时必现）。
+     */
+    private var lyricFloatAttached = false
+    /**
+     * addView 因无悬浮窗权限失败后置真：本次桌面停留期间不再尝试。
+     * lyricTick 每 100ms 会走一次 refreshLyric → updateLyricFloat，不拦住就会每 100ms
+     * 抛一次异常、记一条日志。用户去设置里授权后回到桌面（setFloatAreaVisible(true)）时重置。
+     */
+    private var lyricFloatDenied = false
+    /** 自动拉起过绑定 App 的包名：进程内每个 App 最多拉起一次，避免"点一次弹一次" */
+    private var primeAttemptedPkg: String? = null
     /** 创建悬浮歌词时记录的背景不透明度（0-100），设置变化时用于触发重建 */
     private var lastLyricBgAlpha = -1
     private var lyricFloatNext: TextView? = null
@@ -1009,6 +992,8 @@ class MusicHost(
 
     fun setFloatAreaVisible(v: Boolean) {
         desktopVisible = v
+        // 重新回到桌面时给一次重试机会：用户可能刚在设置里补授了悬浮窗权限
+        if (v) lyricFloatDenied = false
         updateLyricFloat()
     }
 
@@ -1131,22 +1116,32 @@ class MusicHost(
         runCatching { wm.updateViewLayout(view, lp) }
     }
 
-    private fun hideLyricFloat() {
-        val wasShowing = lyricFloatView != null
+    /**
+     * 移除悬浮歌词。
+     * @param reRender 移除后是否重绘音乐栏以恢复内嵌歌词。内部重建场景（改不透明度等）
+     *  必须传 false，否则重绘又会回到 refreshLyric → updateLyricFloat 形成递归。
+     */
+    private fun hideLyricFloat(reRender: Boolean = true) {
+        // 只有真的挂上过窗口才需要重绘，否则"建了但 addView 失败"的引用会误触重绘
+        val wasAttached = lyricFloatAttached
         lyricFloatView?.let { runCatching { wm.removeView(it) } }
         lyricFloatView = null
         karaokeView = null
         lyricFloatNext = null
+        lyricFloatAttached = false
         // 悬浮歌词消失时重绘音乐栏，恢复内嵌歌词
-        if (wasShowing) currentController?.let { renderPlaying(it) }
+        if (wasAttached && reRender) currentController?.let { renderPlaying(it) }
     }
 
     private fun updateLyricFloat() {
+        // 无悬浮窗权限且已失败过一次：本次桌面停留期间直接跳过，别让 100ms 定时刷新反复抛异常
+        if (lyricFloatDenied) return
         // 音乐 App 悬浮显示中：其界面已占据音乐窗口区域（含歌词），NUI 悬浮歌词再叠加会重复/遮挡
         if (!desktopVisible || lyrics.isEmpty() || !playingNow || musicFloatRequested) { hideLyricFloat(); return }
         // 设置页改了背景不透明度：移除旧悬浮窗，下一次显示时按新值重建
+        // 这里不能重绘：下面紧接着就会重建，重绘会绕回本函数造成递归
         if (lastLyricBgAlpha != MusicHost.lyricBgAlpha(context)) {
-            hideLyricFloat()
+            hideLyricFloat(reRender = false)
         }
         if (lyricFloatView == null) {
             loadFloatGeo()
@@ -1160,8 +1155,23 @@ class MusicHost(
                 flags = android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 gravity = Gravity.TOP or Gravity.START
             }
-            runCatching { wm.addView(lyricFloatView!!, lp) }
-                .onFailure { hideLyricFloat(); return }
+            // addView 可能因无悬浮窗权限抛异常（SecurityException / BadTokenException）。
+            // 失败时绝不能走 hideLyricFloat()：那时引用已非空，会被当成"曾经显示过"而触发
+            // renderPlaying → renderCompactNoCover → refreshLyric → updateLyricFloat 递归，
+            // 主线程无限重建视图直到 ANR。这里直接清引用退出，本次不显示歌词即可。
+            val added = runCatching {
+                wm.addView(lyricFloatView!!, lp)
+            }.isSuccess
+            if (!added) {
+                lyricFloatView = null
+                karaokeView = null
+                lyricFloatNext = null
+                lyricFloatAttached = false
+                lyricFloatDenied = true
+                Log.w(TAG, "悬浮歌词 addView 失败（多半是无 SYSTEM_ALERT_WINDOW 权限），本次桌面停留期间不再重试")
+                return
+            }
+            lyricFloatAttached = true
             // 悬浮歌词出现时重绘音乐栏，隐藏内嵌歌词
             currentController?.let { renderPlaying(it) }
         }
@@ -1332,8 +1342,6 @@ class MusicHost(
         private const val ACTION_CLOSE_MAP = "com.autonavi.plus.closemap"
         /** 切歌后封面缓冲期：metadata 封面滞后到达时，缓冲期内维持大布局避免上下首之间来回跳 */
         private const val COVER_GRACE_MS = 2500L
-        /** 已预热过的音乐应用包名（首次播放前启动一次，确保进程在运行、metadata/歌词可用） */
-        private var primedPackage: String? = null
         const val DEFAULT_LYRIC_BG_ALPHA = 20
 
         /** 读取音乐外观，默认经典 */
