@@ -388,6 +388,54 @@
                 android:layout_marginTop="16dp"
                 android:background="@color/settings_divider" />
 
+            <!-- 显示桌面歌词：播放中始终显示歌词框，无歌词时框内说明原因 -->
+            <LinearLayout
+                android:id="@+id/optDesktopLyric"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:clickable="true"
+                android:focusable="true"
+                android:background="@drawable/bg_settings_row_ripple"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
+
+                <TextView
+                    android:id="@+id/tvOptDesktopLyric"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/desktop_lyric_title"
+                    android:textColor="@color/settings_label"
+                    android:textSize="17sp" />
+
+                <TextView
+                    android:id="@+id/checkDesktopLyric"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="✓"
+                    android:textColor="@color/settings_btn_text"
+                    android:textSize="20sp"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/desktopLyricHint"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:layout_marginBottom="8dp"
+                android:text="@string/desktop_lyric_hint"
+                android:textColor="@color/settings_value"
+                android:textSize="13sp" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="8dp"
+                android:background="@color/settings_divider" />
+
             <!-- 音乐悬浮显示：请求绑定的音乐 App 在音乐窗口内悬浮显示（需 App 内置悬浮插件，如酷我车机版） -->
             <LinearLayout
                 android:id="@+id/optMusicFloat"

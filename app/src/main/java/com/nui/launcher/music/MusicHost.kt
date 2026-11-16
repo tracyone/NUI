@@ -99,10 +99,16 @@ class MusicHost(
                     val ctrl = currentController
                     if (ctrl != null) renderPlaying(ctrl)
                 } else {
-                    // 空解析就隐藏，不显示错的
-                    lyrics = emptyList(); lyricHighlight = -1; hideLyricFloat()
+                    // 空解析：没有可滚动歌词，但歌词框仍按开关显示"原因"（不显示错误歌词）
+                    lyrics = emptyList(); lyricHighlight = -1
+                    lyricReason = "歌词缺少时间轴，无法滚动"
+                    updateLyricFloat()
                 }
             }
+        }
+        lyricFetcher.onLyricFailed = { reason ->
+            // 只有当前确实没有可用歌词时才把失败原因留到歌词框里，避免覆盖 App 自带歌词
+            if (lyrics.isEmpty()) lyricReason = reason
         }
     }
     /** 通知兜底：从 MusicListenerService 本地广播接收通知里的 title/artist/cover/lyric（酷我车机版常用） */
@@ -166,6 +172,10 @@ class MusicHost(
     private var lastCoverSetAt = 0L
     /** 当前歌词列表：(timeMs, lyricText) 按时间升序 */
     private var lyrics: List<Pair<Long, String>> = emptyList()
+    /** 无歌词时展示在歌词框里的一句话原因（面向用户，不是日志原文） */
+    private var lyricReason: String = ""
+    /** lyricFromMetadata 本次读取的原因，供上层汇总成 lyricReason */
+    private var metaLyricReason: String = ""
     /** 当前高亮行的 index */
     private var lyricHighlight: Int = -1
     /** 歌词定时刷新 runnable：持久循环，避免被高频 renderPlaying 反复重置 */
@@ -384,6 +394,7 @@ class MusicHost(
             lastCover = newArt   // 切歌时重置封面：新歌没提供就设 null，让通知兜底获取
             lastCoverSetAt = android.os.SystemClock.elapsedRealtime()   // 记录切歌时刻，进入封面缓冲期
             lastLyricRaw = newLyricRaw   // null 也接受 —— 新歌词没拿到时先清空，杜绝跨歌复用
+            lyricReason = ""             // 新歌重新判断原因，别沿用上一首的
         } else {
             // 同首歌：只更新有值的字段（不覆盖已有封面）
             if (newArtist != null) lastArtist = newArtist
@@ -402,6 +413,9 @@ class MusicHost(
         }
         if (recomputed != lyrics) lyricHighlight = -1
         lyrics = recomputed
+        // 歌词为空时先把 metadata 侧的原因记下来，再由 maybeFetchLyric 细化（网络抓词/酷我短路）
+        if (recomputed.isNotEmpty()) lyricReason = ""
+        else if (lyricReason.isBlank()) lyricReason = metaLyricReason.ifBlank { "暂无可用歌词" }
         // 歌词为空（MediaSession 元数据不带歌词）：按歌名+歌手走网络抓词（通用兜底，QQ/酷我等均适用）
         maybeFetchLyric()
 
@@ -854,9 +868,15 @@ class MusicHost(
         val pkg = currentController?.packageName ?: ""
         if (pkg.startsWith("cn.kuwo")) {
             Log.d(TAG, "maybeFetchLyric: 酷我走 media_session 歌词，跳过网络: $t - $lastArtist")
+            // 酷我只认改包注入的歌词：拿不到就把原因留在歌词框里，不再联网抓（避免抓到别的版本）
+            if (lyrics.isEmpty()) {
+                lyricReason = metaLyricReason.ifBlank { "酷我没有提供歌词（可能装的不是改包）" }
+                updateLyricFloat()
+            }
             return
         }
         Log.d(TAG, "maybeFetchLyric: $t - $lastArtist")
+        if (lyrics.isEmpty()) lyricReason = "正在从网络查找歌词…"
         // 传真实时长：网易云候选按时长排除同名不同版本，匹配不到时再用 QQ 兜底
         val dur = currentController?.metadata?.getLong(android.media.MediaMetadata.METADATA_KEY_DURATION) ?: 0L
         lyricFetcher.requestLyric(t, lastArtist, dur, allowQqFallback = true)
@@ -1174,7 +1194,10 @@ class MusicHost(
         // 无悬浮窗权限且已失败过一次：本次桌面停留期间直接跳过，别让 100ms 定时刷新反复抛异常
         if (lyricFloatDenied) return
         // 音乐 App 悬浮显示中：其界面已占据音乐窗口区域（含歌词），NUI 悬浮歌词再叠加会重复/遮挡
-        if (!desktopVisible || lyrics.isEmpty() || !playingNow || musicFloatRequested) { hideLyricFloat(); return }
+        if (!desktopVisible || !playingNow || musicFloatRequested) { hideLyricFloat(); return }
+        // 关闭「显示桌面歌词」：整个歌词框都不显示（有词无词都不显示）
+        if (!desktopLyricEnabled(context)) { hideLyricFloat(); return }
+        val hasLyric = lyrics.isNotEmpty()
         // 设置页改了背景不透明度：移除旧悬浮窗，下一次显示时按新值重建
         // 这里不能重绘：下面紧接着就会重建，重绘会绕回本函数造成递归
         if (lastLyricBgAlpha != MusicHost.lyricBgAlpha(context)) {
@@ -1213,10 +1236,17 @@ class MusicHost(
             currentController?.let { renderPlaying(it) }
         }
         applyFloatLayout()
-        val idx = lyricHighlight.coerceAtLeast(0)
-        karaokeView?.text = lyrics[idx].second
-        lyricFloatNext?.text = if (idx + 1 < lyrics.size) lyrics[idx + 1].second else ""
-        updateKaraokeProgress()
+        if (hasLyric) {
+            val idx = lyricHighlight.coerceAtLeast(0)
+            karaokeView?.text = lyrics[idx].second
+            lyricFloatNext?.text = if (idx + 1 < lyrics.size) lyrics[idx + 1].second else ""
+            updateKaraokeProgress()
+        } else {
+            // 无歌词：主行固定提示，副行放一句原因总结（网络失败 / 没有 metadata / App 没给歌词等）
+            karaokeView?.text = "暂无歌词"
+            karaokeView?.progress = 0f
+            lyricFloatNext?.text = lyricReason
+        }
     }
 
     /** 卡拉OK扫光：按播放进度更新当前行已唱比例 */
@@ -1321,16 +1351,45 @@ class MusicHost(
      *  系统会打一串 "Attempt to cast generated internal exception" 警告。 */
     private fun lyricFromMetadata(md: android.media.MediaMetadata?, pkg: String): String? {
         if (md == null) {
+            metaLyricReason = "拿不到曲目信息（App 未发布播放数据）"
             // 每包只打一次：区分「App 没发布 metadata」和「发布了但没歌词」
             if (dumpedMetaPkgs.add("$pkg#null")) Log.d(TAG, "metadata 为空 pkg=$pkg（App 未发布 metadata）")
             return null
         }
+        // 1) 标准化 key 直读：这是 Android 9+ 唯一可靠的方式。
+        //    从 Android P 起非 SDK 接口受限，反射 MediaMetadata.mBundle 会失败（车机 Android 9 上
+        //    正是这条断的），而 android.media.metadata.LYRIC 是公开 key，getText 可以直接拿。
+        val direct = runCatching {
+            md.getText(LYRIC_KEY)?.toString() ?: md.getString(LYRIC_KEY)
+        }.getOrNull()
+        if (direct != null && direct.length >= 40 && LRC_LIKE.containsMatchIn(direct)) {
+            metaLyricReason = ""
+            if (direct.length != lastMetaLyricLen) {
+                lastMetaLyricLen = direct.length
+                Log.d(TAG, "metadata 歌词 ${direct.length} 字 pkg=$pkg")
+            }
+            return direct
+        }
+        // 2) Android 9+ 拿不到别的自定义 key：只能按"有没有 LYRIC 字段"给原因
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            metaLyricReason = if (direct != null) "歌词缺少时间轴，无法滚动"
+            else "该音乐 App 没有提供歌词"
+            if (dumpedMetaPkgs.add(pkg)) {
+                Log.d(TAG, "metadata 无歌词 pkg=$pkg（API ${Build.VERSION.SDK_INT} 不再反射 mBundle）")
+            }
+            return null
+        }
+        // 3) Android 8 及以下：反射 mBundle 枚举自定义 key（老系统没有非 SDK 接口限制）
         val bundle = runCatching {
             android.media.MediaMetadata::class.java
                 .getDeclaredField("mBundle")
                 .apply { isAccessible = true }
                 .get(md) as? android.os.Bundle
-        }.getOrNull() ?: return null
+        }.getOrNull()
+        if (bundle == null) {
+            metaLyricReason = "曲目信息读取失败"
+            return null
+        }
         var hit: String? = null
         for (key in bundle.keySet()) {
             val raw = bundle.get(key) ?: continue
@@ -1341,13 +1400,20 @@ class MusicHost(
             } ?: continue
             if (text.length >= 40 && LRC_LIKE.containsMatchIn(text)) { hit = text; break }
         }
-        if (hit != null && hit.length != lastMetaLyricLen) {
-            lastMetaLyricLen = hit.length
-            Log.d(TAG, "metadata 歌词 ${hit.length} 字 pkg=$pkg")
-        }
-        if (hit == null && dumpedMetaPkgs.add(pkg)) {
-            // 每个包只打一次：真机上确认酷我把歌词放在哪个字段（没有就是压根没给）
-            Log.d(TAG, "metadata 无歌词 pkg=$pkg keys=${bundle.keySet().joinToString()}")
+        if (hit != null) {
+            metaLyricReason = ""
+            if (hit.length != lastMetaLyricLen) {
+                lastMetaLyricLen = hit.length
+                Log.d(TAG, "metadata 歌词 ${hit.length} 字 pkg=$pkg")
+            }
+        } else {
+            // 原因分两类：压根没有歌词字段 / 有字段但格式不适合滚动
+            val hasLyricKey = bundle.keySet().any { it.contains("lyric", ignoreCase = true) }
+            metaLyricReason = if (hasLyricKey) "歌词缺少时间轴，无法滚动" else "该音乐 App 没有提供歌词"
+            if (dumpedMetaPkgs.add(pkg)) {
+                // 每个包只打一次：真机上确认酷我把歌词放在哪个字段（没有就是压根没给）
+                Log.d(TAG, "metadata 无歌词 pkg=$pkg keys=${bundle.keySet().joinToString()}")
+            }
         }
         return hit
     }
@@ -1383,7 +1449,12 @@ class MusicHost(
     private fun refreshLyric() {
         val controller = currentController
         playingNow = controller?.playbackState?.state == PlaybackState.STATE_PLAYING
-        if (lyrics.isEmpty()) { hideLyricFloat(); onMinusLyric?.invoke("", ""); return }
+        if (lyrics.isEmpty()) {
+            onMinusLyric?.invoke("", "")
+            // 没有歌词也走一次浮窗刷新：开关打开时显示"暂无歌词 + 原因"，关闭时内部会隐藏
+            updateLyricFloat()
+            return
+        }
         val pos = controller?.playbackState?.position ?: -1L
         if (pos < 0L) { updateLyricFloat(); return }
 
@@ -1422,6 +1493,10 @@ class MusicHost(
         private const val KEY_LYRIC_BG_ALPHA = "lyric_bg_alpha"
         private const val KEY_STYLE = "music_style"
         private const val KEY_FLOAT = "music_float"
+        /** 显示桌面歌词开关（默认开） */
+        private const val KEY_DESKTOP_LYRIC = "desktop_lyric"
+        /** 标准歌词 key：酷我改包把整首 LRC 写在这里 */
+        private const val LYRIC_KEY = "android.media.metadata.LYRIC"
         /** 悬浮地图/音乐 App 浮窗广播（touka 插件协议，酷我车机版内置） */
         private const val ACTION_SHOW_MAP = "com.autonavi.plus.showmap"
         private const val ACTION_CLOSE_MAP = "com.autonavi.plus.closemap"
@@ -1461,6 +1536,17 @@ class MusicHost(
         fun setFloatEnabled(context: Context, enabled: Boolean) {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit().putBoolean(KEY_FLOAT, enabled).apply()
+        }
+
+        /** 读取「显示桌面歌词」（默认开）：开启后播放中即使没有歌词也显示歌词框并给出原因 */
+        fun desktopLyricEnabled(context: Context): Boolean =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getBoolean(KEY_DESKTOP_LYRIC, true)
+
+        /** 保存「显示桌面歌词」 */
+        fun setDesktopLyricEnabled(context: Context, enabled: Boolean) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putBoolean(KEY_DESKTOP_LYRIC, enabled).apply()
         }
 
         // 常见音乐 App 包名（用于启动卡选择列表，含车机版。QQ 音乐系列覆盖手机版/车机版/TV版/平板版/爱趣听）

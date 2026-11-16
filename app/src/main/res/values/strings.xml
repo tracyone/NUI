@@ -62,6 +62,8 @@
     <string name="music_style_vinyl">黑胶唱片</string>
     <string name="music_float_title">音乐悬浮显示</string>
     <string name="music_float_hint">开启后请求绑定的音乐 App 在音乐窗口内悬浮显示（需 App 支持悬浮插件，如酷我车机版）</string>
+    <string name="desktop_lyric_title">显示桌面歌词</string>
+    <string name="desktop_lyric_hint">开启后播放中始终显示歌词框，没有歌词时会说明原因；关闭后完全不显示</string>
     <string name="key_mapping_list">方向盘按键映射</string>
     <string name="add_key_mapping">添加按键映射</string>
     <string name="edit">编辑</string>

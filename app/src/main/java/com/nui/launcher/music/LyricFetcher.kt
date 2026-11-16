@@ -34,6 +34,12 @@ class LyricFetcher(private val context: Context) {
     /** 新歌词回调：(lrcText, translation?) */
     var onLyricReady: ((String, String?) -> Unit)? = null
 
+    /** 抓词失败回调：参数是一句面向用户的原因总结（网络不通 / 搜不到 / 无时间轴） */
+    var onLyricFailed: ((String) -> Unit)? = null
+
+    /** 本次抓词失败原因，供 onLyricFailed 使用 */
+    private var lastFailReason: String = "网络歌词获取失败"
+
     private val handler = Handler(Looper.getMainLooper())
     private val executor = Executors.newSingleThreadExecutor()
 
@@ -53,7 +59,10 @@ class LyricFetcher(private val context: Context) {
         val cached = cache[key]
         if (cached != null) {
             Log.d(TAG, "lyric cache hit: $title - $artist")
-            handler.post { if (cached.isNotEmpty()) onLyricReady?.invoke(cached, null) }
+            handler.post {
+                if (cached.isNotEmpty()) onLyricReady?.invoke(cached, null)
+                else onLyricFailed?.invoke("这首歌之前没搜到歌词")
+            }
             return
         }
         fetchingKey = key
@@ -65,6 +74,7 @@ class LyricFetcher(private val context: Context) {
                 if (fetchingKey == key) fetchingKey = null
                 cache[key] = result ?: ""              // 失败也缓存，短期不重试
                 if (result != null) onLyricReady?.invoke(result, null)
+                else onLyricFailed?.invoke(lastFailReason)
             }
         }
     }
@@ -76,7 +86,12 @@ class LyricFetcher(private val context: Context) {
     // ===== 网络 =====
 
     private fun fetchLrc(title: String, artist: String, durationMs: Long = 0L, allowQqFallback: Boolean = true): String? {
+        lastFailReason = "网络歌词获取失败"
         val candidates = searchTop(title, artist)?.toMutableList() ?: mutableListOf()
+        if (candidates.isEmpty()) {
+            if (lastFailReason == "网络歌词获取失败") lastFailReason = "网络搜不到这首歌的歌词"
+            return null
+        }
         // 先尝试原始歌名候选，取第一个有真实时间轴歌词的
         for (song in candidates) {
             if (!durationMatch(song, durationMs)) continue
@@ -115,6 +130,8 @@ class LyricFetcher(private val context: Context) {
             Log.d(TAG, "QQ music fallback lyric: ${qqLrc.length} chars")
             return qqLrc
         }
+        // 候选都试过仍没有可用的时间轴歌词
+        lastFailReason = "搜到的歌词没有时间轴"
         return null
     }
 
@@ -243,7 +260,10 @@ class LyricFetcher(private val context: Context) {
         val url = "https://music.163.com/api/search/get/web?csrf_token=&s=" +
             enc(q) + "&type=1&offset=0&total=true&limit=10"
         Log.d(TAG, "netease 搜索请求: $url")
-        val body = httpGet(url) ?: return null
+        val body = httpGet(url) ?: run {
+            lastFailReason = "网络歌词获取失败（连不上网易云）"
+            return null
+        }
         val songs = runCatching {
             val obj = JSONObject(body)
             val arr = obj.optJSONObject("result")?.optJSONArray("songs") ?: JSONArray()
@@ -261,7 +281,10 @@ class LyricFetcher(private val context: Context) {
                 )
             }
         }.getOrDefault(emptyList())
-        if (songs.isEmpty()) return null
+        if (songs.isEmpty()) {
+            lastFailReason = "网络搜不到这首歌的歌词"
+            return null
+        }
 
         // 打分：标题精确 +100 / 标题包含 +10 / 歌手精确 +50 / 歌手模糊 +20
         val t = norm(title)

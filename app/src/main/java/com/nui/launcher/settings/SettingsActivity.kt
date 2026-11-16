@@ -352,6 +352,18 @@ class SettingsActivity : AppCompatActivity() {
             renderMusicStyle()
         }
         renderMusicStyle()
+        // 显示桌面歌词：播放中无歌词时是否仍显示歌词框（与桌面设置面板同一个偏好）
+        findViewById<View>(R.id.optDesktopLyric).setOnClickListener {
+            MusicHost.setDesktopLyricEnabled(this, !MusicHost.desktopLyricEnabled(this))
+            renderDesktopLyric()
+        }
+        renderDesktopLyric()
+    }
+
+    /** 显示桌面歌词开关状态（勾选框） */
+    private fun renderDesktopLyric() {
+        findViewById<View>(R.id.checkDesktopLyric).visibility =
+            if (MusicHost.desktopLyricEnabled(this)) View.VISIBLE else View.GONE
     }
 
     /** 切换分类：0=音乐，1=方向盘，2=外观 */
@@ -502,6 +514,9 @@ class SettingsActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.checkMusicClassic).setTextColor(p.accent)
         findViewById<TextView>(R.id.checkMusicVinyl).setTextColor(p.accent)
         findViewById<TextView>(R.id.lyricHint).setTextColor(p.value)
+        findViewById<TextView>(R.id.tvOptDesktopLyric).setTextColor(p.label)
+        findViewById<TextView>(R.id.checkDesktopLyric).setTextColor(p.accent)
+        findViewById<TextView>(R.id.desktopLyricHint).setTextColor(p.value)
         tvLyricTitle.setTextColor(p.label)
         tvOptSystem.setTextColor(p.label)
         tvOptDark.setTextColor(p.label)

@@ -430,6 +430,13 @@ class SettingsDialog(context: Context) : Dialog(context) {
             onMusicFloatChanged?.invoke()
         }
         renderMusicFloat()
+        // 显示桌面歌词：控制播放中无歌词时是否仍然显示歌词框
+        findViewById<View>(R.id.optDesktopLyric).setOnClickListener {
+            MusicHost.setDesktopLyricEnabled(context, !MusicHost.desktopLyricEnabled(context))
+            renderDesktopLyric()
+            onMusicFloatChanged?.invoke()   // 复用同一个"音乐浮窗/歌词刷新"回调
+        }
+        renderDesktopLyric()
         render()
     }
 
@@ -713,6 +720,9 @@ class SettingsDialog(context: Context) : Dialog(context) {
         findViewById<TextView>(R.id.checkMusicVinyl).setTextColor(p.accent)
         findViewById<TextView>(R.id.tvOptMusicFloat).setTextColor(p.label)
         findViewById<TextView>(R.id.checkMusicFloat).setTextColor(p.accent)
+        findViewById<TextView>(R.id.tvOptDesktopLyric).setTextColor(p.label)
+        findViewById<TextView>(R.id.checkDesktopLyric).setTextColor(p.accent)
+        findViewById<TextView>(R.id.desktopLyricHint).setTextColor(p.value)
         findViewById<TextView>(R.id.musicFloatHint).setTextColor(p.value)
         tvOptSystem.setTextColor(p.label)
         tvOptDark.setTextColor(p.label)
@@ -846,6 +856,12 @@ class SettingsDialog(context: Context) : Dialog(context) {
     private fun renderMusicFloat() {
         findViewById<View>(R.id.checkMusicFloat).visibility =
             if (MusicHost.floatEnabled(context)) View.VISIBLE else View.GONE
+    }
+
+    /** 显示桌面歌词开关状态（勾选框） */
+    private fun renderDesktopLyric() {
+        findViewById<View>(R.id.checkDesktopLyric).visibility =
+            if (MusicHost.desktopLyricEnabled(context)) View.VISIBLE else View.GONE
     }
 
     /** 男声能力检测：系统 TTS 无男声音色时置灰不可点；若当前已选男声则回退女声（不播报）。
