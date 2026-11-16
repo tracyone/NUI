@@ -80,6 +80,29 @@ class MainActivity : AppCompatActivity() {
      */
     private var appliedMapDark: Boolean? = null
 
+    /** 应用安装/卸载/变更：重扫应用列表。
+     *  之前只在 NUI 内部长按卸载时置 pendingReloadOnResume，从系统设置卸载、或第三方装/卸 App
+     *  都不会刷新；且重载还会被 loadAppGrid 的「高度未变跳过」缓存拦住，已卸载的应用一直留在列表里。 */
+    private val packageChangeReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            val action = intent?.action ?: return
+            if (action != Intent.ACTION_PACKAGE_ADDED &&
+                action != Intent.ACTION_PACKAGE_REMOVED &&
+                action != Intent.ACTION_PACKAGE_CHANGED
+            ) return
+            // 覆盖安装（升级）时包仍存在，无需重扫
+            if (intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)) return
+            // 一次安装/卸载常伴随 ADDED+CHANGED（或 REMOVED+CHANGED）多条广播，
+            // 先撤掉待执行的重扫，只保留最后一次；延后 300ms 等包管理器状态落定再扫
+            binding.root.removeCallbacks(appGridReload)
+            binding.root.postDelayed(appGridReload, 300)
+        }
+    }
+
+    private val appGridReload = Runnable {
+        if (!isDestroyed && !isFinishing) loadAppGrid(force = true)
+    }
+
     // 高德地图昼夜模式广播接收器（FOLLOW_MAP 模式下同步桌面深浅外观）
     private val amapDayNightReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
@@ -1081,6 +1104,18 @@ class MainActivity : AppCompatActivity() {
         appliedMapDark = UiTheme.isDark(this)
         // 监听高德昼夜模式广播
         registerReceiver(amapDayNightReceiver, android.content.IntentFilter("AUTONAVI_STANDARD_BROADCAST_SEND"))
+        // 监听应用安装/卸载：从系统设置卸载、商店装新 App 后，应用列表要跟着刷新
+        val packageFilter = android.content.IntentFilter().apply {
+            addAction(Intent.ACTION_PACKAGE_ADDED)
+            addAction(Intent.ACTION_PACKAGE_REMOVED)
+            addAction(Intent.ACTION_PACKAGE_CHANGED)
+            addDataScheme("package")
+        }
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(packageChangeReceiver, packageFilter, Context.RECEIVER_EXPORTED)
+        } else {
+            registerReceiver(packageChangeReceiver, packageFilter)
+        }
 
         // 红绿灯监控已并入 NavInfoHost（巡航 ICON=0 数据驱动，比 10019 STATE=24 更可靠），
         // 旧 TrafficLightMonitor 停用以避免重复语音提醒
@@ -1631,9 +1666,8 @@ class MainActivity : AppCompatActivity() {
         // 从系统卸载页返回：重载应用网格（被卸载的应用消失）
         if (pendingReloadOnResume) {
             pendingReloadOnResume = false
-            appGridLoaded = false
-            // 应用页 ViewHolder 复用，无需 clear（loadAppGrid 增量更新时会重新 bind）
-            loadAppGrid()
+            // 必须 force：loadAppGrid 有「高度未变直接跳过」的缓存，普通重载不会真正重扫
+            loadAppGrid(force = true)
         }
         // 从系统文件选择器/其它 App 遮挡返回负一屏：遮挡期间 TextureView 的 surface 可能失效，
         // 播放器仍在解码但画面不合成（透出桌面壁纸，表现为"动态壁纸设置无效"）。强制重绑 surface 重启。
@@ -1686,6 +1720,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         unregisterReceiver(amapDayNightReceiver)
+        runCatching { unregisterReceiver(packageChangeReceiver) }
         // if (::trafficLightMonitor.isInitialized) trafficLightMonitor.stop()
         navInfoHost?.stop()
         if (::weatherVoice.isInitialized) weatherVoice.shutdown()
@@ -2336,8 +2371,9 @@ class MainActivity : AppCompatActivity() {
         applyMinusTheme()
     }
 
-    private fun loadAppGrid() {
-        if (appGridLoaded) return
+    private fun loadAppGrid(force: Boolean = false) {
+        // force：安装/卸载后必须重扫。普通调用仍走「已加载就跳过」的缓存，避免切页重复扫包。
+        if (appGridLoaded && !force) return
         appGridLoaded = true
 
         // 每页行数：按当前 DPI 与图标尺寸精确计算，保证每行图标+名称完整显示。
@@ -2354,7 +2390,8 @@ class MainActivity : AppCompatActivity() {
         val navBarH = if (effectiveShowDock()) getNavBarHeight() else 0
         val vpH = realScreenHeight() - statusBarH - navBarH
         // 高度未变则跳过重算（避免每次切到应用列表都刷新 RecyclerView 导致卡顿）
-        if (vpH == lastAppGridVpH) return
+        // force 时例外：安装/卸载后必须重扫，否则列表里会一直留着已卸载的应用
+        if (!force && vpH == lastAppGridVpH) return
         lastAppGridVpH = vpH
         val screenHdp = vpH / density
         val iconScale = UiTheme.appIconScale(this)
@@ -2465,6 +2502,10 @@ class MainActivity : AppCompatActivity() {
                 }
                 if (minOf(oldAppCount, pages.size) > 0) {
                     pa.notifyItemRangeChanged(2, minOf(oldAppCount, pages.size))
+                }
+                // 卸载后页数变少、当前正停在已消失的应用页：退回桌面页，避免 ViewPager 停在空页
+                if (binding.viewPager.currentItem >= 2 + pages.size) {
+                    binding.viewPager.setCurrentItem(1, false)
                 }
                 setupPageIndicator(2 + pages.size)
             }
