@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
+import android.os.SystemClock
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
@@ -47,6 +48,9 @@ class NuiTts(context: Context) {
     fun isSystemAvailable(): Boolean? = core.isSystemAvailable()
 
     companion object {
+        /** 是否正在播报（静态入口，供音乐歌词在语音打断期间冻结进度）。 */
+        fun isSpeaking(): Boolean = NuiTtsCore.isSpeaking()
+
         private const val PREFS = "nui_voice"
         private const val KEY_VOICE = "voice_gender"
         const val VOICE_FEMALE = "female"
@@ -101,6 +105,13 @@ private object NuiTtsCore {
     @Volatile
     private var sysVoices: List<String>? = null
 
+    /** 播报预计结束时刻（elapsedRealtime，0=未在播报）。
+     *  双保险：onDone 会提前清零；部分车机引擎只回调 onStart 不回调 onDone，所以进入播报时
+     *  先按文本长度估算截止时刻（中文约 5 字/秒，留 400ms 余量），避免歌词被永久冻结。 */
+    @Volatile
+    private var speakingUntil = 0L
+    private const val SPEAK_MAX_MS = 30_000L
+
     private val worker: HandlerThread by lazy {
         HandlerThread("nui-tts").apply { start() }
     }
@@ -134,6 +145,18 @@ private object NuiTtsCore {
 
     fun stop() {
         runCatching { sysTts?.stop() }
+        speakingUntil = 0L
+    }
+
+    /** 是否正在播报：按估算截止时刻判断，onDone 会提前复位 */
+    fun isSpeaking(): Boolean {
+        val until = speakingUntil
+        if (until == 0L) return false
+        if (SystemClock.elapsedRealtime() >= until) {
+            speakingUntil = 0L
+            return false
+        }
+        return true
     }
 
     /** 切换音色：立即用新音色播报自我介绍 */
@@ -223,13 +246,25 @@ private object NuiTtsCore {
         runCatching {
             val t0 = System.currentTimeMillis()
             val uttId = "nui_$t0"
+            // 中文按 5 字/秒估算，最短 1.5s、最长 30s；onDone 到达会提前结束
+            val durationMs = (text.length * 220L + 400L).coerceIn(1_500L, SPEAK_MAX_MS)
+            speakingUntil = SystemClock.elapsedRealtime() + durationMs
             t.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(id: String?) {
                     if (id == uttId) Log.i(TAG, "系统语音出声耗时 ${System.currentTimeMillis() - t0}ms")
                 }
-                override fun onDone(id: String?) {}
+                // 注意：不能在这里清零。实测部分引擎（含车机自带的离线引擎）合成完成就回调
+                // onDone，此时声音还没放完；若据此解冻，歌词会在播报中继续走。改为统一按
+                // 上面的估算截止时刻解冻，stop()/下一条 speak() 会覆盖。
+                override fun onDone(id: String?) {
+                    if (id == uttId && SystemClock.elapsedRealtime() > speakingUntil + 1_000L) {
+                        speakingUntil = 0L
+                    }
+                }
                 @Deprecated("Deprecated in Java")
-                override fun onError(id: String?) {}
+                override fun onError(id: String?) {
+                    if (id == uttId) speakingUntil = 0L
+                }
             })
             t.speak(text, TextToSpeech.QUEUE_FLUSH, null, uttId)
         }

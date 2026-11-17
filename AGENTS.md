@@ -270,6 +270,11 @@ chore: 删除无引用死代码
 13. **动态视频壁纸切出负一屏必须释放 MediaPlayer**（`pause()` / surface 销毁 / detach），不许后台播放或占用硬解；起播走 `ensurePlaying()` 并保留 prepare 看门狗——TextureView 首帧前透明会透出底层壁纸。
 14. 视频壁纸只能 centerCrop 铺满全屏（视频比屏幕小则放大、比屏幕大则裁剪），**不允许黑边或拉伸变形**；不要给 `VideoWallpaperView` 用 fitCenter 之类会留边的缩放。
 15. 进负一屏是**向右滑**（负一屏在 ViewPager2 position 0、最左）；边缘手势在 `MainActivity.dispatchTouchEvent`，改方向时注意 32 / 64 位、Android 版本差异，改完务必装机实测。
+16. **NUI 启动后会自动"预热高德"再自己回桌面，测试别误判**：默认桌面启动后第 5 秒拉起高德、第 10 秒回桌面（`MapHost.scheduleLaunchAndReturnHome()` → `launchAndReturnHome()`，回桌面后 2.5 秒还有一次兜底返回）。延迟在设置 → 地图 →「启动高德延迟 / 返回桌面延迟」（`UiTheme.mapLaunchDelaySec` / `mapReturnDelaySec`，返回延迟是**从桌面启动算的绝对时刻**，不是"启动后再等"）。由此：
+    - **装包/重启 NUI 后至少等 12 秒再截图或操作**；这期间截到的是高德在前台、地图全屏，不是布局或浮窗坏了。
+    - 这期间地图浮窗铺满屏幕会吞掉 `input swipe`，翻不到负一屏；等它自动返回后把滑动起点放在浮窗左侧缝隙（x≈3~105）再滑。
+    - 要彻底避开：设置里把「绑定地图应用」改成「内置地图（OpenStreetMap）」——`EMBEDDED_OSM` 类型不会启动外部地图；或把启动延迟调大。
+    - 该行为是设计（让高德进程先起来，NUI 才能把高德贴成浮窗），维护者已明确"维持现状"，不要擅自去掉或加开关。
 
 ---
 

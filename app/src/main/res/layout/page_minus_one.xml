@@ -144,6 +144,19 @@
                 android:src="@drawable/ic_nav_favorite" />
         </LinearLayout>
 
+        <!-- 巡航红绿灯：紧挨三个快捷圆、音乐卡左侧。
+             灯数/方向由 NavInfoHost 动态生成（1~N 个胶囊自适应宽度，>=3 个自动切紧凑尺寸），
+             非巡航或无灯数据时 GONE，不占位、不影响音乐卡与进度条。 -->
+        <LinearLayout
+            android:id="@+id/cruiseLight"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="14dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:visibility="gone"
+            tools:visibility="visible" />
+
         <!-- 中：音乐卡（小封面 + 歌名歌手 + 上一首/绿色播放键/下一首，与桌面音乐卡一致） -->
         <LinearLayout
             android:id="@+id/minusMusicArea"
@@ -163,8 +176,9 @@
                 android:scaleType="centerCrop"
                 android:contentDescription="封面" />
 
-            <!-- 歌名与歌手并列一行（baseline 对齐），只占一行高度；右侧进度区 weight=1 随文字长度伸缩 -->
+            <!-- 歌名与歌手并列一行（baseline 对齐），按内容占宽、永不省略；空间不够时压缩右侧进度条 -->
             <LinearLayout
+                android:id="@+id/minusTitleGroup"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
@@ -175,9 +189,8 @@
                     android:id="@+id/minusSong"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:maxWidth="280dp"
                     android:maxLines="1"
-                    android:ellipsize="end"
+                    android:singleLine="true"
                     android:textSize="28sp"
                     android:textStyle="bold"
                     tools:text="歌曲名" />
@@ -187,9 +200,8 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="12dp"
-                    android:maxWidth="160dp"
                     android:maxLines="1"
-                    android:ellipsize="end"
+                    android:singleLine="true"
                     android:textSize="20sp"
                     android:textStyle="bold"
                     tools:text="歌手" />
@@ -201,6 +213,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:minWidth="120dp"
                 android:layout_marginEnd="14dp"
                 android:orientation="horizontal"
                 android:gravity="center_vertical">

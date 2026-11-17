@@ -8,7 +8,7 @@
 | 文件 | 解决什么场景 |
 |---|---|
 | [amap-broadcast.md](amap-broadcast.md) | 改导航/巡航 HUD、高德广播状态机、昼夜跟随、超速/拥堵阈值 |
-| [build-and-deploy.md](build-and-deploy.md) | 出 APK、装机、抓日志、常见报错排错 |
+| [build-and-deploy.md](build-and-deploy.md) | 出 APK、装机、抓日志、常见报错排错；第 7 节是实测时序（启动后自动预热高德 5s/10s）、模拟器翻页手势、按 uiautomator 取真实坐标、注入 60073 红绿灯 |
 | [adding-feature.md](adding-feature.md) | 新增设置项/页面/语音场景/音乐 App 支持的标准流程 |
 
 ## 怎么用

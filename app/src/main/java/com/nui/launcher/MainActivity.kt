@@ -139,6 +139,7 @@ class MainActivity : AppCompatActivity() {
     private var desktopBtnNavFavorite: View? = null
     private var desktopNavInfoOverlay: View? = null
     private var desktopLightBar: View? = null
+    private var minusLightBar: View? = null
     private var navInfoHost: com.nui.launcher.nav.NavInfoHost? = null
     // 负一屏（最左页）view 引用
     private var minusVideo: VideoWallpaperView? = null
@@ -281,6 +282,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** 应用网格左侧让位宽度（dp）：dock 宽 96dp + 12dp 间距；悬浮形态再 +8dp 左边距 */
+    /** 负一屏歌名字号：字数越多越小，保证单行完整显示（不省略） */
+    private fun songTextSizeSp(title: String): Float = when {
+        title.length <= 8 -> 28f
+        title.length <= 14 -> 22f
+        title.length <= 20 -> 18f
+        else -> 15f
+    }
+
+    /** 负一屏歌手字号：同理，保证完整显示 */
+    private fun artistTextSizeSp(artist: String): Float = when {
+        artist.length <= 8 -> 20f
+        artist.length <= 12 -> 16f
+        else -> 13f
+    }
+
     private fun appGridLeftPadDp(): Float {
         val edge = UiTheme.dockStyle(this) == UiTheme.DockStyle.EDGE
         val dockW = 96f
@@ -378,6 +394,10 @@ class MainActivity : AppCompatActivity() {
         // 应用负一屏壁纸（静态图或视频）
         applyMinusWallpaper()
         applyMinusTheme()
+        // 巡航红绿灯条：负一屏底栏内、三个快捷圆右侧。ViewHolder 重建后必须重挂，
+        // 否则 NavInfoHost 继续往旧 View 渲染，负一屏上看到的是已脱离窗口树的空容器。
+        minusLightBar = v.findViewById(R.id.cruiseLight)
+        if (navInfoHost != null) navInfoHost?.attachMinusLightBar(minusLightBar)
         // 若 musicHost 已就绪，立即同步一次当前音乐到负一屏横条
         if (::musicHost.isInitialized) musicHost.refresh()
         // 大号时钟等负一屏偏好
@@ -1156,6 +1176,10 @@ class MainActivity : AppCompatActivity() {
                 if (position == 0) settingsDialog?.dismissImmediate()
                 // 负一屏强制隐藏系统 Dock（不管用户设置）；切回其它页按用户设置恢复
                 applySystemDock()
+                // 负一屏底栏红绿灯：进入本页时确保灯条挂到当前页面（首次绑定早于 setupNav 的兜底）
+                if (position == 0 && navInfoHost != null) {
+                    navInfoHost?.attachMinusLightBar(minusLightBar)
+                }
                 // 切到应用列表页（position>=2）时强制重算网格：
                 // 从 page0 滑过来时 padding 没变（都是显示 Dock），不会触发 applySystemDock 里的重算，
                 // 但应用列表 RecyclerView 可能刚创建、高度需按当前 ViewPager2 尺寸重新计算
@@ -2336,6 +2360,10 @@ class MainActivity : AppCompatActivity() {
             // 点击行为仍由 minusMusicArea 的点击监听保留
             minusSong?.text = title
             minusArtist?.text = artist
+            // 歌名/歌手必须完整显示（不能省略）：字数多时自动降字号，把宽度让给文字而不是截断，
+            // 空间不足的部分由右侧进度条收缩来承担。
+            minusSong?.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, songTextSizeSp(title))
+            minusArtist?.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, artistTextSizeSp(artist))
             // 音乐 App 没启动 / 没有会话：时间+进度条整块不显示
             minusProgressArea?.visibility = if (title.isNotEmpty()) View.VISIBLE else View.GONE
             if (cover != null) {

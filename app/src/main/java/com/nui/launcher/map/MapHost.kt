@@ -430,6 +430,9 @@ class MapHost(
         val back = Intent(Intent.ACTION_MAIN).apply {
             addCategory(Intent.CATEGORY_HOME)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            // 限定到本包：隐式 HOME 会落到系统默认桌面，debug/release 共存时会拉起另一套 NUI，
+            // 造成两个进程各挂一个悬浮窗（歌词窗、音乐浮窗重复出现）
+            setPackage(context.packageName)
             putExtra(EXTRA_AUTO_BACK, true)
         }
         runCatching { context.startActivity(back) }

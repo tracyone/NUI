@@ -82,7 +82,13 @@ class NavInfoHost(
     /** 一套导航/巡航卡的视图引用（page0 或负一屏各一份）。[page] 为该卡片所在 ViewPager2 页索引。
      *  [showLights]：该卡片是否负责渲染红绿灯胶囊。桌面巡航卡本身不显示（改由音乐区上方的
      *  独立灯条显示），避免同一组灯上下重复出现。 */
-    private class Refs(val root: View, val page: Int, val showLights: Boolean = false) {
+    private class Refs(
+        val root: View,
+        val page: Int,
+        val showLights: Boolean = false,
+        /** 窄容器（负一屏底部横条空间有限）：无论灯数多少都用紧凑胶囊 */
+        val compactLights: Boolean = false,
+    ) {
         val turn: ImageView? = root.findViewById(R.id.navInfoTurn)
         val dest: TextView? = root.findViewById(R.id.navInfoDest)
         val eta: TextView? = root.findViewById(R.id.navInfoEta)
@@ -203,16 +209,28 @@ class NavInfoHost(
         Log.i(TAG, "导航/巡航信息显示已启动（卡片数=${refs.size}）")
     }
 
-    /** 附加 page0 音乐区上方的红绿灯条（该块负责渲染胶囊；桌面巡航卡不再显示同一组灯） */
-    fun attachLightBar(view: View) {
-        refs.add(Refs(view, 1, showLights = true))
+    /** 附加红绿灯条（该块负责渲染胶囊；桌面巡航卡不再显示同一组灯）。
+     *  [page]：所在页索引，负一屏=0、桌面=1。 */
+    fun attachLightBar(view: View, page: Int = 1) {
+        refs.removeAll { it.page == page && it.showLights }
+        refs.add(Refs(view, page, showLights = true))
         syncRefsState()
     }
 
-    /** page0 的 ViewHolder 被回收/重建后重新绑定：旧 View 已脱离窗口树，
-     *  必须换成新 View，否则导航卡和红绿灯继续渲染到废弃布局（页面上什么都看不到）。 */
+    /** 负一屏底部快捷横条里的灯条：绑定负一屏 ViewHolder、或切到负一屏时调用。
+     *  重复调用只保留最新 View（旧 View 可能已随 ViewHolder 回收脱离窗口树）。 */
+    fun attachMinusLightBar(view: View?) {
+        refs.removeAll { it.page == 0 && it.showLights }
+        // 负一屏底栏要同时放快捷圆、音乐卡和进度条，灯条一律用紧凑胶囊，避免把进度条挤没
+        if (view != null) refs.add(Refs(view, 0, showLights = true, compactLights = true))
+        syncRefsState()
+    }
+
+    /** 桌面页的 ViewHolder 被回收/重建后重新绑定：旧 View 已脱离窗口树，
+     *  必须换成新 View，否则导航卡和红绿灯继续渲染到废弃布局（页面上什么都看不到）。
+     *  只重建桌面页的卡片，负一屏的灯条 ref 保留（否则桌面重绑会把负一屏灯条一起清掉）。 */
     fun rebind(overlayView: View, lightBar: View?) {
-        refs.clear()
+        refs.removeAll { it.page != 0 }
         refs.add(Refs(overlayView, 1))
         if (lightBar != null) refs.add(Refs(lightBar, 1, showLights = true))
         syncRefsState()
@@ -880,7 +898,7 @@ class NavInfoHost(
                 // 恢复数据时必须重新展开根容器，否则子容器设为 VISIBLE 也看不见——
                 // 现象就是"日志在渲染红绿灯，屏幕上却没有灯条"。
                 if (currentPage == r.page) r.root.visibility = View.VISIBLE
-                if (!skipRender) buildCruiseLights(box, array)
+                if (!skipRender) buildCruiseLights(box, array, r.compactLights)
             } else box.visibility = View.GONE
         }
         // 断流兜底：超过 LIGHT_TIMEOUT_MS 没再收到 60073 就隐藏（灯已过/高德停止下发）
@@ -946,7 +964,8 @@ class NavInfoHost(
         val dot: View,
         val arrow: ImageView,
         val time: TextView,
-        val compact: Boolean
+        /** 尺寸档位：0=常规（桌面巡航卡），1=紧凑（多灯），2=超紧凑（负一屏底栏） */
+        val sizeClass: Int
     ) {
         var lastColor: Int = Int.MIN_VALUE
         var lastArrowRes: Int = 0
@@ -954,28 +973,38 @@ class NavInfoHost(
         var lastDigits: Int = 0
     }
 
-    /** 把红绿灯 JSON 数组渲染为一排胶囊到 [container]（每套卡片各调一次） */
-    private fun buildCruiseLights(container: LinearLayout, array: JSONArray) {
+    /** 把红绿灯 JSON 数组渲染为一排胶囊到 [container]（每套卡片各调一次）
+     *  [forceCompact]：窄容器（负一屏底栏）强制紧凑尺寸，不随灯数变化 */
+    private fun buildCruiseLights(container: LinearLayout, array: JSONArray, forceCompact: Boolean = false) {
         try {
             val dm = context.resources.displayMetrics.density
             fun dp(v: Int): Int = (v * dm + 0.5f).toInt()
-            // 多方向时紧凑模式（参考 Navi-Link setCompact）：圆/字缩小，保证 4 个以上胶囊放得下
-            val compact = array.length() >= 3
+            // 尺寸档位：0=常规（桌面巡航卡）；1=紧凑（>=3 个灯）；2=负一屏底栏（灯球与左侧
+            // 回家/公司/收藏三颗 44dp 圆同视觉尺寸）；3=负一屏底栏 4 灯及以上（略收一档，
+            // 否则 4 个灯会把进度条挤没）
+            val sizeClass = when {
+                forceCompact -> 2
+                array.length() >= 3 -> 1
+                else -> 0
+            }
             // 视图复用：60073 每秒一帧（同一帧还会连发两条），若每帧都 removeAllViews()+new View，
             // 整排会被重新测量/布局/重绘，看起来就是"倒计时在闪"（摄像头卡是原地 setText，所以不闪）。
-            // 只在灯数量或紧凑模式变化时重建，其余情况只改颜色/箭头/文字。
+            // 只在灯数量或尺寸档位变化时重建，其余情况只改颜色/箭头/文字。
             val cached = container.tag as? MutableList<LightItem>
             val items: MutableList<LightItem> =
                 if (cached != null && cached.size == array.length() &&
-                    cached.firstOrNull()?.compact == compact
+                    cached.firstOrNull()?.sizeClass == sizeClass
                 ) {
                     cached
                 } else {
                     container.removeAllViews()
-                    val dotSize = if (compact) dp(26) else dp(44)
-                    val timeSize = if (compact) 18f else 30f
-                    val padH = if (compact) dp(3) else dp(6)
-                    val itemMargin = if (compact) dp(3) else dp(8)
+                    // 负一屏档位 2：再放大一档——44dp 灯球 + 30sp 数字（与 page0 大档同尺寸），
+                    // 所有灯数（1~4）统一；空间不够时由进度条让位
+                    val dotSize = when (sizeClass) { 2 -> dp(44); 1 -> dp(26); else -> dp(44) }
+                    val timeSize = when (sizeClass) { 2 -> 36f; 1 -> 20f; else -> 30f }
+                    val padH = when (sizeClass) { 2 -> dp(2); 1 -> dp(3); else -> dp(6) }
+                    val itemMargin = when (sizeClass) { 2 -> dp(3); 1 -> dp(3); else -> dp(8) }
+                    val arrowPad = when (sizeClass) { 2 -> dp(6); 1 -> dp(6); else -> dp(6) }
                     val built = ArrayList<LightItem>(array.length())
                     for (i in 0 until array.length()) {
                         // 胶囊：深蓝圆角背景 + [圆形灯(带箭头) + 倒计时数字]
@@ -999,7 +1028,7 @@ class NavInfoHost(
                         }
                         val arrowIv = ImageView(context).apply {
                             scaleType = ImageView.ScaleType.CENTER_INSIDE
-                            setPadding(dp(6), dp(6), dp(6), dp(6))
+                            setPadding(arrowPad, arrowPad, arrowPad, arrowPad)
                             setColorFilter(0xFFFFFFFF.toInt(), android.graphics.PorterDuff.Mode.SRC_IN)
                         }
                         dotBox.addView(dot)
@@ -1016,11 +1045,11 @@ class NavInfoHost(
                             isSingleLine = true
                             gravity = android.view.Gravity.CENTER
                             // 最小宽度按两位数字给，秒数 2 位→1 位时胶囊不会左右跳动
-                            minWidth = if (compact) dp(22) else dp(36)
+                            minWidth = when (sizeClass) { 2 -> dp(42); 1 -> dp(24); else -> dp(36) }
                         }
                         timeTv.layoutParams = LinearLayout.LayoutParams(
                             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                            marginStart = dp(4); marginEnd = dp(2)
+                            marginStart = if (sizeClass == 2) dp(2) else dp(4); marginEnd = dp(2)
                         }
                         item.addView(dotBox)
                         item.addView(timeTv)
@@ -1028,7 +1057,7 @@ class NavInfoHost(
                             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                             marginEnd = itemMargin
                         })
-                        built.add(LightItem(item, dot, arrowIv, timeTv, compact))
+                        built.add(LightItem(item, dot, arrowIv, timeTv, sizeClass))
                     }
                     container.tag = built
                     built
@@ -1075,12 +1104,15 @@ class NavInfoHost(
                 if (it.lastDigits != digits) {
                     // 右侧面板宽度有限：两个三位数胶囊并按会超出，必须同时缩小字号和最小宽度，
                     // 否则最后一个数字会被父容器裁掉
-                    val baseSize = if (compact) 18f else 30f
+                    // 字号必须与建胶囊时的 timeSize 一致，否则会把已设好的字号覆盖掉
+                    // （负一屏曾写死 13f，导致 30sp/36sp 全部不生效，数字始终只有 13sp）
+                    val baseSize = when (sizeClass) { 2 -> 36f; 1 -> 20f; else -> 30f }
                     it.time.textSize = if (digits >= 3) baseSize * 0.62f else baseSize
                     it.time.minWidth = dp(
                         when {
-                            digits >= 3 -> if (compact) 20 else 34
-                            compact -> 22
+                            digits >= 3 -> when (sizeClass) { 2 -> 40; 1 -> 20; else -> 34 }
+                            sizeClass == 2 -> 42
+                            sizeClass == 1 -> 24
                             else -> 36
                         })
                     it.lastDigits = digits

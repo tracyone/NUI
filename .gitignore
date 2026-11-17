@@ -22,3 +22,5 @@ android_screenshot.png
 gpsmock/build/
 icontest/build/
 minus_check.png
+# 巡航测试脚本自动生成的截图（test/cruise_test.sh / cruise_start.sh 产物，不入库）
+/test/shots/

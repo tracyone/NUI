@@ -178,6 +178,16 @@ class MusicHost(
     private var metaLyricReason: String = ""
     /** 当前高亮行的 index */
     private var lyricHighlight: Int = -1
+    /** 最近一次观察到的播放状态（用于识别"离开播放态"的瞬间） */
+    private var lastSeenState: Int = PlaybackState.STATE_NONE
+    /** 离开播放态时冻结的位置（<0 表示无冻结，正在播放） */
+    private var frozenPosition: Long = -1L
+    /** seek 后的本地进度锚点（<0 表示未启用）：拖动结果为准，等播放器上报追上 */
+    private var seekAnchorPos: Long = -1L
+    /** 锚点计时起点（elapsedRealtime） */
+    private var seekAnchorAt: Long = 0L
+    /** 锚点建立时的播放状态，用于播放/暂停切换时结算累计进度 */
+    private var seekAnchorPlaying: Boolean = false
     /** 歌词定时刷新 runnable：持久循环，避免被高频 renderPlaying 反复重置 */
     private var lyricTickRunning = false
     private val lyricTick = object : Runnable {
@@ -373,8 +383,16 @@ class MusicHost(
         registeredControllers.remove(currentController)
         controller.registerCallback(metadataCallback)
         registeredControllers.add(controller)
+        val switchingSession = currentController !== controller
         currentController = controller
         lastRenderState = controller.playbackState?.state ?: PlaybackState.STATE_NONE
+        // 只在换会话时作废上一首的冻结位置；同一会话的重绘不能重置，
+        // 否则暂停期间每次都把"冻结位置"刷成播放器新上报的递增位置，歌词又走了
+        if (switchingSession) {
+            lastSeenState = PlaybackState.STATE_NONE
+            frozenPosition = -1L
+            seekAnchorPos = -1L
+        }
 
         // 布局重建淡入淡出：大布局/紧凑布局切换（封面有无变化）不生硬跳动
         android.transition.TransitionManager.beginDelayedTransition(
@@ -395,6 +413,10 @@ class MusicHost(
             lastCoverSetAt = android.os.SystemClock.elapsedRealtime()   // 记录切歌时刻，进入封面缓冲期
             lastLyricRaw = newLyricRaw   // null 也接受 —— 新歌词没拿到时先清空，杜绝跨歌复用
             lyricReason = ""             // 新歌重新判断原因，别沿用上一首的
+            // 同一 App 内切歌 controller 不变，上一首的位置基准必须作废，否则会拿旧进度推算新歌
+            lastSeenState = PlaybackState.STATE_NONE
+            frozenPosition = -1L
+            seekAnchorPos = -1L
         } else {
             // 同首歌：只更新有值的字段（不覆盖已有封面）
             if (newArtist != null) lastArtist = newArtist
@@ -828,6 +850,9 @@ class MusicHost(
         lastTitle = ""; lastArtist = ""; lastCover = null; lastLyricRaw = null
         lyrics = emptyList()
         lyricHighlight = -1
+        lastSeenState = PlaybackState.STATE_NONE
+        frozenPosition = -1L
+        seekAnchorPos = -1L
         lyricTickRunning = false
         handler.removeCallbacks(lyricTick)
         hideLyricFloat()
@@ -935,6 +960,9 @@ class MusicHost(
         val back = Intent(Intent.ACTION_MAIN).apply {
             addCategory(Intent.CATEGORY_HOME)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            // 必须限定到自己这个包：隐式 HOME 会落到系统默认桌面。debug/release 两个包
+            // 同时安装时，会把另一个 NUI 拉起来，两套实例各挂一个悬浮歌词窗（表现为两个歌词窗口）
+            setPackage(context.packageName)
             putExtra(com.nui.launcher.map.MapHost.EXTRA_AUTO_BACK, true)
         }
         runCatching { context.startActivity(back) }
@@ -1025,7 +1053,67 @@ class MusicHost(
     /** 跳转到指定播放位置（毫秒） */
     fun seekTo(ms: Long) {
         val c = currentController ?: return
-        safe { c.transportControls.seekTo(ms) }
+        val target = ms.coerceAtLeast(0L)
+        // 作废暂停期间的冻结位置，按目标位置重新显示
+        frozenPosition = -1L
+        lastSeenState = PlaybackState.STATE_NONE
+        // 酷我车机版 seek 后不会立刻更新 MediaSession 的 position（声音已经跳过去了，
+        // 上报值还按旧进度递增），只等播放器确认会一直等不到。这里以拖动结果为准建一个
+        // 本地锚点，按播放/暂停状态自行推算，直到播放器上报的位置追上锚点。
+        val st = c.playbackState
+        seekAnchorPos = target
+        seekAnchorAt = android.os.SystemClock.elapsedRealtime()
+        seekAnchorPlaying = st?.state == PlaybackState.STATE_PLAYING
+        Log.i(TAG, "seek 请求: ${target}ms 播放器当前=${st?.position}ms state=${st?.state}")
+        safe { c.transportControls.seekTo(target) }
+    }
+
+    /**
+     * 当前播放位置（毫秒）。
+     *
+     * 优先级：本地 seek 锚点 > 播放器上报。
+     *   - seek 锚点：拖动/跳转后由 NUI 自己维护基准（播放时随系统时钟推进，暂停时定住），
+     *     因为酷我 seek 后不会更新 MediaSession 的 position，等它确认会一直回弹。
+     *     当播放器上报值追上锚点（进入容差）时再交还，恢复正常跟随。
+     *   - 播放态：直接用上报的 position。
+     *   - 非播放态（暂停/缓冲/被语音打断）：冻结在离开播放态那一刻的位置。部分车机播放器
+     *     暂停后仍持续上报递增的 position，继续跟随会让进度和歌词在暂停时继续前进；也不能
+     *     用 position - elapsed*speed 去"还原"，那会把进度拉到更早，打断越久歌词落后越多。
+     * 返回 -1 表示当前没有会话。
+     */
+    fun stablePosition(): Long {
+        val c = currentController ?: return -1L
+        val st = c.playbackState ?: return -1L
+        if (seekAnchorPos >= 0L) {
+            val now = android.os.SystemClock.elapsedRealtime()
+            val playing = st.state == PlaybackState.STATE_PLAYING
+            // 播放/暂停切换：把之前累计的进度落成新基准，暂停期间不计时
+            if (playing != seekAnchorPlaying) {
+                if (seekAnchorPlaying) seekAnchorPos += (now - seekAnchorAt)
+                seekAnchorAt = now
+                seekAnchorPlaying = playing
+            }
+            // 播放器上报值追上锚点（seek 已被它感知）→ 结束锚点，回到正常跟随
+            val local = seekAnchorPos + if (playing) (now - seekAnchorAt) else 0L
+            if (kotlin.math.abs(st.position - local) <= SEEK_ALIGN_TOLERANCE_MS) {
+                Log.i(TAG, "seek 对齐: 播放器=${st.position}ms 本地=${local}ms")
+                seekAnchorPos = -1L
+                return st.position.coerceAtLeast(0L)
+            }
+            return local.coerceAtLeast(0L)
+        }
+        val raw = st.position.coerceAtLeast(0L)
+        if (st.state == PlaybackState.STATE_PLAYING) {
+            lastSeenState = st.state
+            frozenPosition = -1L
+            return raw
+        }
+        // 刚从播放态掉下来（暂停/被语音抢占/缓冲）：把当前位置定住，之后的上报一律忽略
+        if (lastSeenState == PlaybackState.STATE_PLAYING || frozenPosition < 0L) {
+            frozenPosition = raw
+        }
+        lastSeenState = st.state
+        return frozenPosition
     }
 
     /** 当前会话播放进度：(已播毫秒, 总时长毫秒)。无会话或时长未知返回 null（供负一屏进度条使用）。 */
@@ -1033,7 +1121,8 @@ class MusicHost(
         val c = currentController ?: return null
         val dur = c.metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
         if (dur <= 0L) return null
-        val pos = c.playbackState?.position ?: return null
+        val pos = stablePosition()
+        if (pos < 0L) return null
         return pos.coerceIn(0L, dur) to dur
     }
 
@@ -1252,8 +1341,8 @@ class MusicHost(
     /** 卡拉OK扫光：按播放进度更新当前行已唱比例 */
     private fun updateKaraokeProgress() {
         val view = karaokeView ?: return
-        val controller = currentController ?: return
-        val pos = controller.playbackState?.position ?: return
+        val pos = stablePosition()
+        if (pos < 0L) return
         val idx = lyricHighlight.coerceAtLeast(0)
         val start = lyrics[idx].first
         val end = if (idx + 1 < lyrics.size) lyrics[idx + 1].first else start + 5000L
@@ -1455,7 +1544,10 @@ class MusicHost(
             updateLyricFloat()
             return
         }
-        val pos = controller?.playbackState?.position ?: -1L
+        // 位置在播放时跟随播放器上报、暂停/被打断时冻结在暂停那一刻（见 stablePosition），
+        // 所以打断期间歌词会自然停住，不需要再按"是否在播报"额外冻结；那样反而会在音乐
+        // 其实仍在前进（被系统静音而非暂停）时把歌词冻住，恢复声音后就比歌声慢。
+        val pos = stablePosition()
         if (pos < 0L) { updateLyricFloat(); return }
 
         var idx = -1
@@ -1502,6 +1594,8 @@ class MusicHost(
         private const val ACTION_CLOSE_MAP = "com.autonavi.plus.closemap"
         /** 切歌后封面缓冲期：metadata 封面滞后到达时，缓冲期内维持大布局避免上下首之间来回跳 */
         private const val COVER_GRACE_MS = 2500L
+        /** 拖动进度条后的本地锚点与播放器上报值的对齐容差：落入该范围视为播放器已跟上 */
+        private const val SEEK_ALIGN_TOLERANCE_MS = 5_000L
         const val DEFAULT_LYRIC_BG_ALPHA = 20
 
         /** 读取音乐外观，默认经典 */
