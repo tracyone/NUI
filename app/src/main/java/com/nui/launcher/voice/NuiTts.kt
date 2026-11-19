@@ -10,6 +10,7 @@ import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import android.widget.Toast
 import com.nui.launcher.NuiToast
+import com.nui.launcher.music.MusicHost
 import java.util.Locale
 
 /**
@@ -105,12 +106,22 @@ private object NuiTtsCore {
     @Volatile
     private var sysVoices: List<String>? = null
 
-    /** 播报预计结束时刻（elapsedRealtime，0=未在播报）。
-     *  双保险：onDone 会提前清零；部分车机引擎只回调 onStart 不回调 onDone，所以进入播报时
-     *  先按文本长度估算截止时刻（中文约 5 字/秒，留 400ms 余量），避免歌词被永久冻结。 */
+    /** 播报结束时刻（elapsedRealtime，0=未在播报）。恢复音乐完全按估算时间，
+     *  不使用引擎的完成回调。 */
     @Volatile
     private var speakingUntil = 0L
-    private const val SPEAK_MAX_MS = 30_000L
+    /** 当前播报 id：用于判断延迟恢复时是否已被新播报覆盖 */
+    @Volatile
+    private var activeUttId: String? = null
+    /** 到期恢复音乐的定时器（新播报/stop 时不残留） */
+    private var finishRunnable: Runnable? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    /** 估算：准备时间统一 2s，语速每字 240ms，再留 1s 尾部余量。
+     *  只用估算，不依赖引擎的完成回调。 */
+    private const val PREP_MS = 2_000L
+    private const val SPEECH_MS_PER_CHAR = 240L
+    private const val TAIL_MS = 1_000L
 
     private val worker: HandlerThread by lazy {
         HandlerThread("nui-tts").apply { start() }
@@ -145,10 +156,15 @@ private object NuiTtsCore {
 
     fun stop() {
         runCatching { sysTts?.stop() }
+        cancelFinish()
         speakingUntil = 0L
+        if (activeUttId != null) {
+            activeUttId = null
+            MusicHost.ttsPauseHook?.invoke(false)
+        }
     }
 
-    /** 是否正在播报：按估算截止时刻判断，onDone 会提前复位 */
+    /** 是否正在播报：按播放结束时刻判断，播放完成会提前复位 */
     fun isSpeaking(): Boolean {
         val until = speakingUntil
         if (until == 0L) return false
@@ -240,34 +256,65 @@ private object NuiTtsCore {
         }
     }
 
-    /** 用已就绪的系统引擎播报（语言已在初始化时校验设置，speak 不再重复 setLanguage）。
-     *  通过 UtteranceProgressListener.onStart 打点「点击→出声」耗时。 */
+    /** 用已就绪的系统引擎直接播报。
+     *  音乐暂停/恢复不依赖引擎回调：发声前按「暂停按钮」暂停，
+     *  按估算（准备 2s + 每字 240ms + 1s）到点后按「播放按钮」恢复。 */
     private fun speakWithSystem(t: TextToSpeech, text: String) {
-        runCatching {
-            val t0 = System.currentTimeMillis()
-            val uttId = "nui_$t0"
-            // 中文按 5 字/秒估算，最短 1.5s、最长 30s；onDone 到达会提前结束
-            val durationMs = (text.length * 220L + 400L).coerceIn(1_500L, SPEAK_MAX_MS)
-            speakingUntil = SystemClock.elapsedRealtime() + durationMs
-            t.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                override fun onStart(id: String?) {
-                    if (id == uttId) Log.i(TAG, "系统语音出声耗时 ${System.currentTimeMillis() - t0}ms")
+        val t0 = SystemClock.elapsedRealtime()
+        val uttId = "nui_$t0"
+        activeUttId = uttId
+
+        // 1) 发声前立即暂停音乐（与点暂停按钮同路径）
+        MusicHost.ttsPauseHook?.invoke(true)
+
+        // 2) 估算并定时恢复
+        val est = PREP_MS + speechMs(text)
+        speakingUntil = t0 + est
+        scheduleFinish(uttId, est)
+
+        t.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            /** 引擎若晚于估算才出声，从出声时刻重新起算，保证不会早恢复 */
+            override fun onStart(id: String?) {
+                if (id != uttId) return
+                val speech = speechMs(text)
+                val until = SystemClock.elapsedRealtime() + speech
+                if (until > speakingUntil) {
+                    speakingUntil = until
+                    scheduleFinish(uttId, speech)
                 }
-                // 注意：不能在这里清零。实测部分引擎（含车机自带的离线引擎）合成完成就回调
-                // onDone，此时声音还没放完；若据此解冻，歌词会在播报中继续走。改为统一按
-                // 上面的估算截止时刻解冻，stop()/下一条 speak() 会覆盖。
-                override fun onDone(id: String?) {
-                    if (id == uttId && SystemClock.elapsedRealtime() > speakingUntil + 1_000L) {
-                        speakingUntil = 0L
-                    }
-                }
-                @Deprecated("Deprecated in Java")
-                override fun onError(id: String?) {
-                    if (id == uttId) speakingUntil = 0L
-                }
-            })
-            t.speak(text, TextToSpeech.QUEUE_FLUSH, null, uttId)
-        }
+            }
+
+            override fun onDone(id: String?) {}
+
+            @Deprecated("Deprecated in Java")
+            override fun onError(id: String?) {}
+        })
+        runCatching { t.speak(text, TextToSpeech.QUEUE_FLUSH, null, uttId) }
+    }
+
+    /** 语音时长估算：每字 240ms + 1s 尾部余量 */
+    private fun speechMs(text: String): Long =
+        text.length.coerceAtLeast(1).toLong() * SPEECH_MS_PER_CHAR + TAIL_MS
+
+    private fun scheduleFinish(uttId: String, delayMs: Long) {
+        cancelFinish()
+        val r = Runnable { finishSpeaking(uttId) }
+        finishRunnable = r
+        mainHandler.postDelayed(r, delayMs)
+    }
+
+    private fun cancelFinish() {
+        finishRunnable?.let { mainHandler.removeCallbacks(it) }
+        finishRunnable = null
+    }
+
+    /** 结束一次播报：解冻歌词 + 恢复音乐（只有当前播报仍有效时才生效） */
+    private fun finishSpeaking(uttId: String) {
+        if (activeUttId != uttId) return
+        cancelFinish()
+        activeUttId = null
+        speakingUntil = 0L
+        MusicHost.ttsPauseHook?.invoke(false)
     }
 
     /** 按当前音色偏好选择系统引擎的声音（zh 优先，name 含 female/male 匹配，找不到用默认） */

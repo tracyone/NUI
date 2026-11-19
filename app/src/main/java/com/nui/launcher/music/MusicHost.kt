@@ -85,7 +85,35 @@ class MusicHost(
     private var lyricFetchKey: String? = null
     /** 唱碟旋转动画（播放时旋转，暂停时停止） */
     private var discRotationAnim: ObjectAnimator? = null
+    /** 由 NUI 播报触发的暂停；只有这种情况才在播报结束后自动恢复 */
+    @Volatile private var ttsPausedMusic = false
+    private fun pauseForTts() {
+        val c = currentController ?: return
+        val st = c.playbackState ?: return
+        // 已在暂停态：这次播报不改动它，也不在结束后恢复（保持用户原有状态）
+        if (st.state != PlaybackState.STATE_PLAYING) return
+        // 与「用户按暂停按钮」完全同路径：置 userPaused 并取消排队的自动播放，
+        // 否则 PAUSED 回调会走 maybeAutoResume()，800ms 后把音乐自动救活。
+        userPause()
+        runCatching { c.transportControls.pause() }
+        ttsPausedMusic = true
+        Log.i(TAG, "播报开始：暂停音乐 ${c.packageName}")
+    }
+
+    private fun resumeAfterTts() {
+        if (!ttsPausedMusic) return
+        ttsPausedMusic = false
+        // 与「用户按播放按钮」同路径：先清暂停标志，再 play()
+        userPaused = false
+        cancelAllAuto()
+        runCatching { currentController?.transportControls?.play() }
+        Log.i(TAG, "播报结束：恢复音乐")
+    }
+
     init {
+        // NUI 发声（速度/红绿灯/问候语）期间主动暂停音乐，发声结束再恢复。
+        // 外部声音打断时播放器引擎并不会停，只靠位置推断必然错位，直接走暂停最可靠。
+        ttsPauseHook = { pause -> if (pause) pauseForTts() else resumeAfterTts() }
         lyricFetcher.onLyricReady = { lrc, _ ->
             // 对收到的 LRC 做基本一致性校验：不重复采用相同内容
             if (lastLyricRaw != lrc) {
@@ -1012,6 +1040,10 @@ class MusicHost(
     /** 创建悬浮歌词时记录的背景不透明度（0-100），设置变化时用于触发重建 */
     private var lastLyricBgAlpha = -1
     private var lyricFloatNext: TextView? = null
+    /** 悬浮歌词右下角拉伸手柄 */
+    private var lyricFloatHandle: View? = null
+    /** 已应用到悬浮歌词的外观（true=夜间）；null 表示尚未应用 */
+    private var floatNightApplied: Boolean? = null
     private var desktopVisible = false
     private var playingNow = false
     private var floatX = -1
@@ -1172,6 +1204,11 @@ class MusicHost(
     }
 
     private fun createLyricFloat() {
+        // 进程内可能有多个 MusicHost（多个 MainActivity task 并存）：先摘掉上一个实例挂的歌词窗，
+        // 否则两个窗口几何相同会重叠，拖动其中一个才露出下面那个
+        globalFloatView?.let { old ->
+            if (old !== lyricFloatView) runCatching { wm.removeView(old) }
+        }
         val percent = MusicHost.lyricBgAlpha(context)
         lastLyricBgAlpha = percent
         val bgAlpha = percent * 255 / 100   // 0-100% → 0-255，默认 80% ≈ 204
@@ -1207,16 +1244,39 @@ class MusicHost(
         root.addView(col, FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         // 右下角拉伸手柄
-        root.addView(View(context).apply {
+        val handle = View(context).apply {
             background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0xFF00E5FF.toInt()); cornerRadius = dp(2).toFloat()
+                cornerRadius = dp(2).toFloat()
             }
-        }, FrameLayout.LayoutParams(dp(18), dp(4)).apply {
+        }
+        root.addView(handle, FrameLayout.LayoutParams(dp(18), dp(4)).apply {
             gravity = Gravity.BOTTOM or Gravity.END
             marginEnd = dp(8); bottomMargin = dp(6)
         })
+        lyricFloatHandle = handle
         root.setOnTouchListener(floatTouch)
         lyricFloatView = root
+        globalFloatView = root
+        // 按当前外观着色（夜间黑底亮字 / 白天蓝底白字）
+        floatNightApplied = null
+        applyFloatColors(force = true)
+    }
+
+    /**
+     * 悬浮歌词配色随昼夜：背景、副行、手柄保持原样不动，只换文字——
+     *   - 夜间：灰白未唱 + 金色扫光；
+     *   - 白天：纯白未唱 + 宝蓝扫光（KTV 风格）。
+     */
+    private fun applyFloatColors(force: Boolean = false) {
+        val view = lyricFloatView ?: return
+        val night = UiTheme.isDark(context)
+        if (!force && floatNightApplied == night) return
+        floatNightApplied = night
+        val bgAlpha = lastLyricBgAlpha * 255 / 100
+        (view.background as? android.graphics.drawable.GradientDrawable)?.setColor(bgAlpha shl 24)
+        karaokeView?.night = night
+        lyricFloatNext?.setTextColor(0x99FFFFFF.toInt())
+        (lyricFloatHandle?.background as? android.graphics.drawable.GradientDrawable)?.setColor(0xFF00E5FF.toInt())
     }
 
     private var touchMode = 0 // 0 无 1 移动 2 拉伸
@@ -1270,10 +1330,15 @@ class MusicHost(
     private fun hideLyricFloat(reRender: Boolean = true) {
         // 只有真的挂上过窗口才需要重绘，否则"建了但 addView 失败"的引用会误触重绘
         val wasAttached = lyricFloatAttached
-        lyricFloatView?.let { runCatching { wm.removeView(it) } }
+        lyricFloatView?.let {
+            runCatching { wm.removeView(it) }
+            if (globalFloatView === it) globalFloatView = null
+        }
         lyricFloatView = null
         karaokeView = null
         lyricFloatNext = null
+        lyricFloatHandle = null
+        floatNightApplied = null
         lyricFloatAttached = false
         // 悬浮歌词消失时重绘音乐栏，恢复内嵌歌词
         if (wasAttached && reRender) currentController?.let { renderPlaying(it) }
@@ -1282,6 +1347,15 @@ class MusicHost(
     private fun updateLyricFloat() {
         // 无悬浮窗权限且已失败过一次：本次桌面停留期间直接跳过，别让 100ms 定时刷新反复抛异常
         if (lyricFloatDenied) return
+        // 窗口已被另一个 MusicHost 实例接管（进程内只允许一个歌词窗）：本地引用作废，按需重建
+        if (lyricFloatView != null && globalFloatView !== lyricFloatView) {
+            lyricFloatView = null
+            karaokeView = null
+            lyricFloatNext = null
+            lyricFloatHandle = null
+            lyricFloatAttached = false
+            floatNightApplied = null
+        }
         // 音乐 App 悬浮显示中：其界面已占据音乐窗口区域（含歌词），NUI 悬浮歌词再叠加会重复/遮挡
         if (!desktopVisible || !playingNow || musicFloatRequested) { hideLyricFloat(); return }
         // 关闭「显示桌面歌词」：整个歌词框都不显示（有词无词都不显示）
@@ -1308,10 +1382,12 @@ class MusicHost(
             // 失败时绝不能走 hideLyricFloat()：那时引用已非空，会被当成"曾经显示过"而触发
             // renderPlaying → renderCompactNoCover → refreshLyric → updateLyricFloat 递归，
             // 主线程无限重建视图直到 ANR。这里直接清引用退出，本次不显示歌词即可。
+            val newView = lyricFloatView!!
             val added = runCatching {
-                wm.addView(lyricFloatView!!, lp)
+                wm.addView(newView, lp)
             }.isSuccess
             if (!added) {
+                if (globalFloatView === newView) globalFloatView = null
                 lyricFloatView = null
                 karaokeView = null
                 lyricFloatNext = null
@@ -1538,6 +1614,8 @@ class MusicHost(
     private fun refreshLyric() {
         val controller = currentController
         playingNow = controller?.playbackState?.state == PlaybackState.STATE_PLAYING
+        // 外观（昼夜）可能在运行中切换：每轮刷新时同步一次悬浮歌词配色，变化时才重绘
+        applyFloatColors()
         if (lyrics.isEmpty()) {
             onMinusLyric?.invoke("", "")
             // 没有歌词也走一次浮窗刷新：开关打开时显示"暂无歌词 + 原因"，关闭时内部会隐藏
@@ -1570,6 +1648,8 @@ class MusicHost(
         (v * context.resources.displayMetrics.density).toInt()
 
     companion object {
+        /** NuiTts 播报钩子：true=开始播报，false=播报结束（由 MusicHost 实例注册实现） */
+        @Volatile var ttsPauseHook: ((Boolean) -> Unit)? = null
         /** 已打过"metadata 无歌词"诊断日志的包名（每包一次，不刷屏） */
         private val dumpedMetaPkgs = mutableSetOf<String>()
 
@@ -1579,6 +1659,12 @@ class MusicHost(
         var userPaused = false
         /** 用户主动暂停时间戳：全局静态 */
         var lastUserPauseAt = 0L
+        /**
+         * 进程内唯一的悬浮歌词窗口。
+         * 多个 MainActivity 实例（不同 task 同时存活）会各建一个 MusicHost，若各挂一个窗就会出现
+         * 两个重叠的歌词框（拖动后错开才被发现）。新窗口 addView 前先把这里记录的旧窗摘掉，保证全局只有一个。
+         */
+        private var globalFloatView: FrameLayout? = null
         private const val TAG = "MusicHost"
         private const val PREFS = "nui_music"
         private const val KEY_APP = "music_app"
@@ -1663,12 +1749,20 @@ class MusicHost(
     }
 }
 
-/** 卡拉OK歌词行：未唱灰色，已唱金色渐变扫光 */
+/** 卡拉OK歌词行：未唱保持原灰白，已唱扫光夜间金色 / 白天宝蓝 */
 class KaraokeTextView(context: Context) : androidx.appcompat.widget.AppCompatTextView(context) {
     var progress = 0f
         set(v) { field = v.coerceIn(0f, 1f); invalidate() }
+    /** 仅控制已唱扫光色：true 金色，false 宝蓝；未唱文字昼夜一致 */
+    var night = true
+        set(v) { if (field != v) { field = v; invalidate() } }
     private val basePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
     private val sungPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    /** 白天用的文字描边（白字 + 蓝色描边，参考车机字幕风格） */
+    private val strokePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        style = android.graphics.Paint.Style.STROKE
+        strokeJoin = android.graphics.Paint.Join.ROUND
+    }
     override fun onDraw(canvas: android.graphics.Canvas) {
         var text = text?.toString().orEmpty()
         if (text.isEmpty()) return
@@ -1685,17 +1779,48 @@ class KaraokeTextView(context: Context) : androidx.appcompat.widget.AppCompatTex
         val x = (width - tw) / 2f
         val fm = basePaint.fontMetrics
         val y = (height - (fm.descent - fm.ascent)) / 2f - fm.ascent
-        basePaint.color = 0xFF8FA3AD.toInt()
-        canvas.drawText(text, x, y, basePaint)
-        if (progress > 0f) {
-            canvas.save()
-            canvas.clipRect(0f, 0f, x + tw * progress, height.toFloat())
-            sungPaint.shader = android.graphics.LinearGradient(
-                x, 0f, x + tw, 0f,
-                intArrayOf(0xFFFFC400.toInt(), 0xFFFFF59D.toInt(), 0xFFFFAB00.toInt()),
-                null, android.graphics.Shader.TileMode.CLAMP)
-            canvas.drawText(text, x, y, sungPaint)
-            canvas.restore()
+        if (!night) {
+            // 白天分两段绘制：
+            //   已唱段 = 蓝底 + 白边；未唱段 = 白底 + 黑边
+            val sungW = x + tw * progress
+            strokePaint.textSize = basePaint.textSize
+            strokePaint.typeface = typeface
+            strokePaint.strokeWidth = basePaint.textSize * 0.09f
+            // 未唱段（裁剪到已唱进度之后）
+            if (progress < 1f) {
+                canvas.save()
+                canvas.clipRect(sungW, 0f, x + tw, height.toFloat())
+                strokePaint.color = 0xFF000000.toInt()
+                canvas.drawText(text, x, y, strokePaint)
+                basePaint.color = 0xFFFFFFFF.toInt()
+                canvas.drawText(text, x, y, basePaint)
+                canvas.restore()
+            }
+            // 已唱段
+            if (progress > 0f) {
+                canvas.save()
+                canvas.clipRect(0f, 0f, sungW, height.toFloat())
+                strokePaint.color = 0xFFFFFFFF.toInt()
+                canvas.drawText(text, x, y, strokePaint)
+                val colors = intArrayOf(0xFF2B5CFF.toInt(), 0xFF007FFF.toInt(), 0xFF00A8FF.toInt())
+                sungPaint.shader = android.graphics.LinearGradient(
+                    x, 0f, x + tw, 0f, colors, null, android.graphics.Shader.TileMode.CLAMP)
+                canvas.drawText(text, x, y, sungPaint)
+                canvas.restore()
+            }
+        } else {
+            // 夜间：灰白未唱 + 金色扫光
+            basePaint.color = 0xFF8FA3AD.toInt()
+            canvas.drawText(text, x, y, basePaint)
+            if (progress > 0f) {
+                canvas.save()
+                canvas.clipRect(0f, 0f, x + tw * progress, height.toFloat())
+                val colors = intArrayOf(0xFFFFC400.toInt(), 0xFFFFF59D.toInt(), 0xFFFFAB00.toInt())
+                sungPaint.shader = android.graphics.LinearGradient(
+                    x, 0f, x + tw, 0f, colors, null, android.graphics.Shader.TileMode.CLAMP)
+                canvas.drawText(text, x, y, sungPaint)
+                canvas.restore()
+            }
         }
     }
 }

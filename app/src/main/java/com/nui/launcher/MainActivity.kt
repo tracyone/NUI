@@ -1724,7 +1724,9 @@ class MainActivity : AppCompatActivity() {
         super.onPause()
         android.util.Log.d("NUI.Main", "onPause")
         if (::weatherFetcher.isInitialized) weatherFetcher.stop()
-        if (::weatherVoice.isInitialized) weatherVoice.stop()
+        // 注意：这里不能停语音。退后台常由"一键导航"等操作引起，此时导航播报正在说，
+        // 停掉会掐断播报，进而让"播报期间暂停音乐"提前恢复（音乐刚暂停就跳回来）。
+        // 天气播报由 WeatherActivity 自己在页面关闭时停止；进程结束时 onDestroy 兜底 shutdown。
         if (::mapHost.isInitialized) {
             mapHost.onPause()
             mapHost.cancelPendingShow()
