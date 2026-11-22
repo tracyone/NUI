@@ -144,6 +144,48 @@
                 android:src="@drawable/ic_nav_favorite" />
         </LinearLayout>
 
+        <!-- 当前速度 + 限速：固定在三个快捷圆右侧（不随限速有无移动），
+             样式与桌面巡航卡一致（速度=黑底蓝圈白字，限速=白底红圈黑字）；
+             无速度数据时整块隐藏，有限速才显示右侧限速圈。 -->
+        <LinearLayout
+            android:id="@+id/minusSpeedBox"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="14dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:visibility="gone"
+            tools:visibility="visible">
+
+            <TextView
+                android:id="@+id/minusSpeed"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:background="@drawable/bg_speed_circle"
+                android:gravity="center"
+                android:text="65"
+                android:textSize="24sp"
+                android:textStyle="bold"
+                android:textColor="#FFFFFF"
+                android:maxLines="1"
+                tools:ignore="HardcodedText" />
+
+            <TextView
+                android:id="@+id/minusLimit"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginStart="10dp"
+                android:background="@drawable/bg_speed_limit"
+                android:gravity="center"
+                android:text="60"
+                android:textSize="24sp"
+                android:textStyle="bold"
+                android:textColor="#1C1C1E"
+                android:maxLines="1"
+                android:visibility="gone"
+                tools:ignore="HardcodedText" />
+        </LinearLayout>
+
         <!-- 巡航红绿灯：紧挨三个快捷圆、音乐卡左侧。
              灯数/方向由 NavInfoHost 动态生成（1~N 个胶囊自适应宽度，>=3 个自动切紧凑尺寸），
              非巡航或无灯数据时 GONE，不占位、不影响音乐卡与进度条。 -->

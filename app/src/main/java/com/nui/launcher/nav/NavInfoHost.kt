@@ -103,6 +103,11 @@ class NavInfoHost(
         val cruiseLimit: TextView? = root.findViewById(R.id.cruiseLimit)
         val cruiseCamOther: ViewGroup? = root.findViewById(R.id.cruiseCamOther)
         val cruiseLight: LinearLayout? = root.findViewById(R.id.cruiseLight)
+        /** 负一屏底栏的速度/限速：与灯条同处 minusBar，但不在 root 子树内，需从父容器查找 */
+        private val barParent: ViewGroup? = root.parent as? ViewGroup
+        val dockSpeedBox: View? = barParent?.findViewById(R.id.minusSpeedBox)
+        val dockSpeed: TextView? = barParent?.findViewById(R.id.minusSpeed)
+        val dockLimit: TextView? = barParent?.findViewById(R.id.minusLimit)
         // 天气文字仅 page0 右侧面板存在（导航时占用其位置）；负一屏树内无此 id → null
         val weather: View? = (root.parent as? ViewGroup)?.findViewById(R.id.weatherText)
     }
@@ -249,6 +254,7 @@ class NavInfoHost(
             r.cruiseBlock?.visibility = if (mode == Mode.CRUISE) View.VISIBLE else View.GONE
             // 红绿灯胶囊只由灯条负责（showLights），且只在巡航态显示；其余一律隐藏
             if (mode != Mode.CRUISE || !r.showLights) r.cruiseLight?.visibility = View.GONE
+            renderDockSpeed(r, curSpeed, if (mode == Mode.CRUISE) cruiseLimit else limitedSpeed)
             r.root.visibility = when {
                 // 灯条是独立容器：只在巡航 + 有灯数据时占位，导航/无数据时不留下空白条
                 r.showLights -> if (mode == Mode.CRUISE && currentPage == r.page) View.VISIBLE else View.GONE
@@ -353,6 +359,8 @@ class NavInfoHost(
         refs.forEach { r ->
             r.root.visibility =
                 if (mode != Mode.NONE && page == r.page) View.VISIBLE else View.GONE
+            // 负一屏底栏速度/限速：随页面切换显示或隐藏（速度块不在灯条 root 子树内）
+            renderDockSpeed(r, curSpeed, if (mode == Mode.CRUISE) cruiseLimit else limitedSpeed)
         }
         Log.i(TAG, "onPageChanged page=$page 卡片=${refs.joinToString { "p${it.page}=vis${it.root.visibility}" }}")
     }
@@ -361,6 +369,12 @@ class NavInfoHost(
         if (mode == newMode) return
         val old = mode
         mode = newMode
+        // 退出驾驶态：底栏速度圈常驻显示，无数据即 0
+        if (newMode == Mode.NONE) {
+            curSpeed = 0
+            limitedSpeed = 0
+            cruiseLimit = 0
+        }
         // 高德巡航播报静音：进入巡航时让高德闭嘴，由 NUI 负责红绿灯语音提醒；
         // 退出巡航（含转导航）恢复高德播报。
         if (newMode == Mode.CRUISE && old != Mode.CRUISE) setAmapCruiseMute(true)
@@ -392,6 +406,7 @@ class NavInfoHost(
                 active && currentPage == r.page -> View.VISIBLE
                 else -> View.GONE
             }
+            renderDockSpeed(r, curSpeed, if (newMode == Mode.CRUISE) cruiseLimit else limitedSpeed)
             // 占用天气区域（仅 page0 有 weather）：隐藏天气文字；退出恢复
             r.weather?.visibility = if (active) View.GONE else View.VISIBLE
             if (!active || !r.showLights) r.cruiseLight?.visibility = View.GONE
@@ -466,8 +481,9 @@ class NavInfoHost(
         // 速度/限速：导航和巡航都更新（超速检测）
         val speed = intent.getIntExtra("CUR_SPEED", 0)
         val limited = intent.getIntExtra("LIMITED_SPEED", 0)
-        if (speed > 0) curSpeed = speed
-        if (limited > 0) limitedSpeed = limited
+        // 0 也写回：速度数据断流/退出驾驶后底栏速度圈显示 0，而不是停在旧值
+        if (intent.hasExtra("CUR_SPEED")) curSpeed = speed
+        if (intent.hasExtra("LIMITED_SPEED")) limitedSpeed = limited
 
         if (icon == 0) {
             when (mode) {
@@ -576,6 +592,7 @@ class NavInfoHost(
             r.cruiseSpeed?.setTextColor(0xFFFFFFFF.toInt())
             r.cruiseLimit?.setTextColor(0xFF1C1C1E.toInt())
         }
+        renderDockSpeed(r, curSpeed, cruiseLimit)
         updateCruiseCamera(r, intent)
     }
 
@@ -1255,6 +1272,35 @@ class NavInfoHost(
      * 导航卡当前速度圈渲染（与巡航卡样式对齐）：速度黑底蓝圈大字（无单位），
      * 限速红圈白底黑字（可选）。超速时速度圈红字、限速圈红字；不超速白/黑字。
      */
+    /** 负一屏底栏的当前速度/限速（样式与桌面速度圈一致，尺寸适配 44dp 底栏）：
+     *  速度固定占位（三快捷圆右侧），限速有值才显示，无值 GONE 不留空。
+     *  只在导航/巡航态且当前停在负一屏时显示。 */
+    private fun renderDockSpeed(r: Refs, speed: Int, limit: Int) {
+        val box = r.dockSpeedBox ?: return
+        val sp = r.dockSpeed ?: return
+        // 速度圈常驻（无数据时显示 --），限速圈按有无限速显示/隐藏
+        box.visibility = View.VISIBLE
+        sp.text = if (speed > 0) "$speed" else "0"
+        sp.textSize = if (speed >= 100) 19f else 24f
+        val lm = r.dockLimit
+        if (lm != null) {
+            if (limit > 0) {
+                lm.text = "$limit"
+                lm.textSize = if (limit >= 100) 19f else 24f
+                lm.visibility = View.VISIBLE
+            } else {
+                lm.visibility = View.GONE
+            }
+            if (limit > 0 && speed > limit) {
+                sp.setTextColor(0xFFFF6B6B.toInt())
+                lm.setTextColor(0xFFE53935.toInt())
+            } else {
+                sp.setTextColor(0xFFFFFFFF.toInt())
+                lm.setTextColor(0xFF1C1C1E.toInt())
+            }
+        }
+    }
+
     private fun renderNavSpeed(r: Refs, speed: Int, limit: Int) {
         adjustCircleText(r.speed, if (speed > 0) "$speed" else "--")
         if (limit > 0) {
@@ -1272,6 +1318,7 @@ class NavInfoHost(
             r.speed?.setTextColor(0xFFFFFFFF.toInt())
             r.limit?.setTextColor(0xFF1C1C1E.toInt())
         }
+        renderDockSpeed(r, speed, limit)
     }
 
     /** 超速检测语音（仅巡航模式；导航模式高德软件自己播报，NUI 不重复）：
