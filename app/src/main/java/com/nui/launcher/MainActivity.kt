@@ -391,6 +391,15 @@ class MainActivity : AppCompatActivity() {
         v.findViewById<View>(R.id.shortcutNavFavorite).setOnClickListener {
             desktopBtnNavFavorite?.performClick()
         }
+        // 底部 6 个按钮放大选择：按住放大、滑动切换、松手执行；快速单击仍直行
+        setupMinusMagnifySelect(listOf(
+            v.findViewById(R.id.btnMinusPrev),
+            v.findViewById(R.id.btnMinusPlay),
+            v.findViewById(R.id.btnMinusNext),
+            v.findViewById(R.id.shortcutNavHome),
+            v.findViewById(R.id.shortcutNavCompany),
+            v.findViewById(R.id.shortcutNavFavorite),
+        ), v.findViewById(R.id.minusMagnifyLabel))
         // 应用负一屏壁纸（静态图或视频）
         applyMinusWallpaper()
         applyMinusTheme()
@@ -510,6 +519,166 @@ class MainActivity : AppCompatActivity() {
         val s = totalSec % 60
         return if (h > 0) String.format("%d:%02d:%02d", h, m, s)
         else String.format("%02d:%02d", m, s)
+    }
+
+    /** 负一屏底部 6 个按钮（回家/公司/收藏/上一首/播放/下一首）的放大选择：
+     *  按住不放（约 250ms）→ 进入放大态，仿 macOS Dock 效果：离手指越近的图标放大越多、渐远平滑回落，
+     *  放大以按钮底部为锚点只向上凸起（超出 dock 栏，不向下溢出屏幕被裁）；
+     *  手指滑动时整排图标「一个接一个」跟随放大，松手执行离手指最近的按钮；
+     *  快速单击（未触发长按）仍走原 onClick 直行，不改变原有响应。 */
+    /** 负一屏底部 6 个按钮（回家/公司/收藏/上一首/播放/下一首）的放大选择：
+     *  按住不放（约 250ms）→ 进入放大态，仿 macOS Dock 效果：离手指越近的图标放大越多、渐远平滑回落，
+     *  放大以按钮底部为锚点只向上凸起（超出 dock 栏）；同时按放大后的实际宽度横向推开相邻按钮，
+     *  保持图标之间的空隙不重叠（macOS Dock 的核心：放大不只是缩放，还把旁边图标向外挤）。
+     *  手指滑动时整排图标「一个接一个」跟随放大并推开，松手执行离手指最近的按钮；
+     *  快速单击（未触发长按）仍走原 onClick 直行，不改变原有响应。 */
+    private fun setupMinusMagnifySelect(buttons: List<View>, label: TextView) {
+        if (buttons.size < 2) return
+        val density = resources.displayMetrics.density
+        val maxScale = 2.5f
+        val longPressMs = 250L
+        val radius = 90f * density  // 放大影响半径：手指距按钮中心在此范围内按距离渐变放大
+        val groupGap = 120f * density  // 超过此横向间距视为另一组（左侧 3 个 vs 右侧 3 个，中间隔着歌名/进度条）
+        var downBtn: View? = null
+        var active = false
+        var downRawX = 0f
+        var downRawY = 0f
+
+        fun centerOf(v: View, loc: IntArray): Pair<Float, Float> {
+            v.getLocationOnScreen(loc)
+            return Pair(loc[0] + v.width / 2f, loc[1] + v.height / 2f)
+        }
+        // 底部锚点：放大只向上凸起（超过 dock 栏），不向下溢出屏幕
+        fun ensurePivot(v: View) {
+            val px = v.width / 2f
+            val py = v.height.toFloat()
+            if (v.pivotX != px || v.pivotY != py) { v.pivotX = px; v.pivotY = py }
+        }
+        // macOS Dock 式放大 + 推开：按手指距离平滑缩放，并按放大后宽度重排，保持空隙不重叠
+        fun applyMagnify(fx: Float, fy: Float) {
+            val loc = IntArray(2)
+            // 计算每个按钮屏幕中心 + 目标 scale，按屏幕 x 排序
+            val items = buttons.map { b ->
+                val (cx, cy) = centerOf(b, loc)
+                val dx = fx - cx; val dy = fy - cy
+                val d = Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
+                val s = if (d < radius) (1f + (maxScale - 1f) * (1f - d / radius)).coerceIn(1f, maxScale) else 1f
+                arrayOf(b, cx, cy, s)
+            }.sortedBy { it[1] as Float }
+
+            // 分组：横向间距超过 groupGap 的按钮属于不同 Dock 段
+            val groups = mutableListOf<MutableList<Array<Any>>>()
+            for (it in items) {
+                val last = groups.lastOrNull()?.lastOrNull()
+                if (last != null && (it[1] as Float) - (last[1] as Float) < groupGap) groups.last().add(it)
+                else groups.add(mutableListOf(it))
+            }
+
+            // 每组内：先定 scale，再按放大后宽度从左到右重排（推开），保持原始空隙
+            var maxS = 0f
+            var maxItem: Array<Any>? = null
+            for (g in groups) {
+                for (it in g) {
+                    val b = it[0] as View; val s = it[3] as Float
+                    ensurePivot(b); b.scaleX = s; b.scaleY = s
+                    if (s > maxS) { maxS = s; maxItem = it }
+                }
+                // 原始空隙：相邻两按钮「下一左边界 - 当前右边界」
+                val gaps = FloatArray(g.size)
+                for (i in 0 until g.size - 1) {
+                    gaps[i] = ((g[i + 1][1] as Float) - (g[i + 1][0] as View).width / 2f) - ((g[i][1] as Float) + (g[i][0] as View).width / 2f)
+                }
+                var cursor = (g[0][1] as Float) - (g[0][0] as View).width / 2f  // 组左边界
+                for (i in g.indices) {
+                    val b = g[i][0] as View; val cx = g[i][1] as Float; val s = g[i][3] as Float
+                    val newW = b.width * s
+                    val targetCx = cursor + newW / 2f
+                    b.translationX = targetCx - cx
+                    cursor += newW + gaps[i]
+                }
+            }
+
+            // 在当前放大最多的图标头顶显示功能文字
+            val top = maxItem
+            if (top != null && maxS > 1.05f) {
+                val b = top[0] as View; val cx = top[1] as Float; val cy = top[2] as Float; val s = top[3] as Float
+                val txt = b.contentDescription?.toString() ?: ""
+                if (label.text?.toString() != txt) label.text = txt
+                label.measure(
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+                )
+                val lw = label.measuredWidth; val lh = label.measuredHeight
+                val gap = 10f * density
+                // 放大以底部为锚点：放大后顶部 = 底部 - 高*s = (cy + h/2) - h*s
+                val topY = (cy + b.height / 2f) - b.height * s
+                label.translationX = cx - lw / 2f
+                label.translationY = topY - lh - gap
+                label.visibility = View.VISIBLE
+            } else {
+                label.visibility = View.GONE
+            }
+        }
+        fun resetMagnify() {
+            for (b in buttons) { b.scaleX = 1f; b.scaleY = 1f; b.translationX = 0f }
+            label.visibility = View.GONE
+        }
+        fun nearest(fx: Float, fy: Float): View? {
+            val loc = IntArray(2)
+            var best: View? = null
+            var bestD = Float.MAX_VALUE
+            for (b in buttons) {
+                val (cx, cy) = centerOf(b, loc)
+                val dx = fx - cx; val dy = fy - cy
+                val d = Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
+                if (d < bestD) { bestD = d; best = b }
+            }
+            return if (bestD <= radius) best else null
+        }
+        val longPress = Runnable {
+            if (downBtn != null) {
+                active = true
+                // 长按生效后接管手势，阻止 ViewPager2 把横向滑动当成翻页
+                downBtn!!.parent?.requestDisallowInterceptTouchEvent(true)
+                applyMagnify(downRawX, downRawY)
+            }
+        }
+        val listener = View.OnTouchListener { v, ev ->
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    downBtn = v
+                    active = false
+                    downRawX = ev.rawX
+                    downRawY = ev.rawY
+                    ensurePivot(v)
+                    v.postDelayed(longPress, longPressMs)
+                    false
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (active) { applyMagnify(ev.rawX, ev.rawY); true } else false
+                }
+                MotionEvent.ACTION_UP -> {
+                    v.removeCallbacks(longPress)
+                    val wasActive = active
+                    val target = if (wasActive) nearest(ev.rawX, ev.rawY) else downBtn
+                    active = false
+                    downBtn = null
+                    resetMagnify()
+                    v.parent?.requestDisallowInterceptTouchEvent(false)
+                    if (wasActive) { target?.performClick(); true } else false
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    v.removeCallbacks(longPress)
+                    active = false
+                    downBtn = null
+                    resetMagnify()
+                    v.parent?.requestDisallowInterceptTouchEvent(false)
+                    false
+                }
+                else -> false
+            }
+        }
+        buttons.forEach { it.setOnTouchListener(listener) }
     }
 
     /** 负一屏壁纸：follow=跟随桌面（root 壁纸透出，根背景透明）/ image=独立静态图 / video=独立视频。
@@ -1144,6 +1313,14 @@ class MainActivity : AppCompatActivity() {
 
         binding.viewPager.adapter = PagerAdapter()
         binding.viewPager.isUserInputEnabled = true
+        // 允许负一屏底部按钮放大时向上凸出页面（macOS Dock 式放大）：
+        // ViewPager2 及其内部 RecyclerView 默认 clipChildren=true，会把凸出 dock 栏顶部的图标裁掉
+        binding.viewPager.clipChildren = false
+        binding.viewPager.clipToPadding = false
+        (binding.viewPager.getChildAt(0) as? ViewGroup)?.let {
+            it.clipChildren = false
+            it.clipToPadding = false
+        }
         // 等首帧 layout 后再跳到桌面(position 1)：初始同步 setCurrentItem 会让负一屏(0)
         // 的不透明近黑背景错位盖住全屏、dock 被误判为负一屏而隐藏
         binding.viewPager.postDelayed({

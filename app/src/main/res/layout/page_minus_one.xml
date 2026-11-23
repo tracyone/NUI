@@ -15,7 +15,9 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:clipChildren="false"
+    android:clipToPadding="false">
 
     <!-- 静态壁纸（IMAGE 模式显示，centerCrop 铺满无黑边；FOLLOW/VIDEO 模式隐藏） -->
     <ImageView
@@ -94,6 +96,8 @@
         android:layout_gravity="bottom"
         android:orientation="horizontal"
         android:gravity="center_vertical"
+        android:clipChildren="false"
+        android:clipToPadding="false"
         android:paddingStart="18dp"
         android:paddingEnd="18dp"
         android:paddingTop="6dp"
@@ -106,6 +110,8 @@
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
+            android:clipChildren="false"
+            android:clipToPadding="false"
             android:layout_marginEnd="14dp">
 
             <ImageView
@@ -207,6 +213,8 @@
             android:layout_weight="1"
             android:orientation="horizontal"
             android:gravity="center_vertical"
+            android:clipChildren="false"
+            android:clipToPadding="false"
             android:layout_marginEnd="14dp">
 
             <ImageView
@@ -333,4 +341,21 @@
 
         <!-- 右：底栏不再显示时间（大时钟已有时刻/日期），让进度条占满剩余宽度 -->
     </LinearLayout>
+
+    <!-- 放大选择时的功能文字提示气泡：显示在当前放大图标的头顶，由代码按按钮位置平移定位 -->
+    <TextView
+        android:id="@+id/minusMagnifyLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:background="@drawable/bg_minus_label"
+        android:textColor="#FFFFFF"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:visibility="gone"
+        tools:visibility="gone" />
 </FrameLayout>
