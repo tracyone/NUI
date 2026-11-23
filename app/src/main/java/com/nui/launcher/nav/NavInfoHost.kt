@@ -163,6 +163,11 @@ class NavInfoHost(
     private val lightHideHandler = android.os.Handler(android.os.Looper.getMainLooper())
     // 多灯聚合：一个路口 size>1 时，高德按 index 分多条广播下发，需要按组暂存后一起渲染
     private val pendingLights = HashMap<Int, JSONObject>()
+    /** 红绿灯残留检测：红灯倒计时必然每秒递减，若连续 FREEZE_TIMEOUT_MS 内容完全不变，
+     *  说明高德在灯已过后仍在发同一帧（残留），直接隐藏而不是等断流。 */
+    private val FREEZE_TIMEOUT_MS = 3_000L
+    private var lastLightSig = ""
+    private var lastLightSigAt = 0L
     private var pendingSize = 0
     private var pendingAt = 0L
     private var pendingFirstAt = 0L
@@ -909,7 +914,9 @@ class NavInfoHost(
         }
         // 只由灯条渲染（桌面巡航卡不再显示同一组灯，避免上下重复）
         refs.forEach { r ->
-            val box = r.cruiseLight ?: return@forEach
+            // 负一屏 ref 的 root 就是 cruiseLight 容器本身（findViewById 找不到自身），
+            // 桌面页 lightBar 才有独立的子 cruiseLight；这里做兜底，避免负一屏灯渲染不到。
+            val box = r.cruiseLight ?: (r.root as? LinearLayout)?.takeIf { r.compactLights } ?: return@forEach
             if (r.showLights) {
                 // 灯条根容器可能已被 hideLights()/syncRefsState() 收起（无灯路段、断流、切页），
                 // 恢复数据时必须重新展开根容器，否则子容器设为 VISIBLE 也看不见——
@@ -921,6 +928,28 @@ class NavInfoHost(
         // 断流兜底：超过 LIGHT_TIMEOUT_MS 没再收到 60073 就隐藏（灯已过/高德停止下发）
         lightHideHandler.removeCallbacks(lightHideRunnable)
         lightHideHandler.postDelayed(lightHideRunnable, LIGHT_TIMEOUT_MS)
+
+        // 残留检测：只有当组内存在倒计时数字（红灯/读秒绿灯）时才判断冻结——
+        // 这类灯倒计时必然每秒递减，连续 3s 内容不变就是高德在发残留帧。
+        val hasCountdown = (0 until array.length()).any { i ->
+            array.optJSONObject(i)?.optInt("redLightCountDownSeconds", -1) ?: -1 > 0
+        }
+        if (hasCountdown) {
+            val sig = array.toString()
+            if (sig == lastLightSig) {
+                if (nowMs - lastLightSigAt > FREEZE_TIMEOUT_MS) {
+                    Log.i(TAG, "红绿灯数据冻结 ${FREEZE_TIMEOUT_MS}ms 不变，判定残留并隐藏")
+                    hideLights()
+                    return
+                }
+            } else {
+                lastLightSig = sig
+                lastLightSigAt = nowMs
+            }
+        } else {
+            lastLightSig = ""
+            lastLightSigAt = 0L
+        }
 
         // 组还没收齐：先不播，等这一组的其余灯（间隔仅几毫秒）到齐后再统一判断
         if (!groupComplete) return

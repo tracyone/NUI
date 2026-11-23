@@ -1403,8 +1403,11 @@ class MusicHost(
         applyFloatLayout()
         if (hasLyric) {
             val idx = lyricHighlight.coerceAtLeast(0)
-            karaokeView?.text = lyrics[idx].second
-            lyricFloatNext?.text = if (idx + 1 < lyrics.size) lyrics[idx + 1].second else ""
+            // 歌词可能在上面 createLyricFloat 触发的 renderPlaying 递归里被切歌清空，
+            // 这里必须再取一次，取不到就跳过本轮（下一轮 tick 会重建）
+            val cur = lyrics.getOrNull(idx) ?: return
+            karaokeView?.text = cur.second
+            lyricFloatNext?.text = lyrics.getOrNull(idx + 1)?.second ?: ""
             updateKaraokeProgress()
         } else {
             // 无歌词：主行固定提示，副行放一句原因总结（网络失败 / 没有 metadata / App 没给歌词等）
@@ -1420,8 +1423,9 @@ class MusicHost(
         val pos = stablePosition()
         if (pos < 0L) return
         val idx = lyricHighlight.coerceAtLeast(0)
-        val start = lyrics[idx].first
-        val end = if (idx + 1 < lyrics.size) lyrics[idx + 1].first else start + 5000L
+        val cur = lyrics.getOrNull(idx) ?: return
+        val start = cur.first
+        val end = lyrics.getOrNull(idx + 1)?.first ?: (start + 5000L)
         view.progress = if (end > start) (pos - start).toFloat() / (end - start) else 1f
     }
 
