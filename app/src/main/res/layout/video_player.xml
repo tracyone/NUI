@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 视频播放器（复用音乐窗口）：视频画面 + 底部半透明控制层。
+     进度条轨道完全透明（只显已播段），按钮用负一屏音乐卡同款圆底。 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/videoRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_video_window"
+    android:clipToOutline="true">
+
+    <!-- 视频画面（TextureView 铺满容器，画面按 fit 等比缩放居中完整显示，不裁剪） -->
+    <TextureView
+        android:id="@+id/videoSurface"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- 右上角关闭按钮：退出视频播放，恢复音乐窗口 -->
+    <ImageButton
+        android:id="@+id/btnVideoClose"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:layout_gravity="top|end"
+        android:layout_margin="6dp"
+        android:padding="7dp"
+        android:background="@drawable/bg_minus_ctrl"
+        android:contentDescription="关闭"
+        android:scaleType="centerInside"
+        android:src="@drawable/ic_close"
+        android:tint="#FFFFFF" />
+
+    <!-- 底部控制层：半透明黑，覆盖在视频底部 -->
+    <LinearLayout
+        android:id="@+id/videoControls"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="vertical"
+        android:background="#99000000"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp">
+
+        <!-- 进度条行：当前时间 + 透明进度条 + 总时长 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/videoPosTime"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:layout_marginEnd="8dp"
+                android:text="00:00"
+                android:textSize="13sp"
+                android:textColor="#FFFFFF"
+                tools:ignore="HardcodedText"
+                xmlns:tools="http://schemas.android.com/tools" />
+
+            <SeekBar
+                android:id="@+id/videoProgress"
+                android:layout_width="0dp"
+                android:layout_height="36dp"
+                android:layout_weight="1"
+                android:max="1000"
+                android:progress="0"
+                android:paddingTop="16dp"
+                android:paddingBottom="16dp"
+                android:splitTrack="false"
+                android:progressDrawable="@drawable/seek_video_track"
+                android:thumb="@drawable/seek_minus_thumb" />
+
+            <TextView
+                android:id="@+id/videoDurTime"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:layout_marginStart="8dp"
+                android:text="00:00"
+                android:textSize="13sp"
+                android:textColor="#FFFFFF"
+                tools:ignore="HardcodedText"
+                xmlns:tools="http://schemas.android.com/tools" />
+        </LinearLayout>
+
+        <!-- 按钮行：上一首 | 快退 | 播放暂停 | 快进 | 下一首 | 全屏 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:orientation="horizontal"
+            android:gravity="center">
+
+            <ImageButton
+                android:id="@+id/btnVideoPrev"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:layout_marginEnd="6dp"
+                android:padding="7dp"
+                android:background="@drawable/bg_minus_ctrl"
+                android:contentDescription="上一个视频"
+                android:scaleType="centerInside"
+                android:src="@android:drawable/ic_media_previous"
+                android:tint="#FFFFFF" />
+
+            <ImageButton
+                android:id="@+id/btnVideoRewind"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:layout_marginEnd="6dp"
+                android:padding="7dp"
+                android:background="@drawable/bg_minus_ctrl"
+                android:contentDescription="快退"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_rewind"
+                android:tint="#FFFFFF" />
+
+            <ImageButton
+                android:id="@+id/btnVideoPlay"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginEnd="6dp"
+                android:padding="10dp"
+                android:background="@drawable/bg_minus_play"
+                android:contentDescription="播放/暂停"
+                android:scaleType="centerInside"
+                android:src="@android:drawable/ic_media_play"
+                android:tint="#FFFFFF" />
+
+            <ImageButton
+                android:id="@+id/btnVideoForward"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:layout_marginEnd="6dp"
+                android:padding="7dp"
+                android:background="@drawable/bg_minus_ctrl"
+                android:contentDescription="快进"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_forward"
+                android:tint="#FFFFFF" />
+
+            <ImageButton
+                android:id="@+id/btnVideoNext"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:layout_marginEnd="6dp"
+                android:padding="7dp"
+                android:background="@drawable/bg_minus_ctrl"
+                android:contentDescription="下一个视频"
+                android:scaleType="centerInside"
+                android:src="@android:drawable/ic_media_next"
+                android:tint="#FFFFFF" />
+
+            <ImageButton
+                android:id="@+id/btnVideoFullscreen"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:padding="7dp"
+                android:background="@drawable/bg_minus_ctrl"
+                android:contentDescription="全屏"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_fullscreen"
+                android:tint="#FFFFFF" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

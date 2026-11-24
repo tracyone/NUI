@@ -40,6 +40,8 @@ object DockConfig {
         return slots(context).map { pkg ->
             if (pkg == null) return@map null
             if (pkg == StockHome.PKG_STOCK_HOME) return@map runCatching { StockHome.model(context) }.getOrNull()
+            if (pkg == com.nui.launcher.video.VideoShortcut.PKG_VIDEO)
+                return@map runCatching { com.nui.launcher.video.VideoShortcut.model(context) }.getOrNull()
             val launch = pm.getLaunchIntentForPackage(pkg) ?: return@map null
             val label = runCatching {
                 pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()

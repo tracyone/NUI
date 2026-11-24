@@ -87,6 +87,12 @@ class MusicHost(
     private var discRotationAnim: ObjectAnimator? = null
     /** 由 NUI 播报触发的暂停；只有这种情况才在播报结束后自动恢复 */
     @Volatile private var ttsPausedMusic = false
+
+    /**
+     * UI 挂起：视频播放器（复用音乐窗口）激活期间置 true，此时 renderPlaying/renderEmpty
+     * 不再覆盖容器内容，避免音乐会话变化把正在播放的视频顶掉。视频关闭后置 false 并 refresh。
+     */
+    @Volatile var uiSuspended = false
     private fun pauseForTts() {
         val c = currentController ?: return
         val st = c.playbackState ?: return
@@ -406,6 +412,7 @@ class MusicHost(
 
     /** 渲染播放中：封面 + 标题 + 艺术家 + 控制按钮 + 歌词（竖排） */
     private fun renderPlaying(controller: MediaController) {
+        if (uiSuspended) return
         // 注销旧控制器回调，注册新控制器回调（切歌时自动刷新封面）
         currentController?.unregisterCallback(metadataCallback)
         registeredControllers.remove(currentController)
@@ -871,6 +878,7 @@ class MusicHost(
 
     /** 无会话/无权限：启动卡，点击拉起首选音乐 App */
     private fun renderEmpty() {
+        if (uiSuspended) return
         // 注销元数据回调 + 停歌词刷新 + 清缓存（真正没会话时复位）
         currentController?.unregisterCallback(metadataCallback)
         registeredControllers.remove(currentController)

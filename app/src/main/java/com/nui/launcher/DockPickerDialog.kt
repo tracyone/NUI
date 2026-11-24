@@ -32,6 +32,10 @@ object DockPickerDialog {
         if (StockHome.PKG_STOCK_HOME !in exclude) {
             runCatching { StockHome.model(context) }.getOrNull()?.let { apps.add(it) }
         }
+        // 置顶：虚拟条目 —— NUI 内置视频播放器（同包名会被自包过滤，必须显式注入）
+        if (com.nui.launcher.video.VideoShortcut.PKG_VIDEO !in exclude) {
+            runCatching { com.nui.launcher.video.VideoShortcut.model(context) }.getOrNull()?.let { apps.add(it) }
+        }
         apps += pm.queryIntentActivities(main, 0).mapNotNull { ri ->
             val pkg = ri.activityInfo.packageName
             val launch = pm.getLaunchIntentForPackage(pkg) ?: return@mapNotNull null

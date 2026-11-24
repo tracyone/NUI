@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 视频文件列表项：类型图标 + 名称 + 元信息（大小/「目录」标记） -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:paddingStart="20dp"
+    android:paddingEnd="20dp"
+    android:paddingTop="16dp"
+    android:paddingBottom="16dp">
+
+    <ImageView
+        android:id="@+id/videoFileIcon"
+        android:layout_width="28dp"
+        android:layout_height="28dp"
+        android:scaleType="centerInside"
+        android:src="@drawable/ic_video"
+        android:tint="#34C759"
+        tools:ignore="ContentDescription" />
+
+    <TextView
+        android:id="@+id/videoFileName"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginStart="16dp"
+        android:singleLine="true"
+        android:ellipsize="middle"
+        android:textColor="#FFFFFF"
+        android:textSize="19sp"
+        tools:text="示例视频.mp4" />
+
+    <TextView
+        android:id="@+id/videoFileMeta"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="12dp"
+        android:textColor="#8E8E93"
+        android:textSize="15sp"
+        tools:text="12.3 MB" />
+</LinearLayout>

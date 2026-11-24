@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 视频悬浮窗背景：纯黑 + 圆角。
+     GradientDrawable 的圆角会提供 Outline，配合 video_player 根布局 clipToOutline
+     可把 TextureView 画面一起裁成圆角（贴边 dock 形态下由代码把 radius 改为 0）。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#000000" />
+    <corners android:radius="24dp" />
+</shape>

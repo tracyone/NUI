@@ -5,6 +5,7 @@
     <string name="back">返回</string>
     <string name="app_icon">应用图标</string>
     <string name="weather_app_name">天气</string>
+    <string name="video_app_name">视频</string>
 
     <string name="dock_apps">应用列表</string>
     <string name="dock_add">添加应用</string>

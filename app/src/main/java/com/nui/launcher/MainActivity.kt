@@ -56,6 +56,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var cornerMaskLayer: com.nui.launcher.map.CornerMaskLayer
     private lateinit var navHost: NavHost
     private lateinit var musicHost: MusicHost
+    /** 视频播放器承载：复用音乐窗口，视频与音乐二选一显示 */
+    private lateinit var videoHost: com.nui.launcher.video.VideoHost
     private lateinit var wallpaper: WallpaperController
     private lateinit var weatherFetcher: WeatherFetcher
     private var weatherText: android.widget.TextView? = null
@@ -131,7 +133,9 @@ class MainActivity : AppCompatActivity() {
     // Page0 (desktop) 里的 view 引用
     private var desktopMapPanel: MaterialCardView? = null
     private var desktopMapContainer: android.widget.FrameLayout? = null
-    private var desktopRightPanel: LinearLayout? = null
+    private var desktopRightPanel: FrameLayout? = null
+    private var desktopRightPanelContent: LinearLayout? = null
+    private var desktopVideoOverlay: FrameLayout? = null
     private var desktopBtnSwitchMap: ImageButton? = null
     private var desktopMusicContainer: android.widget.FrameLayout? = null
     private var desktopBtnNavHome: View? = null
@@ -1145,20 +1149,24 @@ class MainActivity : AppCompatActivity() {
         tv.text = LunarCalendar.describe(y, m, d)
     }
 
-    /** （重新）安排闲置自动进入负一屏；开关关、已在负一屏、或导航中时不安排。
-     *  导航中不自动进负一屏，避免打断驾驶；巡航不受影响（巡航卡可在负一屏显示）。
-     *  退出导航后由 onNavInactive 重新调度。 */
+    /** （重新）安排闲置自动进入负一屏；开关关、已在负一屏、导航中、或视频播放窗口
+     *  激活时不安排。导航中不自动进负一屏，避免打断驾驶；巡航不受影响（巡航卡可在
+     *  负一屏显示）。视频窗口激活（播放或暂停挂在桌面）期间同样不自动翻页，避免把
+     *  用户正在看的视频切走；退出导航由 onNavInactive、关闭视频由 VideoHost.onClose
+     *  重新调度。 */
     private fun setupAutoMinusTimer() {
         autoMinusHandler.removeCallbacksAndMessages(null)
         autoMinusRunnable = null
         if (!UiTheme.autoMinus(this)) return
         if (binding.viewPager.currentItem == 0) return
         if (navInfoHost?.isNavigating() == true) return   // 仅导航中不调度，巡航正常
+        if (::videoHost.isInitialized && videoHost.isActive()) return  // 视频窗口激活中不调度
         val delayMs = UiTheme.autoMinusSeconds(this) * 1_000L
         val r = Runnable {
             if (!isFinishing && !isDestroyed && UiTheme.autoMinus(this) &&
                 binding.viewPager.currentItem != 0 &&
-                navInfoHost?.isNavigating() != true        // 触发时再次确认未在导航
+                navInfoHost?.isNavigating() != true &&     // 触发时再次确认未在导航
+                !(::videoHost.isInitialized && videoHost.isActive())  // 且视频已关闭
             ) {
                 binding.viewPager.setCurrentItem(0, true)
             }
@@ -1186,6 +1194,19 @@ class MainActivity : AppCompatActivity() {
      *  此刻动画刚开始，不能在里面恢复浮窗（否则按过渡坐标发 showmap，浮窗错位+多建窗口卡顿），
      *  统一交给 SCROLL_STATE_IDLE 的延迟恢复。 */
     private var pendingDesktopFloatRestore = false
+    /** 本次手势起始于视频悬浮窗（如拖动进度条）：期间禁止 ViewPager2 翻页与边缘进负一屏，
+     *  抬手即恢复。视频窗口很小且贴着右边缘，不拦的话横向拖动进度条会误触发翻页。 */
+    private var videoTouchDown = false
+
+    /** 触摸点是否落在可见的视频悬浮窗内。 */
+    private fun inVideoOverlayTouch(x: Float, y: Float): Boolean {
+        if (!(::videoHost.isInitialized && videoHost.isActive())) return false
+        val ov = desktopVideoOverlay ?: return false
+        if (ov.visibility != View.VISIBLE || !ov.isShown) return false
+        val r = android.graphics.Rect()
+        if (!ov.getGlobalVisibleRect(r)) return false
+        return r.contains(x.toInt(), y.toInt())
+    }
 
     override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
         val action = ev.actionMasked
@@ -1197,6 +1218,9 @@ class MainActivity : AppCompatActivity() {
                 onUserActive()
                 edgeDownX = ev.rawX; edgeDownY = ev.rawY
                 edgeTriggered = false
+                // 视频窗口内的手势（拖进度条/点按钮）不允许翻页
+                videoTouchDown = inVideoOverlayTouch(ev.rawX, ev.rawY)
+                if (videoTouchDown) binding.viewPager.isUserInputEnabled = false
             }
             android.view.MotionEvent.ACTION_MOVE -> {
                 // 用户持续滑动（浏览应用列表/拖动等）也属活动，限流重置闲置计时
@@ -1205,7 +1229,7 @@ class MainActivity : AppCompatActivity() {
                     lastActiveResetMs = now
                     onUserActive()
                 }
-                if (!edgeTriggered && binding.viewPager.currentItem == 1) {
+                if (!edgeTriggered && !videoTouchDown && binding.viewPager.currentItem == 1) {
                     val dx = ev.rawX - edgeDownX
                     val dy = ev.rawY - edgeDownY
                     // 负一屏在 page0（左边），右侧音乐区域向右滑 → 露出左边的负一屏
@@ -1225,6 +1249,10 @@ class MainActivity : AppCompatActivity() {
                 if (edgeTriggered) return true
             }
             android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                if (videoTouchDown) {
+                    videoTouchDown = false
+                    binding.viewPager.isUserInputEnabled = true
+                }
                 if (edgeTriggered) { edgeTriggered = false; return true }
             }
         }
@@ -1251,6 +1279,18 @@ class MainActivity : AppCompatActivity() {
         }
         desktopMapContainer = v.findViewById(R.id.mapContainer)
         desktopRightPanel = v.findViewById(R.id.rightPanel)
+        desktopRightPanelContent = v.findViewById(R.id.rightPanelContent)
+        desktopVideoOverlay = v.findViewById(R.id.videoOverlay)
+        // page0 的 ViewHolder 可能被回收重建：视频播放中把播放器 UI 迁到新容器，保持悬浮播放
+        if (::videoHost.isInitialized && videoHost.isActive()) {
+            val overlay = desktopVideoOverlay
+            if (overlay != null) {
+                videoHost.attach(overlay)
+                overlay.visibility = View.VISIBLE
+                desktopRightPanelContent?.visibility = View.GONE
+                overlay.post { applyVideoWindowRadius() }
+            }
+        }
         desktopBtnSwitchMap = v.findViewById(R.id.btnSwitchMap)
         desktopMusicContainer = v.findViewById(R.id.musicContainer)
         desktopBtnNavHome = v.findViewById(R.id.btnNavHome)
@@ -1269,7 +1309,7 @@ class MainActivity : AppCompatActivity() {
         if (!page0Ready) {
             page0Ready = true
             v.post {
-                setupMap(); setupNav(); setupMusic(); setupWallpaper(); syncRightPanel()
+                setupMap(); setupNav(); setupMusic(); setupVideo(); setupWallpaper(); syncRightPanel()
                 applyDockStyle()
                 applyTheme()
                 // mapHost 就绪后按当前开关重算悬浮地图上下边界（onCreate/onResume 时
@@ -1416,6 +1456,10 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     minusVideo?.pause()
                 }
+                // 视频播放器：离开桌面页(1)暂停出声，回桌面继续（surface 重建由 VideoHost 自身处理）
+                if (::videoHost.isInitialized && videoHost.isActive()) {
+                    if (position == 1) videoHost.resumePlayback() else videoHost.suspendPlayback()
+                }
             }
 
             override fun onPageScrollStateChanged(state: Int) {
@@ -1441,17 +1485,7 @@ class MainActivity : AppCompatActivity() {
                 ) {
                     binding.viewPager.postDelayed({
                         if (!isDestroyed && !isFinishing && binding.viewPager.currentItem == 1) {
-                            // 由 IDLE 统一负责恢复，清掉 onResume 的挂起标记
-                            pendingDesktopFloatRestore = false
-                            // 回桌面：先显示分割条（alpha=1 + 定位），再恢复浮窗并按新几何刷新
-                            mapHost.setDividerVisible(true)
-                            // 回桌面先恢复浮窗（closeFloat 已置隐藏态），再按新几何刷新
-                            mapHost.resumeFloat()
-                            mapHost.refreshFloat()
-                            // 动画期间不刷竖条，静止后一次性落位
-                            mapHost.refreshDivider()
-                            // 页面已静止：手柄在过渡中可能未定位（target 未挂载），此处重新落位
-                            showSwapHandles()
+                            restoreDesktopFloatAndDivider()
                         }
                     }, 100)
                 }
@@ -1697,6 +1731,15 @@ class MainActivity : AppCompatActivity() {
             requestCode == wc.REQ_PICK_MINUS_NIGHT) {
             settingsDialog?.refreshWallpaper()
         }
+        // 全屏视频返回：带回播放位置与状态，在音乐窗口续播
+        if (requestCode == com.nui.launcher.video.VideoHost.REQ_FULLSCREEN &&
+            resultCode == RESULT_OK && data != null && ::videoHost.isInitialized
+        ) {
+            val path = data.getStringExtra(com.nui.launcher.video.VideoFullscreenActivity.EXTRA_PATH)
+            val pos = data.getIntExtra(com.nui.launcher.video.VideoFullscreenActivity.EXTRA_POSITION, 0)
+            val playing = data.getBooleanExtra(com.nui.launcher.video.VideoFullscreenActivity.EXTRA_PLAYING, true)
+            videoHost.onFullscreenResult(path, pos.toLong(), playing)
+        }
     }
 
     override fun startActivity(intent: Intent?, options: android.os.Bundle?) {
@@ -1851,6 +1894,10 @@ class MainActivity : AppCompatActivity() {
             // 音乐浮窗：回前台后按当前 page 恢复（设置里改了开关也能在此生效）
             binding.root.postDelayed({ syncMusicFloat() }, 300)
         }
+        // 文件浏览器选完视频回到桌面：在音乐窗口启动播放（视频与音乐二选一）
+        com.nui.launcher.video.VideoHost.consumePendingOpen()?.let { path ->
+            if (::videoHost.isInitialized) openVideo(path)
+        }
         // 设置页可能改了应用列表图标比例，返回时刷新：仅重绑应用页（桌面页 ViewHolder 复用）
         // 延后一帧执行：返回时 ViewPager2 正在 relayout，立即 notify 会在页面宽度未就绪时
         // 重建网格 → 应用图标瞬时靠右、左边留白（先等布局稳定再重绑）
@@ -1933,6 +1980,7 @@ class MainActivity : AppCompatActivity() {
         runCatching { maskCheckExecutor.shutdownNow() }
         if (::cornerMaskLayer.isInitialized) cornerMaskLayer.release()
         if (::musicHost.isInitialized) musicHost.onDestroy()
+        if (::videoHost.isInitialized) videoHost.release()
         minusProgressTick?.let { minusProgressHandler.removeCallbacks(it) }
         minusProgressTick = null
         super.onDestroy()
@@ -2016,7 +2064,7 @@ class MainActivity : AppCompatActivity() {
         // dock 贴边形态时面板也改为矩形（与贴边 dock 的贯穿式风格一致），悬浮形态保留 24dp 圆角。
         val panelEdge = UiTheme.dockStyle(this) == UiTheme.DockStyle.EDGE
         desktopRightPanel?.let { rp ->
-            rp.background = GradientDrawable().apply {
+            desktopRightPanelContent?.background = GradientDrawable().apply {
                 setColor(p.panelBg)
                 cornerRadius = if (panelEdge) 0f else 24 * density
                 setStroke(1, p.divider)
@@ -2037,6 +2085,8 @@ class MainActivity : AppCompatActivity() {
                 // 音乐窗口圆角随 dock 形态：贴边矩形 / 悬浮 24dp（与地图卡片、右侧面板统一）
                 mp.radius = if (panelEdge) 0f else 24 * density
             }
+            // 视频悬浮窗（若正在显示）同样跟随形态
+            applyVideoWindowRadius()
         }
     }
 
@@ -2052,12 +2102,14 @@ class MainActivity : AppCompatActivity() {
         }
         // 右侧音乐面板圆角同步 dock 形态：贴边时矩形，悬浮时 24dp 圆角
         desktopRightPanel?.let { rp ->
-            (rp.background as? android.graphics.drawable.GradientDrawable)?.let { bg ->
+            (desktopRightPanelContent?.background as? android.graphics.drawable.GradientDrawable)?.let { bg ->
                 bg.cornerRadius = if (edge) 0f else 24 * dp
-                rp.background = bg
+                desktopRightPanelContent?.background = bg
             }
             // 音乐窗口卡片本身也随形态变矩形/圆角（悬浮 24dp，与地图卡片、右侧面板统一）
             rp.findViewById<MaterialCardView>(R.id.musicPanel)?.radius = if (edge) 0f else 24 * dp
+            // 视频悬浮窗（若正在显示）同样跟随形态
+            applyVideoWindowRadius()
             // 导航标签文字样式同步（dock 形态切换时重新应用）
             val panelText = if (dark) 0xFFFFFFFF.toInt() else 0xFF000000.toInt()
             rp.findViewById<TextView>(R.id.navLabelHome)?.let { it.setTextColor(panelText); it.setTypeface(null, Typeface.BOLD); it.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f) }
@@ -2562,6 +2614,79 @@ class MainActivity : AppCompatActivity() {
         musicHost.start()
     }
 
+    /**
+     * 页面静止在桌面页时，统一恢复悬浮地图 / 分割条 / 缩放手柄。
+     * 正常滑页由 SCROLL_STATE_IDLE 触发；无动画跳页（setCurrentItem(x,false)）不会产生
+     * 滚动状态变化，需要调用方主动补一次（如打开视频后跳回桌面）。
+     */
+    private fun restoreDesktopFloatAndDivider() {
+        if (isDestroyed || isFinishing) return
+        if (binding.viewPager.currentItem != 1 || !::mapHost.isInitialized) return
+        // 清掉 onResume 的挂起标记（本方法已在页面静止后执行）
+        pendingDesktopFloatRestore = false
+        // 先显示分割条（alpha=1 + 定位），再恢复浮窗并按新几何刷新
+        mapHost.setDividerVisible(true)
+        // closeFloat 已置隐藏态，这里恢复显示
+        mapHost.resumeFloat()
+        mapHost.refreshFloat()
+        // 动画期间不刷竖条，静止后一次性落位
+        mapHost.refreshDivider()
+        // 手柄在过渡中可能未定位（target 未挂载），此处重新落位
+        showSwapHandles()
+    }
+
+    private fun setupVideo() {
+        videoHost = com.nui.launcher.video.VideoHost(this, desktopVideoOverlay!!)
+        videoHost.onClose = {
+            // 关闭视频：恢复内容层（导航/时钟/音乐区）、解除音乐挂起
+            desktopVideoOverlay?.visibility = View.GONE
+            desktopRightPanelContent?.visibility = View.VISIBLE
+            if (::musicHost.isInitialized) {
+                musicHost.uiSuspended = false
+                musicHost.refresh()
+            }
+            // 视频窗口已消失：重新武装闲置自动进负一屏计时
+            setupAutoMinusTimer()
+        }
+    }
+
+    /** 打开视频：切到桌面页、挂起音乐、隐藏内容层、显示视频覆盖层（占据整个右侧面板）。 */
+    private fun openVideo(path: String) {
+        // 视频窗口在桌面页（ViewPager2 index=1）：从应用列表页选完视频回来时先切回桌面，
+        // 否则用户停留在应用列表，看不出视频已经开始播放。
+        if (binding.viewPager.currentItem != 1) {
+            binding.viewPager.setCurrentItem(1, false)
+            // 无动画跳页不触发 SCROLL_STATE_IDLE：悬浮地图/分割条需在此补一次恢复
+            binding.viewPager.postDelayed({
+                if (!isDestroyed && !isFinishing) restoreDesktopFloatAndDivider()
+            }, 120)
+        }
+        if (::musicHost.isInitialized) musicHost.uiSuspended = true
+        desktopRightPanelContent?.visibility = View.GONE
+        desktopVideoOverlay?.visibility = View.VISIBLE
+        if (::videoHost.isInitialized) {
+            // 桌面页若被回收重建，这里挂到当前容器；稍后 bindDesktop 还会再校正一次
+            desktopVideoOverlay?.let { videoHost.attach(it) }
+            videoHost.open(path)
+        }
+        applyVideoWindowRadius()
+        // 视频窗口激活：取消尚未触发的闲置自动进负一屏计时（打开后 isActive()=true，
+        // 该调用会清掉回调并提前返回）
+        setupAutoMinusTimer()
+    }
+
+    /**
+     * 视频悬浮窗圆角跟随 Dock 形态：悬浮 24dp（与音乐卡片/右侧面板统一），贴边时矩形。
+     * bg_video_window 是 GradientDrawable，改 cornerRadius 会同步更新 clipToOutline 的轮廓，
+     * TextureView 画面也会被裁成对应圆角。
+     */
+    private fun applyVideoWindowRadius() {
+        val edge = UiTheme.dockStyle(this) == UiTheme.DockStyle.EDGE
+        val radius = if (edge) 0f else 24 * resources.displayMetrics.density
+        val root = desktopVideoOverlay?.findViewById<View>(R.id.videoRoot) ?: return
+        (root.background as? GradientDrawable)?.cornerRadius = radius
+    }
+
     private fun setupWallpaper() {
         wallpaper = WallpaperController(this, binding.root)
         wallpaper.applyOnStart()
@@ -2683,7 +2808,9 @@ class MainActivity : AppCompatActivity() {
                     dlg.refreshMap()
                 },
             )
-            val allApps = listOf(settingsEntry) + apps
+            // 内置视频播放器虚拟条目：与 NUI 同包名会被自包过滤，需像「桌面设置」一样手动注入
+            val videoEntry = com.nui.launcher.video.VideoShortcut.model(this)
+            val allApps = listOf(settingsEntry, videoEntry) + apps
             // 实际行数 = min(屏幕可容纳最大行数, 应用所需行数)：应用不足整屏时均分可用高度，
             // 不留空行（18 个应用按 3 行均分，而不是算 4 行留空一整行）
             val needRows = maxOf(1, (allApps.size + 5) / 6)

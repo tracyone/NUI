@@ -10,6 +10,9 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+    <!-- 视频浏览器：读取视频媒体文件。Android 13+ 用 READ_MEDIA_VIDEO，旧版用 READ_EXTERNAL_STORAGE -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 
     <!-- Android 11+ queries: 允许 bindService 到酷我/网易云/QQ/酷狗等音乐 App，不走 QUERY_ALL 兜底也能通 -->
     <queries>
@@ -84,6 +87,26 @@
             android:configChanges="orientation|screenSize|keyboardHidden|navigation|smallestScreenSize|screenLayout|uiMode"
             android:screenOrientation="landscape"
             android:theme="@style/Theme.NUI.Transparent">
+        </activity>
+
+        <!-- 视频播放器入口（文件浏览器）：带启动入口，可加入 Dock / 应用列表 -->
+        <activity
+            android:name=".video.VideoBrowserActivity"
+            android:exported="true"
+            android:icon="@drawable/ic_video"
+            android:label="@string/video_app_name"
+            android:configChanges="orientation|screenSize|keyboardHidden|navigation|smallestScreenSize|screenLayout|uiMode"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.NUI">
+        </activity>
+
+        <!-- 全屏视频播放器（由 VideoHost 进入，退出返回悬浮态） -->
+        <activity
+            android:name=".video.VideoFullscreenActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden|navigation|smallestScreenSize|screenLayout|uiMode"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.NUI">
         </activity>
 
         <service

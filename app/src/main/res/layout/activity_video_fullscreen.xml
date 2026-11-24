@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 全屏视频播放器：视频铺满全屏，底部控制层点画面自动显隐。
+     进度条轨道透明，按钮比悬浮态更大（车机好按）。 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/videoFullscreenRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <!-- 全屏视频画面 -->
+    <TextureView
+        android:id="@+id/videoFullscreenSurface"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- 底部控制层：点画面显隐 -->
+    <LinearLayout
+        android:id="@+id/videoFullscreenControls"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="vertical"
+        android:background="#99000000"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:paddingTop="14dp"
+        android:paddingBottom="14dp">
+
+        <!-- 进度条行 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/videoFullscreenPosTime"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:layout_marginEnd="14dp"
+                android:text="00:00"
+                android:textSize="18sp"
+                android:textColor="#FFFFFF"
+                tools:ignore="HardcodedText" />
+
+            <SeekBar
+                android:id="@+id/videoFullscreenProgress"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:max="1000"
+                android:progress="0"
+                android:paddingTop="19dp"
+                android:paddingBottom="19dp"
+                android:splitTrack="false"
+                android:progressDrawable="@drawable/seek_video_track"
+                android:thumb="@drawable/seek_minus_thumb" />
+
+            <TextView
+                android:id="@+id/videoFullscreenDurTime"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:includeFontPadding="false"
+                android:layout_marginStart="14dp"
+                android:text="00:00"
+                android:textSize="18sp"
+                android:textColor="#FFFFFF"
+                tools:ignore="HardcodedText" />
+        </LinearLayout>
+
+        <!-- 按钮行 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:orientation="horizontal"
+            android:gravity="center">
+
+            <ImageButton
+                android:id="@+id/btnFullPrev"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginEnd="16dp"
+                android:padding="9dp"
+                android:background="@drawable/bg_minus_ctrl"
+                android:contentDescription="上一个视频"
+                android:scaleType="centerInside"
+                android:src="@android:drawable/ic_media_previous"
+                android:tint="#FFFFFF" />
+
+            <ImageButton
+                android:id="@+id/btnFullRewind"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginEnd="16dp"
+                android:padding="9dp"
+                android:background="@drawable/bg_minus_ctrl"
+                android:contentDescription="快退"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_rewind"
+                android:tint="#FFFFFF" />
+
+            <ImageButton
+                android:id="@+id/btnFullPlay"
+                android:layout_width="60dp"
+                android:layout_height="60dp"
+                android:layout_marginEnd="16dp"
+                android:padding="13dp"
+                android:background="@drawable/bg_minus_play"
+                android:contentDescription="播放/暂停"
+                android:scaleType="centerInside"
+                android:src="@android:drawable/ic_media_play"
+                android:tint="#FFFFFF" />
+
+            <ImageButton
+                android:id="@+id/btnFullForward"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginEnd="16dp"
+                android:padding="9dp"
+                android:background="@drawable/bg_minus_ctrl"
+                android:contentDescription="快进"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_forward"
+                android:tint="#FFFFFF" />
+
+            <ImageButton
+                android:id="@+id/btnFullNext"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:layout_marginEnd="16dp"
+                android:padding="9dp"
+                android:background="@drawable/bg_minus_ctrl"
+                android:contentDescription="下一个视频"
+                android:scaleType="centerInside"
+                android:src="@android:drawable/ic_media_next"
+                android:tint="#FFFFFF" />
+
+            <ImageButton
+                android:id="@+id/btnFullExit"
+                android:layout_width="44dp"
+                android:layout_height="44dp"
+                android:padding="9dp"
+                android:background="@drawable/bg_minus_ctrl"
+                android:contentDescription="退出全屏"
+                android:scaleType="centerInside"
+                android:src="@drawable/ic_fullscreen_exit"
+                android:tint="#FFFFFF" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>
