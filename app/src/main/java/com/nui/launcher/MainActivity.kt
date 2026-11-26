@@ -136,6 +136,11 @@ class MainActivity : AppCompatActivity() {
     private var desktopRightPanel: FrameLayout? = null
     private var desktopRightPanelContent: LinearLayout? = null
     private var desktopVideoOverlay: FrameLayout? = null
+    // 视频画中画小窗（activity_main.xml 顶层）：切离桌面页时承载播放器 UI
+    private var videoPipContainer: FrameLayout? = null
+    private var videoPipWindow: FrameLayout? = null
+    /** 视频是否处于画中画小窗模式（切离桌面页继续播放） */
+    private var videoPipActive = false
     private var desktopBtnSwitchMap: ImageButton? = null
     private var desktopMusicContainer: android.widget.FrameLayout? = null
     private var desktopBtnNavHome: View? = null
@@ -1281,8 +1286,9 @@ class MainActivity : AppCompatActivity() {
         desktopRightPanel = v.findViewById(R.id.rightPanel)
         desktopRightPanelContent = v.findViewById(R.id.rightPanelContent)
         desktopVideoOverlay = v.findViewById(R.id.videoOverlay)
-        // page0 的 ViewHolder 可能被回收重建：视频播放中把播放器 UI 迁到新容器，保持悬浮播放
-        if (::videoHost.isInitialized && videoHost.isActive()) {
+        // page0 的 ViewHolder 可能被回收重建：视频播放中把播放器 UI 迁到新容器，保持悬浮播放。
+        // 画中画模式下（视频在小窗）不迁回桌面，等真正回到桌面页由 exitVideoPip 处理。
+        if (::videoHost.isInitialized && videoHost.isActive() && !videoPipActive) {
             val overlay = desktopVideoOverlay
             if (overlay != null) {
                 videoHost.attach(overlay)
@@ -1456,9 +1462,9 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     minusVideo?.pause()
                 }
-                // 视频播放器：离开桌面页(1)暂停出声，回桌面继续（surface 重建由 VideoHost 自身处理）
+                // 视频播放器：离开桌面页(1)以小窗继续播放（画中画），回桌面恢复大窗
                 if (::videoHost.isInitialized && videoHost.isActive()) {
-                    if (position == 1) videoHost.resumePlayback() else videoHost.suspendPlayback()
+                    if (position == 1) exitVideoPip() else enterVideoPip()
                 }
             }
 
@@ -2637,8 +2643,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupVideo() {
         videoHost = com.nui.launcher.video.VideoHost(this, desktopVideoOverlay!!)
+        videoPipContainer = binding.videoPipContainer
+        videoPipWindow = binding.videoPipWindow
         videoHost.onClose = {
-            // 关闭视频：恢复内容层（导航/时钟/音乐区）、解除音乐挂起
+            // 关闭视频：恢复内容层（导航/时钟/音乐区）、解除音乐挂起、退出画中画
+            videoPipActive = false
+            videoPipContainer?.visibility = View.GONE
+            videoHost.setPipMode(false)
             desktopVideoOverlay?.visibility = View.GONE
             desktopRightPanelContent?.visibility = View.VISIBLE
             if (::musicHost.isInitialized) {
@@ -2661,6 +2672,8 @@ class MainActivity : AppCompatActivity() {
                 if (!isDestroyed && !isFinishing) restoreDesktopFloatAndDivider()
             }, 120)
         }
+        // 若之前视频在画中画小窗（切离桌面页播放中又选了新视频），先退出小窗回到桌面
+        if (videoPipActive) exitVideoPip()
         if (::musicHost.isInitialized) musicHost.uiSuspended = true
         desktopRightPanelContent?.visibility = View.GONE
         desktopVideoOverlay?.visibility = View.VISIBLE
@@ -2673,6 +2686,96 @@ class MainActivity : AppCompatActivity() {
         // 视频窗口激活：取消尚未触发的闲置自动进负一屏计时（打开后 isActive()=true，
         // 该调用会清掉回调并提前返回）
         setupAutoMinusTimer()
+    }
+
+    /** 切离桌面页：视频迁移到全局小窗继续播放（画中画），不暂停。 */
+    private fun enterVideoPip() {
+        if (videoPipActive) return
+        val win = videoPipWindow ?: return
+        videoPipActive = true
+        videoHost.setPipMode(true)
+        videoHost.attach(win)
+        installPipDrag()
+        videoPipContainer?.visibility = View.VISIBLE
+        // 不暂停：attach 触发 surface 重建，onSurfaceTextureAvailable 依 wantPlaying 自动续播；
+        // resumePlayback 兜底处理 surface 未就绪/已就绪两种情况。
+        videoHost.resumePlayback()
+    }
+
+    /**
+     * 画中画小窗拖动换位：按住画面拖动，限制在屏幕内（留 8dp 边距）；
+     * 未拖动的轻点则切回桌面页恢复大窗。关闭按钮是子 View，不受影响。
+     */
+    private fun installPipDrag() {
+        val win = videoPipWindow ?: return
+        val root = win.findViewById<View>(R.id.videoRoot) ?: return
+        if (root.tag != null) return
+        root.tag = "pipDrag"
+        val slop = ViewConfiguration.get(this).scaledTouchSlop
+        val margin = (8 * resources.displayMetrics.density).toInt()
+        var downX = 0f
+        var downY = 0f
+        var startTx = 0f
+        var startTy = 0f
+        var moved = false
+        root.setOnTouchListener { _, ev ->
+            // 只有小窗模式接管手势；回到桌面大窗后把事件交还控制层
+            if (!videoPipActive) return@setOnTouchListener false
+            when (ev.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    onUserActive()
+                    downX = ev.rawX
+                    downY = ev.rawY
+                    startTx = win.translationX
+                    startTy = win.translationY
+                    moved = false
+                    true
+                }
+                android.view.MotionEvent.ACTION_MOVE -> {
+                    val dx = ev.rawX - downX
+                    val dy = ev.rawY - downY
+                    if (!moved && (kotlin.math.abs(dx) > slop || kotlin.math.abs(dy) > slop)) moved = true
+                    if (moved) {
+                        val cw = videoPipContainer?.width ?: 0
+                        val ch = videoPipContainer?.height ?: 0
+                        if (cw > 0 && ch > 0) {
+                            // translation 以布局位置（win.left/top）为基准换算，并夹在容器内
+                            val minTx = margin - win.left.toFloat()
+                            val maxTx = (cw - win.width - margin - win.left).toFloat()
+                            val minTy = margin - win.top.toFloat()
+                            val maxTy = (ch - win.height - margin - win.top).toFloat()
+                            win.translationX = (startTx + dx).coerceIn(minTx, maxTx.coerceAtLeast(minTx))
+                            win.translationY = (startTy + dy).coerceIn(minTy, maxTy.coerceAtLeast(minTy))
+                        }
+                    }
+                    true
+                }
+                android.view.MotionEvent.ACTION_UP -> {
+                    // 没有拖动 = 点击：回桌面页恢复大窗
+                    if (!moved) binding.viewPager.setCurrentItem(1, true)
+                    true
+                }
+                android.view.MotionEvent.ACTION_CANCEL -> true
+                else -> true
+            }
+        }
+    }
+
+    /** 回到桌面页：视频从小窗迁回右侧面板恢复大窗。 */
+    private fun exitVideoPip() {
+        if (!videoPipActive) return
+        videoPipActive = false
+        videoPipContainer?.visibility = View.GONE
+        videoHost.setPipMode(false)
+        val overlay = desktopVideoOverlay
+        if (overlay != null) {
+            videoHost.attach(overlay)
+            overlay.visibility = View.VISIBLE
+            desktopRightPanelContent?.visibility = View.GONE
+            overlay.post { applyVideoWindowRadius() }
+        }
+        // overlay 为 null（桌面页尚未重建）时，bindDesktop 的 attach 分支会兜底迁回
+        videoHost.resumePlayback()
     }
 
     /**

@@ -147,4 +147,23 @@
             xmlns:tools="http://schemas.android.com/tools"
             tools:ignore="HardcodedText" />
     </LinearLayout>
+
+    <!-- 视频画中画小窗：视频播放中切离桌面页(1)时，以小窗继续播放（最顶层，盖在其它页之上）。
+         videoPipWindow 承载 VideoHost 的播放器 UI（videoRoot match_parent 自动填满）；
+         小窗尺寸固定 16:9，悬浮右上角，点小窗回到桌面页恢复大窗。 -->
+    <FrameLayout
+        android:id="@+id/videoPipContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone">
+
+        <FrameLayout
+            android:id="@+id/videoPipWindow"
+            android:layout_width="320dp"
+            android:layout_height="180dp"
+            android:layout_gravity="top|end"
+            android:layout_marginTop="16dp"
+            android:layout_marginEnd="16dp"
+            android:elevation="24dp" />
+    </FrameLayout>
 </FrameLayout>

@@ -59,6 +59,9 @@ class VideoHost(
     /** 用户关闭视频（点 X），通知宿主恢复音乐窗口 */
     var onClose: (() -> Unit)? = null
 
+    /** 是否处于画中画小窗模式（决定底部控制层显隐） */
+    private var pipMode = false
+
     // ==================== 打开视频 ====================
 
     /**
@@ -271,6 +274,16 @@ class VideoHost(
     /** 切离桌面页：仅暂停不释放（surface 销毁会走 onSurfaceTextureDestroyed 分离）。 */
     fun suspendPlayback() {
         pause()
+    }
+
+    /**
+     * 画中画小窗模式切换：
+     * - true：隐藏底部控制层（进度条/按钮），只保留右上角关闭按钮，点画面回桌面；
+     * - false：恢复完整控制层。
+     */
+    fun setPipMode(on: Boolean) {
+        pipMode = on
+        binding?.videoControls?.visibility = if (on) View.GONE else View.VISIBLE
     }
 
     /** 回到桌面页：确保继续播放（surface 重建后重新绑定）。 */
