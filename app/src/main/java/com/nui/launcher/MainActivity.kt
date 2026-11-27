@@ -141,6 +141,9 @@ class MainActivity : AppCompatActivity() {
     private var videoPipWindow: FrameLayout? = null
     /** 视频是否处于画中画小窗模式（切离桌面页继续播放） */
     private var videoPipActive = false
+
+    /** 画中画小窗是否处于放大（半屏）状态，双击切换 */
+    private var pipWindowLarge = false
     private var desktopBtnSwitchMap: ImageButton? = null
     private var desktopMusicContainer: android.widget.FrameLayout? = null
     private var desktopBtnNavHome: View? = null
@@ -1720,6 +1723,7 @@ class MainActivity : AppCompatActivity() {
                     this, event.keyCode,
                     if (::musicHost.isInitialized) musicHost else null,
                     if (::navHost.isInitialized) navHost else null,
+                    if (::videoHost.isInitialized) videoHost else null,
                     onSystemDockToggle = { refreshForThemeChange() },
                 )) return true
         }
@@ -2645,10 +2649,13 @@ class MainActivity : AppCompatActivity() {
         videoHost = com.nui.launcher.video.VideoHost(this, desktopVideoOverlay!!)
         videoPipContainer = binding.videoPipContainer
         videoPipWindow = binding.videoPipWindow
+        // 画中画小窗"回到桌面"按钮：切回桌面页恢复大窗
+        videoHost.onPipHome = { binding.viewPager.setCurrentItem(1, true) }
         videoHost.onClose = {
             // 关闭视频：恢复内容层（导航/时钟/音乐区）、解除音乐挂起、退出画中画
             videoPipActive = false
             videoPipContainer?.visibility = View.GONE
+            resetPipWindowSize()
             videoHost.setPipMode(false)
             desktopVideoOverlay?.visibility = View.GONE
             desktopRightPanelContent?.visibility = View.VISIBLE
@@ -2703,8 +2710,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 画中画小窗拖动换位：按住画面拖动，限制在屏幕内（留 8dp 边距）；
-     * 未拖动的轻点则切回桌面页恢复大窗。关闭按钮是子 View，不受影响。
+     * 画中画小窗手势：按住画面拖动换位（限制在屏幕内，留 8dp 边距）；
+     * 轻点切换控制按钮层；双击在「小窗」与「半屏」之间切换大小。
+     * 关闭按钮是子 View，不受影响。
      */
     private fun installPipDrag() {
         val win = videoPipWindow ?: return
@@ -2718,9 +2726,24 @@ class MainActivity : AppCompatActivity() {
         var startTx = 0f
         var startTy = 0f
         var moved = false
+        // 单击/双击交给 GestureDetector 判定：单击延迟到双击超时后才确认，双击不会误触发单击
+        val detector = android.view.GestureDetector(this, object : android.view.GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: android.view.MotionEvent) = true
+
+            override fun onSingleTapConfirmed(e: android.view.MotionEvent): Boolean {
+                videoHost.togglePipControls()
+                return true
+            }
+
+            override fun onDoubleTap(e: android.view.MotionEvent): Boolean {
+                togglePipSize()
+                return true
+            }
+        })
         root.setOnTouchListener { _, ev ->
             // 只有小窗模式接管手势；回到桌面大窗后把事件交还控制层
             if (!videoPipActive) return@setOnTouchListener false
+            detector.onTouchEvent(ev)
             when (ev.actionMasked) {
                 android.view.MotionEvent.ACTION_DOWN -> {
                     onUserActive()
@@ -2750,15 +2773,57 @@ class MainActivity : AppCompatActivity() {
                     }
                     true
                 }
-                android.view.MotionEvent.ACTION_UP -> {
-                    // 没有拖动 = 点击：回桌面页恢复大窗
-                    if (!moved) binding.viewPager.setCurrentItem(1, true)
-                    true
-                }
-                android.view.MotionEvent.ACTION_CANCEL -> true
                 else -> true
             }
         }
+    }
+
+    /** 双击切换小窗大小：小窗 320×180dp，大窗取屏幕一半（仍是 16:9）。 */
+    private fun togglePipSize() {
+        val win = videoPipWindow ?: return
+        val cw = videoPipContainer?.width ?: 0
+        val ch = videoPipContainer?.height ?: 0
+        if (cw <= 0 || ch <= 0) return
+        pipWindowLarge = !pipWindowLarge
+        val lp = win.layoutParams
+        if (pipWindowLarge) {
+            lp.width = cw / 2
+            lp.height = ch / 2
+        } else {
+            val d = resources.displayMetrics.density
+            lp.width = (320 * d).toInt()
+            lp.height = (180 * d).toInt()
+        }
+        win.layoutParams = lp
+        // 尺寸变化会改变布局位置，重新夹紧，避免放大后越界
+        win.post { clampPipPosition() }
+    }
+
+    /** 把当前位移夹回容器内（尺寸变化后调用）。 */
+    private fun clampPipPosition() {
+        val win = videoPipWindow ?: return
+        val cw = videoPipContainer?.width ?: return
+        val ch = videoPipContainer?.height ?: return
+        val margin = (8 * resources.displayMetrics.density).toInt()
+        val minTx = margin - win.left.toFloat()
+        val maxTx = (cw - win.width - margin - win.left).toFloat().coerceAtLeast(minTx)
+        val minTy = margin - win.top.toFloat()
+        val maxTy = (ch - win.height - margin - win.top).toFloat().coerceAtLeast(minTy)
+        win.translationX = win.translationX.coerceIn(minTx, maxTx)
+        win.translationY = win.translationY.coerceIn(minTy, maxTy)
+    }
+
+    /** 退出画中画时恢复默认小窗尺寸，下次进入从「小」开始。 */
+    private fun resetPipWindowSize() {
+        if (!pipWindowLarge) return
+        pipWindowLarge = false
+        val win = videoPipWindow ?: return
+        val d = resources.displayMetrics.density
+        val lp = win.layoutParams
+        lp.width = (320 * d).toInt()
+        lp.height = (180 * d).toInt()
+        win.layoutParams = lp
+        win.post { clampPipPosition() }
     }
 
     /** 回到桌面页：视频从小窗迁回右侧面板恢复大窗。 */
@@ -2766,6 +2831,7 @@ class MainActivity : AppCompatActivity() {
         if (!videoPipActive) return
         videoPipActive = false
         videoPipContainer?.visibility = View.GONE
+        // 不重置尺寸：本次播放期间切页往返，小窗保持用户双击选的大小；仅关闭视频时恢复默认
         videoHost.setPipMode(false)
         val overlay = desktopVideoOverlay
         if (overlay != null) {

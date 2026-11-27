@@ -29,6 +29,9 @@ class VideoFullscreenActivity : Activity(), android.view.TextureView.SurfaceText
     private var mediaPlayer: MediaPlayer? = null
     private var surface: Surface? = null
     private var prepared = false
+
+    /** 进度条拖动中：暂停 tick 回写进度，避免和手指抢进度 */
+    private var draggingProgress = false
     private var playToken = 0
 
     private var videoFiles: List<File> = emptyList()
@@ -89,19 +92,28 @@ class VideoFullscreenActivity : Activity(), android.view.TextureView.SurfaceText
         binding.btnFullRewind.setOnClickListener { seekBy(-SEEK_STEP_MS) }
         binding.btnFullForward.setOnClickListener { seekBy(SEEK_STEP_MS) }
         binding.btnFullExit.setOnClickListener { exitFullscreen() }
+        binding.videoFullscreenProgress.max = PROGRESS_MAX
         binding.videoFullscreenProgress.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             private var dragTo = -1
             override fun onProgressChanged(sb: SeekBar, progress: Int, fromUser: Boolean) {
                 if (fromUser) dragTo = progress
             }
-            override fun onStartTrackingTouch(sb: SeekBar) { dragTo = -1 }
+            override fun onStartTrackingTouch(sb: SeekBar) {
+                draggingProgress = true
+                dragTo = -1
+            }
             override fun onStopTrackingTouch(sb: SeekBar) {
+                draggingProgress = false
                 if (dragTo >= 0) {
                     val mp = mediaPlayer
                     val dur = mp?.duration ?: 0
-                    if (dur > 0) mp?.let { runCatching { it.seekTo(dur * dragTo / 1000) } }
+                    // Long 计算：dur(ms) × 1000 会超出 Int（>24 分钟的视频），溢出后 seek 到错误位置（表现为从头播）
+                    if (dur > 0 && sb.max > 0) {
+                        runCatching { mp?.seekTo((dur.toLong() * dragTo / sb.max).toInt()) }
+                    }
                 }
                 dragTo = -1
+                updateProgress()
             }
         })
     }
@@ -156,6 +168,13 @@ class VideoFullscreenActivity : Activity(), android.view.TextureView.SurfaceText
         val token = playToken
         try {
             val mp = MediaPlayer()
+            // 明确媒体/电影音频属性：默认 USAGE_UNKNOWN 在车机 ROM 不路由（无声），模拟器才正常。
+            mp.setAudioAttributes(
+                android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MOVIE)
+                    .build()
+            )
             mp.setDataSource(path)
             mp.setSurface(s)
             mp.isLooping = false
@@ -266,7 +285,10 @@ class VideoFullscreenActivity : Activity(), android.view.TextureView.SurfaceText
         val pos = mp.currentPosition
         binding.videoFullscreenDurTime.text = formatTime(dur.toLong())
         binding.videoFullscreenPosTime.text = formatTime(pos.toLong())
-        if (dur > 0) binding.videoFullscreenProgress.progress = (pos * 1000 / dur).coerceIn(0, 1000)
+        if (dur > 0 && !draggingProgress) {
+            val max = binding.videoFullscreenProgress.max
+            binding.videoFullscreenProgress.progress = (pos.toLong() * max / dur).toInt().coerceIn(0, max)
+        }
         updatePlayIcon()
     }
 
@@ -381,6 +403,9 @@ class VideoFullscreenActivity : Activity(), android.view.TextureView.SurfaceText
         const val EXTRA_PLAYING = "extra_video_playing"
         private const val SEEK_STEP_MS = 10000L
         private const val TICK_MS = 500L
+
+        /** 进度条精度（SeekBar 默认 max 只有 100，不足以表达长视频） */
+        private const val PROGRESS_MAX = 1000
         private const val CONTROLS_HIDE_MS = 4000L
     }
 }

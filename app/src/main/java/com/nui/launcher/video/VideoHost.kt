@@ -3,6 +3,7 @@ package com.nui.launcher.video
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Matrix
+import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.os.Handler
 import android.os.Looper
@@ -49,6 +50,9 @@ class VideoHost(
     private val handler = Handler(Looper.getMainLooper())
     private var tickRunning = false
 
+    /** 进度条拖动中：暂停 tick 回写进度，避免和手指抢进度 */
+    private var draggingProgress = false
+
     /** 播放进度记忆：按文件绝对路径存上次停下的毫秒数（prefs: nui_video） */
     private val prefs by lazy { activity.getSharedPreferences("nui_video", 0) }
     /** 本次起播需要 seek 到的位置（prepared 后消费） */
@@ -58,6 +62,9 @@ class VideoHost(
 
     /** 用户关闭视频（点 X），通知宿主恢复音乐窗口 */
     var onClose: (() -> Unit)? = null
+
+    /** 画中画小窗"回到桌面"按钮回调（切回桌面页恢复大窗），由宿主设置。 */
+    var onPipHome: (() -> Unit)? = null
 
     /** 是否处于画中画小窗模式（决定底部控制层显隐） */
     private var pipMode = false
@@ -72,6 +79,11 @@ class VideoHost(
         if (newContainer === container) return
         container = newContainer
         val root = binding?.root ?: return
+        // 迁移窗口前先把播放器从旧 surface 上摘下来：旧 surface 随 TextureView detach 即失效，
+        // 继续往它上面解码（或拿着它起播）会导致绿屏并把播放器拖进错误态（表现为绿屏+暂停）。
+        runCatching { mediaPlayer?.setSurface(null) }
+        surface?.release()
+        surface = null
         (root.parent as? android.view.ViewGroup)?.removeView(root)
         newContainer.removeAllViews()
         newContainer.addView(root)
@@ -109,19 +121,33 @@ class VideoHost(
         b.btnVideoForward.setOnClickListener { seekBy(SEEK_STEP_MS) }
         b.btnVideoFullscreen.setOnClickListener { fullscreen() }
         b.btnVideoClose.setOnClickListener { close() }
+        // 画中画小窗控制按钮：暂停/回桌面/全屏；点空白处收起按钮层
+        b.btnPipPlay.setOnClickListener { togglePlay() }
+        b.btnPipHome.setOnClickListener { onPipHome?.invoke() }
+        b.btnPipFullscreen.setOnClickListener { fullscreen() }
+        b.videoPipControls.setOnClickListener { hidePipControls() }
+        b.videoProgress.max = PROGRESS_MAX
         b.videoProgress.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             private var dragTo = -1
             override fun onProgressChanged(sb: SeekBar, progress: Int, fromUser: Boolean) {
                 if (fromUser) dragTo = progress
             }
-            override fun onStartTrackingTouch(sb: SeekBar) { dragTo = -1 }
+            override fun onStartTrackingTouch(sb: SeekBar) {
+                draggingProgress = true
+                dragTo = -1
+            }
             override fun onStopTrackingTouch(sb: SeekBar) {
+                draggingProgress = false
                 if (dragTo >= 0) {
                     val mp = mediaPlayer
                     val dur = mp?.duration ?: 0
-                    if (dur > 0) mp?.let { runCatching { it.seekTo(dur * dragTo / 1000) } }
+                    // Long 计算：dur(ms) × 1000 会超出 Int（>24 分钟的视频），溢出后 seek 到错误位置（表现为从头播）
+                    if (dur > 0 && sb.max > 0) {
+                        runCatching { mp?.seekTo((dur.toLong() * dragTo / sb.max).toInt()) }
+                    }
                 }
                 dragTo = -1
+                updateProgress()
             }
         })
     }
@@ -147,6 +173,15 @@ class VideoHost(
         val token = playToken
         try {
             val mp = MediaPlayer()
+            // 明确声明媒体/电影音频属性：默认 MediaPlayer 是 USAGE_UNKNOWN+CONTENT_TYPE_UNKNOWN，
+            // 车机 ROM 对 UNKNOWN 不路由到扬声器（表现为无声），标准 Android 才 fallback 正常出声。
+            // 显式 USAGE_MEDIA 让车机正确出声。
+            mp.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE)
+                    .build()
+            )
             mp.setDataSource(path)
             mp.setSurface(s)
             mp.isLooping = false
@@ -284,6 +319,20 @@ class VideoHost(
     fun setPipMode(on: Boolean) {
         pipMode = on
         binding?.videoControls?.visibility = if (on) View.GONE else View.VISIBLE
+        // 切换小窗/大窗模式时收起小窗控制按钮层，避免残留
+        binding?.videoPipControls?.visibility = View.GONE
+    }
+
+    /** 画中画小窗：切换控制按钮层（暂停/回桌面/全屏）显隐。 */
+    fun togglePipControls() {
+        val b = binding ?: return
+        val show = b.videoPipControls.visibility != View.VISIBLE
+        b.videoPipControls.visibility = if (show) View.VISIBLE else View.GONE
+    }
+
+    /** 隐藏画中画小窗控制按钮层。 */
+    fun hidePipControls() {
+        binding?.videoPipControls?.visibility = View.GONE
     }
 
     /** 回到桌面页：确保继续播放（surface 重建后重新绑定）。 */
@@ -293,12 +342,14 @@ class VideoHost(
             val s = surface
             if (mp != null && prepared && s != null) {
                 runCatching { mp.setSurface(s) }
+                runCatching { mp.seekTo(mp.currentPosition) }
                 if (wantPlaying && !mp.isPlaying) runCatching { mp.start() }
                 updatePlayIcon()
                 startTick()
-            } else {
+            } else if (s != null) {
                 startPlay()
             }
+            // surface 为空：等 onSurfaceTextureAvailable 重绑，绝不拿已释放的旧 surface 起播
         }
     }
 
@@ -376,7 +427,10 @@ class VideoHost(
         val pos = mp.currentPosition
         b.videoDurTime.text = formatTime(dur.toLong())
         b.videoPosTime.text = formatTime(pos.toLong())
-        if (dur > 0) b.videoProgress.progress = (pos * 1000 / dur).coerceIn(0, 1000)
+        if (dur > 0 && !draggingProgress) {
+            val max = b.videoProgress.max
+            b.videoProgress.progress = (pos.toLong() * max / dur).toInt().coerceIn(0, max)
+        }
         updatePlayIcon()
         // 播放中每 5 秒落一次进度，避免进程被杀丢太多
         val now = android.os.SystemClock.elapsedRealtime()
@@ -422,9 +476,9 @@ class VideoHost(
         val b = binding ?: return
         val mp = mediaPlayer ?: return
         val playing = prepared && mp.isPlaying
-        b.btnVideoPlay.setImageResource(
-            if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
-        )
+        val icon = if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+        b.btnVideoPlay.setImageResource(icon)
+        b.btnPipPlay.setImageResource(icon)
     }
 
     private fun formatTime(ms: Long): String {
@@ -444,10 +498,14 @@ class VideoHost(
         surface = Surface(surfaceTexture)
         val mp = mediaPlayer
         if (mp != null && prepared) {
-            // 切页回来：重新绑定 surface 继续
+            // 切页/小窗迁移回来：重新绑定 surface 继续
             runCatching { mp.setSurface(surface) }
+            // 换 surface 后主动 seek 到当前帧，强制解码器重新输出一帧，
+            // 避免部分解码器残留绿屏/花屏；暂停态同样能刷出正确画面。
+            runCatching { mp.seekTo(mp.currentPosition) }
             if (wantPlaying && !mp.isPlaying) runCatching { mp.start() }
             applyFitMatrix()
+            updatePlayIcon()
         } else if (currentPath != null && wantPlaying) {
             startPlay()
         }
@@ -541,6 +599,9 @@ class VideoHost(
         }
         private const val SEEK_STEP_MS = 10000L
         private const val TICK_MS = 500L
+
+        /** 进度条精度（SeekBar 默认 max 只有 100，不足以表达长视频） */
+        private const val PROGRESS_MAX = 1000
 
         /** 支持的视频扩展名（小写，不带点） */
         private val VIDEO_EXTS = setOf(
