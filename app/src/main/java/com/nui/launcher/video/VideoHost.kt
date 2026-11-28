@@ -121,6 +121,8 @@ class VideoHost(
         b.btnVideoForward.setOnClickListener { seekBy(SEEK_STEP_MS) }
         b.btnVideoFullscreen.setOnClickListener { fullscreen() }
         b.btnVideoClose.setOnClickListener { close() }
+        b.btnVideoMute.setOnClickListener { toggleMute() }
+        updateMuteIcon()
         // 画中画小窗控制按钮：暂停/回桌面/全屏；点空白处收起按钮层
         b.btnPipPlay.setOnClickListener { togglePlay() }
         b.btnPipHome.setOnClickListener { onPipHome?.invoke() }
@@ -185,6 +187,7 @@ class VideoHost(
             mp.setDataSource(path)
             mp.setSurface(s)
             mp.isLooping = false
+            applyMute(mp)
             mp.setOnVideoSizeChangedListener { _, _, _ ->
                 if (token == playToken) applyFitMatrix()
             }
@@ -230,6 +233,24 @@ class VideoHost(
         val mp = mediaPlayer ?: return
         if (!prepared) return
         if (mp.isPlaying) pause() else play()
+    }
+
+    /** 切换静音：悬浮/画中画与全屏共用同一状态（companion muted），概率小到无需持久化。 */
+    fun toggleMute() {
+        muted = !muted
+        applyMute(mediaPlayer)
+        updateMuteIcon()
+    }
+
+    private fun applyMute(mp: MediaPlayer?) {
+        val v = if (muted) 0f else 1f
+        runCatching { mp?.setVolume(v, v) }
+    }
+
+    private fun updateMuteIcon() {
+        binding?.btnVideoMute?.setImageResource(
+            if (muted) R.drawable.ic_volume_off else R.drawable.ic_volume_on
+        )
     }
 
     fun play() {
@@ -343,6 +364,9 @@ class VideoHost(
             if (mp != null && prepared && s != null) {
                 runCatching { mp.setSurface(s) }
                 runCatching { mp.seekTo(mp.currentPosition) }
+                // 全屏里可能改过静音，回悬浮态同步一次
+                applyMute(mp)
+                updateMuteIcon()
                 if (wantPlaying && !mp.isPlaying) runCatching { mp.start() }
                 updatePlayIcon()
                 startTick()
@@ -504,6 +528,7 @@ class VideoHost(
             // 避免部分解码器残留绿屏/花屏；暂停态同样能刷出正确画面。
             runCatching { mp.seekTo(mp.currentPosition) }
             if (wantPlaying && !mp.isPlaying) runCatching { mp.start() }
+            applyMute(mp)
             applyFitMatrix()
             updatePlayIcon()
         } else if (currentPath != null && wantPlaying) {
@@ -590,6 +615,9 @@ class VideoHost(
          * onResume 必然触发，无竞态。
          */
         @Volatile var pendingOpenPath: String? = null
+
+        /** 静音状态：悬浮/画中画/全屏共用（全屏是独立 MediaPlayer 实例） */
+        @Volatile var muted = false
 
         /** 取走并清空待播放路径。 */
         fun consumePendingOpen(): String? {

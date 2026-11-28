@@ -2666,6 +2666,20 @@ class MainActivity : AppCompatActivity() {
             // 视频窗口已消失：重新武装闲置自动进负一屏计时
             setupAutoMinusTimer()
         }
+        // 桌面页双击视频画面 → 全屏；全屏里再双击回到原来的状态（由全屏页处理）
+        val videoDoubleTap = android.view.GestureDetector(this, object : android.view.GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: android.view.MotionEvent) = true
+
+            override fun onDoubleTap(e: android.view.MotionEvent): Boolean {
+                if (videoHost.isActive() && !videoPipActive) videoHost.fullscreen()
+                return true
+            }
+        })
+        // 控制器（进度条/按钮）会先消费事件；落到空白画面上的触摸才交给 GestureDetector
+        desktopVideoOverlay?.setOnTouchListener { _, ev ->
+            videoDoubleTap.onTouchEvent(ev)
+            true
+        }
     }
 
     /** 打开视频：切到桌面页、挂起音乐、隐藏内容层、显示视频覆盖层（占据整个右侧面板）。 */

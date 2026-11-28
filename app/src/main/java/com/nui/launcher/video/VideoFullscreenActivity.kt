@@ -13,6 +13,7 @@ import android.view.Surface
 import android.view.View
 import android.widget.SeekBar
 import com.nui.launcher.NuiToast
+import com.nui.launcher.R
 import com.nui.launcher.databinding.ActivityVideoFullscreenBinding
 import java.io.File
 
@@ -80,9 +81,43 @@ class VideoFullscreenActivity : Activity(), android.view.TextureView.SurfaceText
     }
 
     private fun setupControls() {
-        // 点画面切换控制层显隐
-        binding.videoFullscreenRoot.setOnClickListener { toggleControls() }
+        // 点画面切换控制层显隐；双击退出全屏（回到原来的悬浮/画中画状态）
+        val detector = android.view.GestureDetector(this, object : android.view.GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: android.view.MotionEvent) = true
+
+            override fun onSingleTapConfirmed(e: android.view.MotionEvent): Boolean {
+                toggleControls()
+                return true
+            }
+
+            override fun onDoubleTap(e: android.view.MotionEvent): Boolean {
+                exitFullscreen()
+                return true
+            }
+        })
+        binding.videoFullscreenRoot.setOnTouchListener { _, ev ->
+            detector.onTouchEvent(ev)
+            true
+        }
         binding.videoFullscreenControls.setOnClickListener { /* 控制层自身点击不隐藏 */ }
+    }
+
+    /** 切换静音：与悬浮窗共用 VideoHost.muted 状态。 */
+    private fun toggleMute() {
+        VideoHost.muted = !VideoHost.muted
+        applyMute(mediaPlayer)
+        updateMuteIcon()
+    }
+
+    private fun applyMute(mp: MediaPlayer?) {
+        val v = if (VideoHost.muted) 0f else 1f
+        runCatching { mp?.setVolume(v, v) }
+    }
+
+    private fun updateMuteIcon() {
+        binding.btnFullMute.setImageResource(
+            if (VideoHost.muted) R.drawable.ic_volume_off else R.drawable.ic_volume_on
+        )
     }
 
     private fun bindControls() {
@@ -92,6 +127,8 @@ class VideoFullscreenActivity : Activity(), android.view.TextureView.SurfaceText
         binding.btnFullRewind.setOnClickListener { seekBy(-SEEK_STEP_MS) }
         binding.btnFullForward.setOnClickListener { seekBy(SEEK_STEP_MS) }
         binding.btnFullExit.setOnClickListener { exitFullscreen() }
+        binding.btnFullMute.setOnClickListener { toggleMute() }
+        updateMuteIcon()
         binding.videoFullscreenProgress.max = PROGRESS_MAX
         binding.videoFullscreenProgress.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             private var dragTo = -1
@@ -178,6 +215,7 @@ class VideoFullscreenActivity : Activity(), android.view.TextureView.SurfaceText
             mp.setDataSource(path)
             mp.setSurface(s)
             mp.isLooping = false
+            applyMute(mp)
             mp.setOnVideoSizeChangedListener { _, _, _ ->
                 if (token == playToken) applyCropMatrix()
             }
